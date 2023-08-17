@@ -1,5 +1,7 @@
 # discord_wwnames
 
+![Lint and test](https://github.com/markrcote/discord_wwnames/actions/workflows/lint-and-test.yml/badge.svg)
+
 Discord bot for randomly generating Old West names. Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/utilities/WesternBrowse.php).
 
 Provides these commands:

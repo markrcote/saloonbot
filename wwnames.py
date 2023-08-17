@@ -1,5 +1,6 @@
 import random
 
+
 class WildWestNames:
     def __init__(self):
         self.male_names = self.load_names('M')
@@ -14,7 +15,7 @@ class WildWestNames:
         if gender:
             gender = gender.upper()[0]
             if gender not in 'MF':
-                  gender = None
+                gender = None
 
         if not gender:
             gender = random.choice('MF')

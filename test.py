@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 from wwnames import WildWestNames
 
+
 class TestWildWestNames(unittest.TestCase):
 
     @classmethod
@@ -25,6 +26,7 @@ class TestWildWestNames(unittest.TestCase):
         mock_choice.side_effect = ['F', 'Mary', 'Brown']
         result = self.wild_west_names.random_name()
         self.assertEqual(result, '♀ Mary Brown')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,10 +5,10 @@ class WildWestNames:
         self.male_names = self.load_names('M')
         self.female_names = self.load_names('F')
         self.surnames = self.load_names('S')
-    
+
     def load_names(self, name_type):
-        inf = open(f'names/{name_type}.txt')
-        return [name.strip() for name in inf.readlines()]
+        with open(f'names/{name_type}.txt') as inf:
+            return [name.strip() for name in inf.readlines()]
 
     def random_name(self, gender=None):
         if gender:
@@ -18,7 +18,7 @@ class WildWestNames:
 
         if not gender:
             gender = random.choice('MF')
-        
+
         first_names = self.female_names if gender == 'F' else self.male_names
         gender_symbol = '♀' if gender == 'F' else '♂'
 

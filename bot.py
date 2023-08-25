@@ -15,8 +15,8 @@ async def on_ready():
 
 
 @bot.slash_command(description='Generate a name')
-async def wwname(interaction: nextcord.Interaction, gender: str = ''):
+async def wwname(interaction: nextcord.Interaction, gender: str = '', number: int = 1):
     names = WildWestNames()
-    await interaction.send(names.random_name(gender))
+    await interaction.send(names.random_name(gender, number))
 
 bot.run(os.getenv('DISCORD_TOKEN'))

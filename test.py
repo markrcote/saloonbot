@@ -27,6 +27,12 @@ class TestWildWestNames(unittest.TestCase):
         result = self.wild_west_names.random_name()
         self.assertEqual(result, '♀ Mary Brown')
 
+    @patch('random.choice')
+    def test_multiple_random_name_random_gender(self, mock_choice):
+        mock_choice.side_effect = ['F', 'Mary', 'Brown', 'M', 'Aiden', 'Patel']
+        result = self.wild_west_names.random_name(number=2)
+        self.assertEqual(result, '♀ Mary Brown\n♂ Aiden Patel')
+
 
 if __name__ == '__main__':
     unittest.main()

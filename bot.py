@@ -17,7 +17,7 @@ async def on_ready():
 
 
 @bot.slash_command(description='Version')
-async def version(interaction: nextcord.Interaction):
+async def wwname_version(interaction: nextcord.Interaction):
     await interaction.send(git_sha)
 
 

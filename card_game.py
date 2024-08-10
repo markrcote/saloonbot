@@ -13,6 +13,8 @@ class CardGame:
         for suit in ['H', 'D', 'C', 'S']:
             for value in range(2, 15):
                 self.deck.append((suit, value))
+
+    def shuffle(self):
         random.shuffle(self.deck)
 
     def deal(self, player, cards=1):

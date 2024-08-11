@@ -62,8 +62,6 @@ async def shuffle_deck(interaction: nextcord.Interaction):
 @bot.slash_command(description='Show a player\'s hand')
 async def show_hand(interaction: nextcord.Interaction, player: str):
     hand = card_game.hands.get(player, [])
-    # substitute emoji for suits
-    hand = [f'{card[1]} of {{"H": "♥", "D": "♦", "C": "♣", "S": "♠"}}[card[0]]' for card in hand]
     await interaction.send(f'{player}\'s hand: {", ".join(str(card) for card in hand)}')
 
 

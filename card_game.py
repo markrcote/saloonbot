@@ -1,6 +1,31 @@
 import random
 
 
+class Card:
+    SUIT_EMOJIS = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
+    SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
+
+    def __init__(self, suit, value):
+        self.suit = suit.upper()
+        assert self.suit in self.SUIT_EMOJIS, f'Invalid suit: {self.suit}'
+        self.value = value
+        assert self.value in range(2, 15), f'Invalid value: {self.value}'
+
+    def __repr__(self):
+        return f'{self.value} of {self.SUIT_STRINGS[self.suit]}'
+
+    def __eq__(self, other):
+        if isinstance(other, Card):
+            return self.suit == other.suit and self.value == other.value
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def short_string(self):
+        return f'{self.value}{self.SUIT_EMOJIS[self.suit]}'
+
+
 class CardGame:
     def __init__(self):
         self.deck = []
@@ -12,7 +37,7 @@ class CardGame:
         self.deck = []
         for suit in ['H', 'D', 'C', 'S']:
             for value in range(2, 15):
-                self.deck.append((suit, value))
+                self.deck.append(Card(suit, value))
 
     def shuffle(self):
         random.shuffle(self.deck)

@@ -28,8 +28,12 @@ class TestCardGame(unittest.TestCase):
         self.game.create_deck()
         self.game.deal("Player 1", 3)
         card_to_discard = self.game.hands["Player 1"][0]
+        discarded_value = card_to_discard.value
+        discarded_suit = card_to_discard.suit
         self.game.discard("Player 1", card_to_discard)
         self.assertEqual(len(self.game.hands["Player 1"]), 2)  # Check if the discarded card was removed from the player's hand
+        self.assertEqual(self.game.deck[-1].suit, discarded_suit)
+        self.assertEqual(self.game.deck[-1].value, discarded_value)
 
     def test_discard_all(self):
         self.game.create_deck()

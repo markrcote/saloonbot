@@ -6,7 +6,7 @@ class Card:
     SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
 
     def __init__(self, suit, value):
-        self.suit = suit.upper()
+        self.suit = suit.upper()[0]
         assert self.suit in self.SUIT_EMOJIS, f'Invalid suit: {self.suit}'
         self.value = value
         assert self.value in range(2, 15), f'Invalid value: {self.value}'

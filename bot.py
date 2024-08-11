@@ -5,7 +5,7 @@ import subprocess
 import nextcord
 from nextcord.ext import commands
 
-from card_game import CardGame
+from card_game import Card, CardGame
 from wwnames import WildWestNames
 
 bot = commands.Bot()
@@ -42,7 +42,8 @@ async def deal_all(interaction: nextcord.Interaction, cards: int = 1):
 
 
 @bot.slash_command(description='Discard a card from a player')
-async def discard(interaction: nextcord.Interaction, player: str, card: str):
+async def discard(interaction: nextcord.Interaction, player: str, card_value: str, card_suit: str):
+    card = Card(card_suit, int(card_value))
     card_game.discard(player, card)
     await interaction.send(f'{player} discarded {card}.')
 

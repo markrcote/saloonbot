@@ -30,7 +30,10 @@ async def wwname(interaction: nextcord.Interaction, gender: str = '', number: in
 
 
 @bot.slash_command(description='Deal a card to a player')
-async def deal_hand(interaction: nextcord.Interaction, player: str, cards: int = 1):
+async def deal_hand(interaction: nextcord.Interaction, cards: int = 1, player: str = ''):
+    # If player is not given, use the interaction author
+    if player == '':
+        player = interaction.user.name
     card_game.deal(player, cards)
     await interaction.send(f'{player} was dealt {cards} cards.')
 
@@ -42,7 +45,9 @@ async def deal_all(interaction: nextcord.Interaction, cards: int = 1):
 
 
 @bot.slash_command(description='Discard a card from a player')
-async def discard(interaction: nextcord.Interaction, player: str, card_value: str, card_suit: str):
+async def discard(interaction: nextcord.Interaction, card_value: str, card_suit: str, player: str = ''):
+    if player == '':
+        player = interaction.user.name
     card = Card(card_suit, int(card_value))
     card_game.discard(player, card)
     await interaction.send(f'{player} discarded {card}.')
@@ -61,7 +66,9 @@ async def shuffle_deck(interaction: nextcord.Interaction):
 
 
 @bot.slash_command(description='Show a player\'s hand')
-async def show_hand(interaction: nextcord.Interaction, player: str):
+async def show_hand(interaction: nextcord.Interaction, player: str = ''):
+    if player == '':
+        player = interaction.user.name
     hand = card_game.hands.get(player, [])
     await interaction.send(f'{player}\'s hand: {", ".join(str(card) for card in hand)}')
 

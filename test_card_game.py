@@ -1,5 +1,5 @@
 import unittest
-from card_game import CardGame
+from card_game import Card, CardGame
 
 
 class TestCardGame(unittest.TestCase):
@@ -44,6 +44,15 @@ class TestCardGame(unittest.TestCase):
         # Check if each hand is empty
         for hand in self.game.hands.values():
             self.assertEqual(len(hand), 0)
+
+    def test_compare(self):
+        card1 = Card('H', 5)
+        card2 = Card('H', 5)
+        card3 = Card('S', 5)
+        card4 = Card('S', 7)
+        self.assertGreater(card4, card3)
+        self.assertLess(card2, card3)
+        self.assertEqual(card1, card2)
 
 
 if __name__ == '__main__':

@@ -22,6 +22,22 @@ class Card:
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __gt__(self, other):
+        if self.value == other.value:
+            return ord(self.suit) > ord(other.suit)
+        return self.value > other.value
+
+    def __lt__(self, other):
+        if self.value == other.value:
+            return ord(self.suit) < ord(other.suit)
+        return self.value < other.value
+
+    def __ge__(self, other):
+        return self == other or self > other
+
+    def __le__(self, other):
+        return self == other or self < other
+
     def short_string(self):
         return f'{self.value}{self.SUIT_EMOJIS[self.suit]}'
 
@@ -38,6 +54,7 @@ class CardGame:
         for suit in ['H', 'D', 'C', 'S']:
             for value in range(2, 15):
                 self.deck.append(Card(suit, value))
+        self.shuffle()
 
     def shuffle(self):
         random.shuffle(self.deck)

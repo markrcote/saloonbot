@@ -42,21 +42,26 @@ class TestCardGame(unittest.TestCase):
 
     def test_create_deck(self):
         self.game.create_deck()
-        self.assertEqual(len(self.game.deck), 52)  # Check if the deck has 52 cards
+        # Check if the deck has 52 cards
+        self.assertEqual(len(self.game.deck), 52)
 
     def test_deal(self):
         self.game.create_deck()
         self.game.deal("Player 1", 5)
-        self.assertEqual(len(self.game.deck), 47)  # Check if 5 cards were removed from the deck
-        self.assertEqual(len(self.game.hands["Player 1"]), 5)  # Check if 5 cards were added to the player's hand
+        # Check if 5 cards were removed from the deck
+        self.assertEqual(len(self.game.deck), 47)
+        # Check if 5 cards were added to the player's hand
+        self.assertEqual(len(self.game.hands["Player 1"]), 5)
 
     def test_deal_all(self):
         self.game.create_deck()
         self.game.hands = {"Player 1": [], "Player 2": []}
         self.game.deal_all(7)
-        self.assertEqual(len(self.game.deck), 38)  # Check if 14 cards were removed from the deck
+        # Check if 14 cards were removed from the deck
+        self.assertEqual(len(self.game.deck), 38)
         for player, hand in self.game.hands.items():
-            self.assertEqual(len(hand), 7)  # Check if 7 cards were added to each player's hand
+            # Check if 7 cards were added to each player's hand
+            self.assertEqual(len(hand), 7)
 
     def test_discard(self):
         self.game.create_deck()
@@ -65,7 +70,8 @@ class TestCardGame(unittest.TestCase):
         discarded_value = card_to_discard.value
         discarded_suit = card_to_discard.suit
         self.game.discard("Player 1", card_to_discard)
-        self.assertEqual(len(self.game.hands["Player 1"]), 2)  # Check if the discarded card was removed from the player's hand
+        # Check if the discarded card was removed from the player's hand
+        self.assertEqual(len(self.game.hands["Player 1"]), 2)
         self.assertEqual(self.game.deck[-1].suit, discarded_suit)
         self.assertEqual(self.game.deck[-1].value, discarded_value)
 

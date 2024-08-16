@@ -30,18 +30,18 @@ async def wwname(interaction: nextcord.Interaction, gender: str = '', number: in
 
 
 @bot.slash_command(description='Deal a card to a player')
-async def deal_hand(interaction: nextcord.Interaction, cards: int = 1, player: str = ''):
+async def deal_hand(interaction: nextcord.Interaction, number: int = 1, player: str = ''):
     # If player is not given, use the interaction author
     if player == '':
         player = interaction.user.name
-    card_game.deal(player, cards)
-    await interaction.send(f'{player} was dealt {cards} cards.')
+    card_game.deal(player, number)
+    await interaction.send(f'{player} was dealt {number} cards.')
 
 
 @bot.slash_command(description='Deal a card to all players')
-async def deal_all(interaction: nextcord.Interaction, cards: int = 1):
-    card_game.deal_all(cards)
-    await interaction.send(f'All players were dealt {cards} cards.')
+async def deal_all(interaction: nextcord.Interaction, number: int = 1):
+    card_game.deal_all(number)
+    await interaction.send(f'All players were dealt {number} cards.')
 
 
 @bot.slash_command(description='Discard a card from a player')

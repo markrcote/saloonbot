@@ -54,6 +54,12 @@ class TestCardGame(unittest.TestCase):
         self.assertLess(card2, card3)
         self.assertEqual(card1, card2)
 
+    def test_card_strings(self):
+        self.assertEqual("5 of Hearts", str(Card('H', 5)))
+        self.assertEqual("Jack of Spades", str(Card('S', 11)))
+        self.assertEqual("A♥", Card('H', 14).shortstr())
+        self.assertEqual("2♦", Card('D', 2).shortstr())
+
 
 if __name__ == '__main__':
     unittest.main()

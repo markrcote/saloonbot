@@ -4,6 +4,7 @@ import random
 class Card:
     SUIT_EMOJIS = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
     SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
+    SUIT_FACE_CARDS = {11: 'Jack', 12: 'Queen', 13: 'King', 14: 'Ace'}
 
     def __init__(self, suit, value):
         self.suit = suit.upper()[0]
@@ -12,7 +13,7 @@ class Card:
         assert self.value in range(2, 15), f'Invalid value: {self.value}'
 
     def __repr__(self):
-        return f'{self.value} of {self.SUIT_STRINGS[self.suit]}'
+        return f'{self.valuestr()} of {self.SUIT_STRINGS[self.suit]}'
 
     def __eq__(self, other):
         if isinstance(other, Card):
@@ -38,8 +39,12 @@ class Card:
     def __le__(self, other):
         return self == other or self < other
 
-    def short_string(self):
-        return f'{self.value}{self.SUIT_EMOJIS[self.suit]}'
+    def valuestr(self, short=False):
+        return self.value if self.value < 11 \
+            else self.SUIT_FACE_CARDS[self.value][:1 if short else None]
+
+    def shortstr(self):
+        return f'{self.valuestr(short=True)}{self.SUIT_EMOJIS[self.suit]}'
 
 
 class CardGame:

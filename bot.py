@@ -70,7 +70,7 @@ async def show_hand(interaction: nextcord.Interaction, player: str = ''):
     if player == '':
         player = interaction.user.name
     hand = card_game.get_player(player).hand
-    await interaction.send(f'{player}\'s hand: {", ".join(str(card) for card in hand)}')
+    await interaction.send(f'{player}\'s hand: {", ".join(str(card) for card in hand) if hand else "<empty>"}')
 
 
 bot.run(os.getenv('DISCORD_TOKEN'))

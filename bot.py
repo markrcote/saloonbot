@@ -66,11 +66,11 @@ async def shuffle_deck(interaction: nextcord.Interaction):
 
 
 @bot.slash_command(description='Show a player\'s hand')
-async def show_hand(interaction: nextcord.Interaction, player: str = ''):
+async def show_hand(interaction: nextcord.Interaction, player: str = '', short: bool = False):
     if player == '':
         player = interaction.user.name
     hand = card_game.get_player(player).hand
-    await interaction.send(f'{player}\'s hand: {", ".join(str(card) for card in hand) if hand else "<empty>"}')
+    await interaction.send(f'{player}\'s hand: {", ".join(card.str(short) for card in hand) if hand else "<empty>"}')
 
 
 bot.run(os.getenv('DISCORD_TOKEN'))

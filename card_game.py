@@ -46,6 +46,9 @@ class Card:
     def shortstr(self):
         return f'{self.valuestr(short=True)}{self.SUIT_EMOJIS[self.suit]}'
 
+    def str(self, short=False):
+        return self.shortstr() if short else str(self)
+
 
 class Player:
     def __init__(self, name):

@@ -100,9 +100,9 @@ class TestCardGame(unittest.TestCase):
 
     def test_card_strings(self):
         self.assertEqual("5 of Hearts", str(Card('H', 5)))
-        self.assertEqual("Jack of Spades", str(Card('S', 11)))
-        self.assertEqual("A♥", Card('H', 14).shortstr())
-        self.assertEqual("2♦", Card('D', 2).shortstr())
+        self.assertEqual("Jack of Spades", Card('S', 11).str())
+        self.assertEqual("A♥", Card('H', 14).str(short=True))
+        self.assertEqual("2♦", Card('D', 2).str(short=True))
 
 
 if __name__ == '__main__':

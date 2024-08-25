@@ -5,7 +5,7 @@ import subprocess
 import nextcord
 from nextcord.ext import commands
 
-from card_game import Card, CardGame
+from card_game import Card, CardGame, PlayerNotFoundError
 from wwnames import WildWestNames
 
 bot = commands.Bot()
@@ -34,13 +34,17 @@ async def deal_hand(interaction: nextcord.Interaction, number: int = 1, player: 
     # If player is not given, use the interaction author
     if player == '':
         player = interaction.user.name
-    card_game.deal(player, number)
+    card_game.deal(card_game.get_player(player, add=True), number)
     await interaction.send(f'{player} was dealt {number} cards.')
 
 
 @bot.slash_command(description='Deal a card to all players')
 async def deal_all(interaction: nextcord.Interaction, number: int = 1):
-    card_game.deal_all(number)
+    if not card_game.players:
+        await interaction.send('No players to deal to.')
+        return
+    for player in card_game.players:
+        card_game.deal(player, number)
     await interaction.send(f'All players were dealt {number} cards.')
 
 
@@ -49,14 +53,24 @@ async def discard(interaction: nextcord.Interaction, card_value: str, card_suit:
     if player == '':
         player = interaction.user.name
     card = Card(card_suit, int(card_value))
-    card_game.discard(player, card)
+    try:
+        card_game.discard(card_game.get_player(player), card)
+    except PlayerNotFoundError as e:
+        await interaction.send(e)
+        return
     await interaction.send(f'{player} discarded {card}.')
 
 
 @bot.slash_command(description='Discard all cards from all players')
-async def discard_all(interaction: nextcord.Interaction):
-    card_game.discard_all()
-    await interaction.send('All cards were discarded.')
+async def discard_all(interaction: nextcord.Interaction, player: str = ''):
+    if player == '':
+        player = interaction.user.name
+    try:
+        card_game.discard_all(card_game.get_player(player))
+    except PlayerNotFoundError as e:
+        await interaction.send(e)
+        return
+    await interaction.send(f'{player} discarded all their cards.')
 
 
 @bot.slash_command(description='Shuffle the deck')
@@ -69,7 +83,7 @@ async def shuffle_deck(interaction: nextcord.Interaction):
 async def show_hand(interaction: nextcord.Interaction, player: str = '', short: bool = False):
     if player == '':
         player = interaction.user.name
-    hand = card_game.get_player(player).hand
+    hand = card_game.get_player(player, add=True).hand
     await interaction.send(f'{player}\'s hand: {", ".join(card.str(short) for card in hand) if hand else "<empty>"}')
 
 

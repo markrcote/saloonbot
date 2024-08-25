@@ -1,5 +1,3 @@
-import random
-
 from card_game import CardGame, CardGameError, Player
 
 
@@ -23,35 +21,73 @@ class Blackjack(CardGame):
     def __init__(self):
         super().__init__()
         self.dealer = Dealer()
-        self.current_player_idx = 0
+        self.current_player_idx = None
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
             raise NotPlayerTurnError(player)
 
+    def _check_game_in_progress(self):
+        if self.current_player_idx is None:
+            raise CardGameError('No game in progress')
+
     def sit_down(self, player):
         self.players.append(player)
 
-    def new_game(self):
+    def new_hand(self):
         if not self.players:
             raise CardGameError('No players')
 
-        # Shuffle players
-        random.shuffle(self.players)
-        self.create_deck()
+        self.current_player_idx = 0
         self.deal(self.dealer, 2)
+        self.message_queue.append(f'{self.dealer} shows {self.dealer.hand[0]}')
+        if self.get_score(self.dealer) == 21:
+            self.message_queue.append(f'{self.dealer} reveals {self.dealer.hand[1]}. Dealer wins.')
+            self.end_hand()
+            return
+
+        # Deal two cards to each player
+        for player in self.players:
+            self.deal(player, 2)
+
+    def end_hand(self):
+        self.current_player_idx = None
+        for player in self.players:
+            self.discard_all(player)
 
     def hit(self, player):
+        self._check_game_in_progress()
         self._check_turn(player)
-        self.game.deal(player)
-        if self.get_score(player) >= 21:
-            self.current_player_idx += 1
-            if self.current_player_idx >= len(self.players):
-                self.current_player_idx = 0
-                self.dealer_turn()
+        self.deal(player)
+        self.message_queue.append(f'{player} is dealt {player.hand[-1]}')
+
+        if self.get_score(player) <= 21:
+            return
+
+        if self.get_score(player) == 21:
+            self.message_queue.append(f'{player} has 21.')
+        else:
+            self.message_queue.append(f'{player} busts.')
+        self.current_player_idx += 1
+        if self.current_player_idx >= len(self.players):
+            self.current_player_idx = None
+            self.dealer_turn()
 
     def get_score(self, player):
-        return sum(card.value for card in self.game.hands[player])
+        sorted_hand = sorted(player.hand, key=lambda card: card.value)
+        score = 0
+        for card in sorted_hand:
+            if card.value < 10:
+                score += card.value
+            elif card.value >= 10 and card.value <= 13:
+                score += 10
+            else:
+                if score + 11 > 21:
+                    score += 1
+                else:
+                    score += 11
+
+        return score
 
     def dealer_turn(self):
         pass

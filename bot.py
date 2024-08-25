@@ -29,7 +29,7 @@ async def wwname(interaction: nextcord.Interaction, gender: str = '', number: in
     await interaction.send(names.random_name(gender, number))
 
 
-@bot.slash_command(description='Deal a card to a player')
+@bot.slash_command(description='Deal one or more cards to a player')
 async def deal_hand(interaction: nextcord.Interaction, number: int = 1, player: str = ''):
     # If player is not given, use the interaction author
     if player == '':
@@ -38,7 +38,7 @@ async def deal_hand(interaction: nextcord.Interaction, number: int = 1, player: 
     await interaction.send(f'{player} was dealt {number} cards.')
 
 
-@bot.slash_command(description='Deal a card to all players')
+@bot.slash_command(description='Deal one or more cards to all players')
 async def deal_all(interaction: nextcord.Interaction, number: int = 1):
     if not card_game.players:
         await interaction.send('No players to deal to.')
@@ -61,7 +61,7 @@ async def discard(interaction: nextcord.Interaction, card_value: str, card_suit:
     await interaction.send(f'{player} discarded {card}.')
 
 
-@bot.slash_command(description='Discard all cards from all players')
+@bot.slash_command(description='Discard all cards from a player')
 async def discard_all(interaction: nextcord.Interaction, player: str = ''):
     if player == '':
         player = interaction.user.name

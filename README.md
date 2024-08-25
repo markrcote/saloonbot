@@ -24,7 +24,7 @@ A player is registered with the game when they are first dealt a hand.  After th
 cards to `player`.  `number` defaults to 1 and `player` defaults to the current user.
 * `/deal_all [number]`: Deals `number` cards to each registered player.
 * `/discard <card value> <card suit> [player]`: Returns the indicated card to the deck from `player`'s hand.  `player` defaults to the current user.
-* `/discard_all`: Discards all cards from all players' hands.
+* `/discard_all [player]`: Discards all cards from `player`, defaulting to the current user.
 * `/show_hand [player]`: Prints out (to everyone) the contents of `player`'s hand, defaulting to the current user.
 * `/shuffle_deck`: Shuffles the deck.  Does **not** discard any cards from players' hands.
 

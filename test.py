@@ -103,16 +103,42 @@ class TestBlackjack(unittest.TestCase):
     def setUp(self):
         self.game = Blackjack()
 
-    def test_new_game(self):
+    def test_new_hand(self):
         # Verify that an error is raised when no players are present
         with self.assertRaises(CardGameError):
-            self.game.new_game()
+            self.game.new_hand()
 
         self.game.sit_down(Player("Player 1"))
         self.game.sit_down(Player("Player 2"))
-        self.game.new_game()
+        self.game.new_hand()
         self.assertEqual(len(self.game.players), 2)
-        self.assertEqual(len(self.game.deck), 50)
+        self.assertEqual(len(self.game.deck), 46)
+
+    def test_dealer_has_21(self):
+        self.game.deck = [Card('H', 3), Card('H', 2), Card('H', 14), Card('H', 10)]
+        self.game.sit_down(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(self.game.get_score(self.game.dealer), 21)
+        self.assertEqual(self.game.current_player_idx, None)
+
+    def test_hit(self):
+        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4), Card('H', 5), Card('H', 6), Card('H', 7)]
+
+        self.game.sit_down(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(len(self.game.dealer.hand), 2)
+        print(self.game.dealer.hand)
+        self.assertEqual(self.game.get_score(self.game.dealer), 13)
+        self.assertEqual(len(self.game.players[0].hand), 2)
+        self.assertEqual(self.game.get_score(self.game.players[0]), 9)
+        self.game.hit(self.game.players[0])
+        self.assertEqual(len(self.game.players[0].hand), 3)
+        self.assertEqual(self.game.get_score(self.game.players[0]), 12)
+        self.assertEqual(len(self.game.deck), 1)  # from the mock deck
+        self.assertEqual(self.game.current_player_idx, 0)
+        self.game.hit(self.game.players[0])
+        self.assertEqual(self.game.get_score(self.game.players[0]), 22)
+        self.assertEqual(self.game.current_player_idx, None)
 
 
 if __name__ == '__main__':

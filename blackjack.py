@@ -68,6 +68,18 @@ class Blackjack(CardGame):
             self.message_queue.append(f'{player} has 21.')
         else:
             self.message_queue.append(f'{player} busts.')
+
+        self.next_turn()
+    
+    def stand(self, player):
+        self._check_game_in_progress()
+        self._check_turn(player)
+        self.next_turn()
+
+    def next_turn(self):
+        if self.current_player_idx is None:
+            raise CardGameError('No game in progress')
+
         self.current_player_idx += 1
         if self.current_player_idx >= len(self.players):
             self.current_player_idx = None

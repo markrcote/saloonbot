@@ -16,14 +16,18 @@ class PlayerNotFoundError(CardGameError):
 
 class Card:
     SUIT_EMOJIS = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
-    SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs', 'S': 'Spades'}
+    SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs',
+                    'S': 'Spades'}
     SUIT_FACE_CARDS = {11: 'Jack', 12: 'Queen', 13: 'King', 14: 'Ace'}
 
     def __init__(self, suit, value):
         self.suit = suit.upper()[0]
-        assert self.suit in self.SUIT_EMOJIS, f'Invalid suit: {self.suit}'
         self.value = value
-        assert self.value in range(2, 15), f'Invalid value: {self.value}'
+
+        if self.suit not in self.SUIT_EMOJIS:
+            raise CardGameError(f'Invalid suit: {suit}')
+        if self.value not in range(2, 15):
+            raise CardGameError(f'Invalid value: {self.value}')
 
     def __repr__(self):
         return f'{self.valuestr()} of {self.SUIT_STRINGS[self.suit]}'
@@ -102,6 +106,9 @@ class CardGame:
     def shuffle(self):
         random.shuffle(self.deck)
 
+    def has_card(self, player, card):
+        return card in player.hand
+
     def deal(self, player, cards=1):
         # Deal cards to player
         for _ in range(cards):
@@ -109,8 +116,9 @@ class CardGame:
 
     def discard(self, player, card):
         # Discard a card from player's hand
-        player.hand.remove(card)
-        self.deck.append(card)
+        if self.has_card(player, card):
+            player.hand.remove(card)
+            self.deck.append(card)
 
     def discard_all(self, player):
         # Discard all cards from player

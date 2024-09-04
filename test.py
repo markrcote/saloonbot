@@ -38,6 +38,15 @@ class TestWildWestNames(unittest.TestCase):
         self.assertEqual(result, '♀ Mary Brown\n♂ Aiden Patel')
 
 
+class TestCard(unittest.TestCase):
+    def test_invalid_card(self):
+        with self.assertRaises(CardGameError):
+            Card('H', 16)
+
+        with self.assertRaises(CardGameError):
+            Card('X', 5)
+
+
 class TestCardGame(unittest.TestCase):
     def setUp(self):
         self.game = CardGame()
@@ -57,18 +66,16 @@ class TestCardGame(unittest.TestCase):
         self.assertEqual(len(self.game.players[0].hand), 5)
 
     def test_discard(self):
-        self.game.create_deck()
+        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
+                          Card('H', 5), Card('H', 6), Card('H', 7)]
         self.game.players = [Player("Player 1"), Player("Player 2")]
         self.game.deal(self.game.players[0], 3)
-        card_to_discard = self.game.players[0].hand[0]
-        discarded_value = card_to_discard.value
-        discarded_suit = card_to_discard.suit
-        self.game.discard(self.game.players[0], card_to_discard)
-        # Check if the discarded card was removed from the player's hand
+        self.game.discard(self.game.players[0], Card('H', 7))
         self.assertEqual(len(self.game.players[0].hand), 2)
-        # Check if the discarded card was added to the deck
-        self.assertEqual(self.game.deck[-1].suit, discarded_suit)
-        self.assertEqual(self.game.deck[-1].value, discarded_value)
+        self.assertEqual(self.game.deck[-1].suit, 'H')
+        self.assertEqual(self.game.deck[-1].value, 7)
+        self.game.discard(self.game.players[0], Card('D', 3))
+        self.assertEqual(len(self.game.players[0].hand), 2)
 
     def test_discard_all(self):
         self.game.create_deck()

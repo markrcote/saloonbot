@@ -5,7 +5,7 @@ import subprocess
 import nextcord
 from nextcord.ext import commands
 
-from card_game import Card, CardGame, PlayerNotFoundError
+from card_game import Card, CardGame, CardGameError, PlayerNotFoundError
 from wwnames import WildWestNames
 
 bot = commands.Bot()
@@ -59,7 +59,15 @@ async def deal_all(interaction: nextcord.Interaction, number: int = 1):
 async def discard(interaction: nextcord.Interaction, card_value: str,
                   card_suit: str, player: str = ''):
     player = determine_player_name(interaction, player)
-    card = Card(card_suit, int(card_value))
+    try:
+        card = Card(card_suit, int(card_value))
+    except CardGameError as e:
+        await interaction.send(e)
+
+    if not card_game.has_card(card_game.get_player(player), card):
+        await interaction.send(f'{player} does not have {card}.')
+        return
+
     try:
         card_game.discard(card_game.get_player(player), card)
     except PlayerNotFoundError as e:

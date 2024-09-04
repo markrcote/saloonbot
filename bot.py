@@ -13,6 +13,12 @@ git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text
 card_game = CardGame()
 
 
+def determine_player_name(interaction, player):
+    if player == '':
+        player = interaction.user.name
+    return player
+
+
 @bot.event
 async def on_ready():
     print('Howdy folks.')
@@ -31,9 +37,7 @@ async def wwname(interaction: nextcord.Interaction, gender: str = '', number: in
 
 @bot.slash_command(description='Deal one or more cards to a player')
 async def deal_hand(interaction: nextcord.Interaction, number: int = 1, player: str = ''):
-    # If player is not given, use the interaction author
-    if player == '':
-        player = interaction.user.name
+    player = determine_player_name(interaction, player)
     card_game.deal(card_game.get_player(player, add=True), number)
     await interaction.send(f'{player} was dealt {number} cards.')
 
@@ -50,8 +54,7 @@ async def deal_all(interaction: nextcord.Interaction, number: int = 1):
 
 @bot.slash_command(description='Discard a card from a player')
 async def discard(interaction: nextcord.Interaction, card_value: str, card_suit: str, player: str = ''):
-    if player == '':
-        player = interaction.user.name
+    player = determine_player_name(interaction, player)
     card = Card(card_suit, int(card_value))
     try:
         card_game.discard(card_game.get_player(player), card)
@@ -63,8 +66,7 @@ async def discard(interaction: nextcord.Interaction, card_value: str, card_suit:
 
 @bot.slash_command(description='Discard all cards from a player')
 async def discard_all(interaction: nextcord.Interaction, player: str = ''):
-    if player == '':
-        player = interaction.user.name
+    player = determine_player_name(interaction, player)
     try:
         card_game.discard_all(card_game.get_player(player))
     except PlayerNotFoundError as e:
@@ -81,8 +83,7 @@ async def shuffle_deck(interaction: nextcord.Interaction):
 
 @bot.slash_command(description='Show a player\'s hand')
 async def show_hand(interaction: nextcord.Interaction, player: str = '', short: bool = False):
-    if player == '':
-        player = interaction.user.name
+    player = determine_player_name(interaction, player)
     hand = card_game.get_player(player, add=True).hand
     await interaction.send(f'{player}\'s hand: {", ".join(card.str(short) for card in hand) if hand else "<empty>"}')
 

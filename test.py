@@ -129,7 +129,6 @@ class TestBlackjack(unittest.TestCase):
         self.game.sit_down(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(len(self.game.dealer.hand), 2)
-        print(self.game.dealer.hand)
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.assertEqual(len(self.game.players[0].hand), 2)
         self.assertEqual(self.game.get_score(self.game.players[0]), 9)
@@ -140,7 +139,17 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(self.game.current_player_idx, 0)
         self.game.hit(self.game.players[0])
         self.assertEqual(self.game.get_score(self.game.players[0]), 22)
-        self.assertEqual(self.game.current_player_idx, None)
+
+    def test_dealer_turn(self):
+        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
+                          Card('H', 5), Card('H', 6), Card('H', 7)]
+        self.game.sit_down(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(self.game.get_score(self.game.dealer), 13)
+        self.game.stand(self.game.players[0])
+        self.game.next_turn()
+        self.assertEqual(len(self.game.dealer.hand), 4)
+        self.assertEqual(self.game.get_score(self.game.dealer), 26)
 
 
 if __name__ == '__main__':

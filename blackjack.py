@@ -38,6 +38,10 @@ class Blackjack(CardGame):
         if not self.players:
             raise CardGameError('No players')
 
+        for player in self.players:
+            self.discard_all(player)
+        self.discard_all(self.dealer)
+
         self.current_player_idx = 0
         self.deal(self.dealer, 2)
         self.message_queue.append(f'{self.dealer} shows {self.dealer.hand[0]}')
@@ -54,8 +58,6 @@ class Blackjack(CardGame):
 
     def end_hand(self):
         self.current_player_idx = None
-        for player in self.players:
-            self.discard_all(player)
 
     def hit(self, player):
         self._check_game_in_progress()
@@ -71,12 +73,9 @@ class Blackjack(CardGame):
         else:
             self.message_queue.append(f'{player} busts.')
 
-        self.next_turn()
-    
     def stand(self, player):
         self._check_game_in_progress()
         self._check_turn(player)
-        self.next_turn()
 
     def next_turn(self):
         if self.current_player_idx is None:
@@ -104,4 +103,20 @@ class Blackjack(CardGame):
         return score
 
     def dealer_turn(self):
-        pass
+        while self.get_score(self.dealer) < 17:
+            self.deal(self.dealer)
+            self.message_queue.append(
+                f'Dealer is dealt {self.dealer.hand[-1]}'
+            )
+
+        if self.get_score(self.dealer) == 21:
+            self.message_queue.append('Dealer has 21.')
+            self.end_hand()
+            return
+        elif self.get_score(self.dealer) > 21:
+            self.message_queue.append('Dealer busts.')
+            self.end_hand()
+            return
+
+        self.message_queue.append('Dealer stands.')
+        self.end_hand()

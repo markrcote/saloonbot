@@ -115,14 +115,16 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(len(self.game.deck), 46)
 
     def test_dealer_has_21(self):
-        self.game.deck = [Card('H', 3), Card('H', 2), Card('H', 14), Card('H', 10)]
+        self.game.deck = [Card('H', 3), Card('H', 2), Card('H', 14),
+                          Card('H', 10)]
         self.game.sit_down(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)
         self.assertEqual(self.game.current_player_idx, None)
 
     def test_hit(self):
-        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4), Card('H', 5), Card('H', 6), Card('H', 7)]
+        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
+                          Card('H', 5), Card('H', 6), Card('H', 7)]
 
         self.game.sit_down(Player("Player 1"))
         self.game.new_hand()

@@ -42,7 +42,9 @@ class Blackjack(CardGame):
         self.deal(self.dealer, 2)
         self.message_queue.append(f'{self.dealer} shows {self.dealer.hand[0]}')
         if self.get_score(self.dealer) == 21:
-            self.message_queue.append(f'{self.dealer} reveals {self.dealer.hand[1]}. Dealer wins.')
+            self.message_queue.append(
+                f'{self.dealer} reveals {self.dealer.hand[1]}. Dealer wins.'
+            )
             self.end_hand()
             return
 

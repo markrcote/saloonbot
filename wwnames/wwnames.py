@@ -1,4 +1,5 @@
 import random
+import os
 
 
 class WildWestNames:
@@ -8,7 +9,8 @@ class WildWestNames:
         self.surnames = self.load_names('S')
 
     def load_names(self, name_type):
-        with open(f'names/{name_type}.txt') as inf:
+        curdir = os.path.dirname(os.path.abspath(__file__))
+        with open(f'{curdir}/names/{name_type}.txt') as inf:
             return [name.strip() for name in inf.readlines()]
 
     def random_name(self, gender=None, number=1):
@@ -24,9 +26,11 @@ class WildWestNames:
             if not cur_gender:
                 cur_gender = random.choice('MF')
 
-            first_names = self.female_names if cur_gender == 'F' else self.male_names
+            first_names = (self.female_names if cur_gender == 'F' else
+                           self.male_names)
             gender_symbol = '♀' if cur_gender == 'F' else '♂'
 
-            names.append(f'{gender_symbol} {random.choice(first_names)} {random.choice(self.surnames)}')
+            names.append(f'{gender_symbol} {random.choice(first_names)} '
+                         f'{random.choice(self.surnames)}')
 
         return '\n'.join(names)

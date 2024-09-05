@@ -1,10 +1,10 @@
 import unittest
 from unittest.mock import patch
 
-from blackjack import Blackjack
-from card_game import Card, CardGame, CardGameError, Player
+from cardgames.blackjack import Blackjack
+from cardgames.card_game import Card, CardGame, CardGameError, Player
 
-from wwnames import WildWestNames
+from wwnames.wwnames import WildWestNames
 
 
 class TestWildWestNames(unittest.TestCase):

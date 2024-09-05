@@ -1,4 +1,4 @@
-from card_game import CardGame, CardGameError, Player
+from .card_game import CardGame, CardGameError, Player
 
 
 class NotPlayerTurnError(CardGameError):

@@ -1,12 +1,16 @@
 import os
 import subprocess
 
-
 import nextcord
 from nextcord.ext import commands
 
-from card_game import Card, CardGame, CardGameError, PlayerNotFoundError
-from wwnames import WildWestNames
+from cardgames.card_game import (
+    Card,
+    CardGame,
+    CardGameError,
+    PlayerNotFoundError
+)
+from wwnames.wwnames import WildWestNames
 
 bot = commands.Bot()
 git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,

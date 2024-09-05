@@ -20,12 +20,12 @@ A card game has a deck with 52 cards (no jokers atm).  These cards all start out
 A player is registered with the game when they are first dealt a hand.  After that, they are
 (currently) always a player and will be affected by any commands involving all players.
 
-* `/deal_hand [player] [number]`: Registers `player` if not already registered.  Deals `number`
+* `/deal [player] [number]`: Registers `player` if not already registered.  Deals `number`
 cards to `player`.  `number` defaults to 1 and `player` defaults to the current user.
 * `/deal_all [number]`: Deals `number` cards to each registered player.
 * `/discard <card value> <card suit> [player]`: Returns the indicated card to the deck from `player`'s hand.  `player` defaults to the current user.
 * `/discard_all [player]`: Discards all cards from `player`, defaulting to the current user.
-* `/show_hand [player]`: Prints out (to everyone) the contents of `player`'s hand, defaulting to the current user.
+* `/show_hand [player] [short]`: Prints out (to everyone) the contents of `player`'s hand, defaulting to the current user.  `short` is a boolean value indicating whether to display a shortened version, defaulting to `False`.
 * `/shuffle_deck`: Shuffles the deck.  Does **not** discard any cards from players' hands.
 
 ### Metadata

@@ -42,8 +42,8 @@ async def wwname(interaction: nextcord.Interaction, gender: str = '',
 
 
 @bot.slash_command(description='Deal one or more cards to a player')
-async def deal_hand(interaction: nextcord.Interaction, number: int = 1,
-                    player: str = ''):
+async def deal(interaction: nextcord.Interaction, number: int = 1,
+               player: str = ''):
     player = determine_player_name(interaction, player)
     card_game.deal(card_game.get_player(player, add=True), number)
     await interaction.send(f'{player} was dealt {number} cards.')

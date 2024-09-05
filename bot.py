@@ -63,6 +63,7 @@ async def discard(interaction: nextcord.Interaction, card_value: str,
         card = Card(card_suit, int(card_value))
     except CardGameError as e:
         await interaction.send(e)
+        return
 
     if not card_game.has_card(card_game.get_player(player), card):
         await interaction.send(f'{player} does not have {card}.')
@@ -73,6 +74,7 @@ async def discard(interaction: nextcord.Interaction, card_value: str,
     except PlayerNotFoundError as e:
         await interaction.send(e)
         return
+
     await interaction.send(f'{player} discarded {card}.')
 
 

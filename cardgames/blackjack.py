@@ -90,10 +90,10 @@ class Blackjack(CardGame):
         if self.current_player_idx is None:
             raise CardGameError('No game in progress')
 
-        self.current_player_idx += 1
-        if self.current_player_idx >= len(self.players):
-            self.current_player_idx = None
-            self.dealer_turn()
+        if self.current_player_idx < len(self.players):
+            self.current_player_idx += 1
+        else:
+            raise CardGameError('All players have played this hand')
 
     def get_score(self, player):
         sorted_hand = sorted(player.hand, key=lambda card: card.value)
@@ -112,6 +112,12 @@ class Blackjack(CardGame):
         return score
 
     def dealer_turn(self):
+        if self.current_player_idx is None:
+            raise CardGameError('No game in progress')
+
+        if self.current_player_idx < len(self.players):
+            raise CardGameError('Players still have turns')
+
         while self.get_score(self.dealer) < 17:
             self.deal(self.dealer)
             self.message_queue.append(

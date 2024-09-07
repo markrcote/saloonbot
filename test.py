@@ -159,6 +159,9 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.game.stand(self.game.players[0])
         self.game.next_turn()
+        with self.assertRaises(CardGameError):
+            self.game.next_turn()
+        self.game.dealer_turn()
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
 

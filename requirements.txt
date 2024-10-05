@@ -8,4 +8,4 @@ idna==3.8
 multidict==6.1.0
 nextcord==2.6.0
 typing_extensions==4.12.2
-yarl==1.9.7
+yarl==1.13.1

@@ -111,6 +111,10 @@ class TestBlackjack(unittest.TestCase):
         self.game = Blackjack()
 
     def test_new_hand(self):
+        # Set up a mock deck to ensure that the dealer never has 21.
+        self.game.deck = [Card('H', 3), Card('H', 2), Card('H', 14),
+                          Card('H', 10)]
+
         # Verify that an error is raised when no players are present
         with self.assertRaises(CardGameError):
             self.game.new_hand()
@@ -119,7 +123,7 @@ class TestBlackjack(unittest.TestCase):
         self.game.sit_down(Player("Player 2"))
         self.game.new_hand()
         self.assertEqual(len(self.game.players), 2)
-        self.assertEqual(len(self.game.deck), 46)
+        self.assertEqual(len(self.game.deck), 2)
 
     def test_dealer_has_21(self):
         self.game.deck = [Card('H', 3), Card('H', 2), Card('H', 14),

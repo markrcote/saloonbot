@@ -64,6 +64,7 @@ class Blackjack(CardGame):
         # Deal two cards to each player
         for player in self.players:
             self.deal(player, 2)
+            self.message_queue.append(f'{player} has f{player.hand_str()}')
 
     def end_hand(self):
         self.current_player_idx = None
@@ -73,6 +74,7 @@ class Blackjack(CardGame):
         self._check_turn(player)
         self.deal(player)
         self.message_queue.append(f'{player} is dealt {player.hand[-1]}')
+        self.message_queue.append(f'{player} has {player.hand_str()}')
 
         if self.get_score(player) <= 21:
             return
@@ -81,10 +83,22 @@ class Blackjack(CardGame):
             self.message_queue.append(f'{player} has 21.')
         else:
             self.message_queue.append(f'{player} busts.')
+        self.next_turn()
 
     def stand(self, player):
         self._check_game_in_progress()
         self._check_turn(player)
+        self.message_queue.append(f'{player} stands.')
+        self.next_turn()
+
+    def game_in_progress(self):
+        return self.current_player_idx is not None
+
+    def is_player_turn(self):
+        return self.current_player_idx is not None and self.current_player_idx < len(self.players)
+
+    def is_dealer_turn(self):
+        return self.current_player_idx == len(self.players)
 
     def next_turn(self):
         if self.current_player_idx is None:
@@ -135,3 +149,27 @@ class Blackjack(CardGame):
 
         self.message_queue.append('Dealer stands.')
         self.end_hand()
+
+    def tick(self):
+        # States of the game:
+        # 1. No game in progress
+        # Event: game starts after timeout/interaction.
+        # Dealer dealt cards. Hand may end.
+        # Player dealt cards.
+        # 2. Wait for each player turn.
+        # Player takes action(s); ends when standing, 21, or bust.
+        # 3. Wait for dealer turn (after timeout/interaction).
+        # Dealer takes action(s); ends when standing, 21, or bust.
+        # Adjust player scores.
+        # Take all cards back and shuffle.
+
+        # End of every tick or action, we look for messages to display.
+        if self.game_in_progress():
+            if self.is_dealer_turn():
+                self.message_queue.append('Dealer\'s turn')
+                self.dealer_turn()
+
+        return_queue = self.message_queue[:]
+
+        self.message_queue.clear()
+        return return_queue

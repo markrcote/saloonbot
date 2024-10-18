@@ -152,16 +152,27 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(self.game.get_score(self.game.players[0]), 22)
 
     def test_dealer_turn(self):
+        self.assertFalse(self.game.is_dealer_turn()) 
         self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
                           Card('H', 5), Card('H', 6), Card('H', 7)]
         self.game.sit_down(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.game.stand(self.game.players[0])
-        self.game.next_turn()
         with self.assertRaises(CardGameError):
             self.game.next_turn()
         self.game.dealer_turn()
+        self.assertEqual(len(self.game.dealer.hand), 4)
+        self.assertEqual(self.game.get_score(self.game.dealer), 26)
+
+    def test_tick(self):
+        self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
+                          Card('H', 5), Card('H', 6), Card('H', 7)]
+        self.game.sit_down(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(self.game.get_score(self.game.dealer), 13)
+        self.game.stand(self.game.players[0])
+        self.game.tick()
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
 

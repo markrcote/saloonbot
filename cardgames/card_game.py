@@ -78,6 +78,9 @@ class Player:
     def __str__(self):
         return f'Player {self.name}'
 
+    def hand_str(self):
+        return ', '.join([card.str() for card in self.hand])
+
 
 class CardGame:
     def __init__(self):

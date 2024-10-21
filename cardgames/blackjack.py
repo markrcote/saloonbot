@@ -1,3 +1,4 @@
+import time
 from .card_game import CardGame, CardGameError, Player
 
 
@@ -18,11 +19,15 @@ class Blackjack(CardGame):
 
     dealer = 'dealer'
 
+    TIME_LAST_AMBIENT = None
+    PERIOD_LAST_AMBIENT = 10
+
     def __init__(self):
         super().__init__()
         self.dealer = Dealer()
         self.players_waiting  = []
         self.current_player_idx = None
+        self.TIME_LAST_AMBIENT = time.time()
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -168,6 +173,10 @@ class Blackjack(CardGame):
             if self.is_dealer_turn():
                 self.message_queue.append('Dealer\'s turn')
                 self.dealer_turn()
+
+        if time.time() > self.TIME_LAST_AMBIENT + self.PERIOD_LAST_AMBIENT:
+            self.message_queue.append('The dealer clears his throat.')
+            self.TIME_LAST_AMBIENT = time.time()
 
         return_queue = self.message_queue[:]
 

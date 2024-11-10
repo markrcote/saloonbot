@@ -3,8 +3,10 @@ import signal
 import threading
 from time import sleep
 
+from cardgames.card_game import Player
 from cardgames.blackjack import Blackjack
 
+player = None
 game = Blackjack()
 cmd_q = queue.Queue()
 cmd_listener_thread = None
@@ -20,7 +22,6 @@ def process_command(cmd):
             'Commands:',
             '  quit',
             '  help',
-            '  deal',
             '  hit',
             '  stand',
             '  bet <amount>',
@@ -29,12 +30,10 @@ def process_command(cmd):
             '  insurance',
             '  surrender',
         ])
-    elif cmd == 'deal':
-        game.deal()
     elif cmd == 'hit':
-        game.hit()
+        game.hit(player)
     elif cmd =='stand':
-        game.stand()
+        game.stand(player)
     elif cmd.startswith('bet'):
         try:
             amount = int(cmd.split(' ')[1])
@@ -43,13 +42,13 @@ def process_command(cmd):
         else:
             game.bet(amount)
     elif cmd =='split':
-        game.split()
+        game.split(player)
     elif cmd == 'double':
-        game.double()
+        game.double(player)
     elif cmd == 'insurance':
-        game.insurance()
+        game.insurance(player)
     elif cmd =='surrender':
-        game.surrender()
+        game.surrender(player)
     else:
         output.append('Unknown command')
     return output
@@ -82,19 +81,27 @@ if __name__ == "__main__":
     if output:
         print('\n'.join(output))
 
+    player_name = input('Enter your name: ')
+    player = Player(player_name)
+    print(f'Welcome {player.name}')
+    game.sit_down(player)
+    game.new_hand()
+
     setup_cmd_listener()
 
     try:
         while True:
+            output = game.tick()
+            if output:
+                print('\n'.join(output))
             try:
                 cmd = cmd_q.get(timeout=5)
             except queue.Empty:
                 cmd = None
-            output = []
+            output = None
             if cmd:
-                output.extend(process_command(cmd))
+                output = process_command(cmd)
 
-            output.extend(game.tick())
             if output:
                 print('\n'.join(output))
     except KeyboardInterrupt:
@@ -103,6 +110,6 @@ if __name__ == "__main__":
         # complex input routine.
         pass
 
-    print('tearing down')    
+    print('tearing down')
     teardown_cmd_listener()
     print('done')

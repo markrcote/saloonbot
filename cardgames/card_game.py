@@ -73,10 +73,10 @@ class Player:
         self.hand = []
 
     def __repr__(self):
-        return f'Player {self.name}'
+        return f'{self.name}'
 
     def __str__(self):
-        return f'Player {self.name}'
+        return f'{self.name}'
 
     def hand_str(self):
         return ', '.join([card.str() for card in self.hand])

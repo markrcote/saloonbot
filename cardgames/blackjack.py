@@ -20,7 +20,9 @@ class Blackjack(CardGame):
     dealer = 'dealer'
 
     TIME_LAST_AMBIENT = None
+    time_last_hand_ended = None
     PERIOD_LAST_AMBIENT = 10
+    TIME_BETWEEN_HANDS = 5
 
     def __init__(self):
         super().__init__()
@@ -41,15 +43,17 @@ class Blackjack(CardGame):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f'{player} is already sitting down')
 
-        if self.current_player_idx is None:
-            self.players.append(player)
-        else:
-            self.players_waiting.append(player)
+        self.players_waiting.append(player)
         self.message_queue.append(f'{player} sits down and will join the next game.')
 
     def new_hand(self):
+        self.players.extend(self.players_waiting)
+        self.players_waiting = []
         if not self.players:
             raise CardGameError('No players')
+
+        self.message_queue.append('New hand started.')
+        self.message_queue.append(f'Players: {", ".join([str(x) for x in self.players])}')
 
         for player in self.players:
             self.discard_all(player)
@@ -69,9 +73,29 @@ class Blackjack(CardGame):
         # Deal two cards to each player
         for player in self.players:
             self.deal(player, 2)
-            self.message_queue.append(f'{player} has f{player.hand_str()}')
+            self.message_queue.append(f'{player} has {player.hand_str()}')
 
     def end_hand(self):
+        wins = []
+        ties = []
+        losses = []
+        self.message_queue.append('End of hand.')
+        self.message_queue.append(f'Dealer has {self.get_score(self.dealer)}.')
+        for player in self.players:
+            if self.get_score(player) > 21:
+                self.message_queue.append(f'{player} busted out.')
+                losses.append(player)
+            else:
+                self.message_queue.append(f'{player} has {self.get_score(player)}.')
+                if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
+                    self.message_queue.append(f'{player} wins.')
+                    wins.append(player)
+                elif self.get_score(player) == self.get_score(self.dealer):
+                    self.message_queue.append(f'{player} ties with dealer.')
+                    ties.append(player)
+                else:
+                    self.message_queue.append(f'{player} loses.')
+                    losses.append(player)
         self.current_player_idx = None
 
     def hit(self, player):
@@ -137,6 +161,8 @@ class Blackjack(CardGame):
         if self.current_player_idx < len(self.players):
             raise CardGameError('Players still have turns')
 
+        self.message_queue.append(f'Dealer flips over the second card: {self.dealer.hand[-1]}')
+
         while self.get_score(self.dealer) < 17:
             self.deal(self.dealer)
             self.message_queue.append(
@@ -173,6 +199,14 @@ class Blackjack(CardGame):
             if self.is_dealer_turn():
                 self.message_queue.append('Dealer\'s turn')
                 self.dealer_turn()
+        
+        if not self.game_in_progress():
+            if self.time_last_hand_ended is None:
+                self.time_last_hand_ended = time.time()
+
+            if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
+                self.time_last_hand_ended = None
+                self.new_hand()
 
         if time.time() > self.TIME_LAST_AMBIENT + self.PERIOD_LAST_AMBIENT:
             self.message_queue.append('The dealer clears his throat.')

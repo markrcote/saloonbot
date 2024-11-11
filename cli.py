@@ -85,7 +85,6 @@ if __name__ == "__main__":
     player = Player(player_name)
     print(f'Welcome {player.name}')
     game.sit_down(player)
-    game.new_hand()
 
     setup_cmd_listener()
 

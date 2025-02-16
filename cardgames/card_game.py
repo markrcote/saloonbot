@@ -86,7 +86,6 @@ class CardGame:
     def __init__(self):
         self.deck = []
         self.players = []
-        self.message_queue = []
         self.create_deck()
 
     def get_player(self, name, add=False):

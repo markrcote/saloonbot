@@ -200,7 +200,6 @@ class Blackjack(CardGame):
         # Adjust player scores.
         # Take all cards back and shuffle.
 
-        # End of every tick or action, we look for messages to display.
         if self.game_in_progress():
             if self.is_dealer_turn():
                 await self.output('Dealer\'s turn')

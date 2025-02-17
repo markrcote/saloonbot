@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 from unittest.mock import patch
 
@@ -169,6 +170,10 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
     async def test_tick(self):
         self.game.deck = [Card('H', 13), Card('H', 3), Card('H', 4),
                           Card('H', 5), Card('H', 6), Card('H', 7)]
+        self.game.time_last_hand_ended = time.time() - self.game.TIME_BETWEEN_HANDS
+        await self.game.tick()  # shouldn't do anything
+        self.game.time_last_hand_ended = None
+
         await self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
@@ -176,6 +181,7 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         await self.game.tick()
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
+        await self.game.tick()
 
 
 if __name__ == '__main__':

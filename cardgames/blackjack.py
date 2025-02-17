@@ -199,24 +199,15 @@ class Blackjack(CardGame):
         await self.end_hand()
 
     async def tick(self):
-        # States of the game:
-        # 1. No game in progress
-        # Event: game starts after timeout/interaction.
-        # Dealer dealt cards. Hand may end.
-        # Player dealt cards.
-        # 2. Wait for each player turn.
-        # Player takes action(s); ends when standing, 21, or bust.
-        # 3. Wait for dealer turn (after timeout/interaction).
-        # Dealer takes action(s); ends when standing, 21, or bust.
-        # Adjust player scores.
-        # Take all cards back and shuffle.
-
         if self.game_in_progress():
-            if self.is_dealer_turn():
+            if not self.players:
+                await self.output('All players have left the table.')
+                self.current_player_idx = None
+            elif self.is_dealer_turn():
                 await self.output('Dealer\'s turn')
                 await self.dealer_turn()
 
-        if not self.game_in_progress():
+        if not self.game_in_progress() and (self.players or self.players_waiting):
             if self.time_last_hand_ended is None:
                 self.time_last_hand_ended = time.time()
 

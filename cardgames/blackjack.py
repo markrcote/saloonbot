@@ -52,6 +52,17 @@ class Blackjack(CardGame):
         self.players_waiting.append(player)
         await self.output(f'{player} sits down and will join the next game.')
 
+    async def stand_up(self, player):
+        if player not in self.players:
+            raise CardGameError(f'{player} is not at the table')
+
+        if player in self.players_waiting:
+            self.players_waiting.remove(player)
+        else:
+            self.players.remove(player)
+
+        await self.output(f'{player} leaves the table.')
+
     async def new_hand(self):
         self.players.extend(self.players_waiting)
         self.players_waiting = []

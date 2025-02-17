@@ -35,6 +35,10 @@ async def process_command(player, cmd, args):
             '  insurance',
             '  surrender',
         ])
+    elif cmd == 'standup':
+        await game.stand_up(player)
+    elif cmd == 'sitdown':
+        await game.sit_down(player)
     elif cmd == 'hit':
         await game.hit(player)
     elif cmd == 'stand':
@@ -65,7 +69,6 @@ async def main():
     player_name = input('Enter your name: ')
     player = Player(player_name)
     print(f'Welcome {player.name}')
-    await game.sit_down(player)
 
     quit = False
     timed_out = False

@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 
@@ -11,6 +12,8 @@ from cardgames.card_game import (
     PlayerNotFoundError
 )
 from wwnames.wwnames import WildWestNames
+
+logging.basicConfig(level=logging.INFO)
 
 bot = commands.Bot()
 git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
@@ -26,7 +29,7 @@ def determine_player_name(interaction, player):
 
 @bot.event
 async def on_ready():
-    print('Howdy folks.')
+    logging.info('Howdy folks.')
 
 
 @bot.slash_command(description='Version')

@@ -1,9 +1,12 @@
 import asyncio
+import logging
 
 import aioconsole
 
 from cardgames.card_game import Player
 from cardgames.blackjack import Blackjack
+
+logging.basicConfig(level=logging.INFO)
 
 game = Blackjack()
 game.output_func = print

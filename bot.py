@@ -5,20 +5,19 @@ import subprocess
 import nextcord
 from nextcord.ext import commands
 
-from cardgames.card_game import (
-    Card,
-    CardGame,
-    CardGameError,
-    PlayerNotFoundError
-)
+from cardgames.blackjack import Blackjack
 from wwnames.wwnames import WildWestNames
 
 logging.basicConfig(level=logging.INFO)
 
+guild_ids_env = os.getenv("DISCORD_GUILDS")
+guild_ids = [int(x) for x in guild_ids_env.split(",")] if guild_ids_env else None
+
 bot = commands.Bot()
 git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                          text=True).stdout.strip()
-card_game = CardGame()
+
+game = None
 
 
 def determine_player_name(interaction, player):
@@ -32,84 +31,37 @@ async def on_ready():
     logging.info("Howdy folks.")
 
 
-@bot.slash_command(description="Version")
+@bot.slash_command(description="Version", guild_ids=guild_ids)
 async def wwname_version(interaction: nextcord.Interaction):
     await interaction.send(git_sha)
 
 
-@bot.slash_command(description="Generate a name")
+@bot.slash_command(description="Generate a name", guild_ids=guild_ids)
 async def wwname(interaction: nextcord.Interaction, gender: str = "",
                  number: int = 1):
     names = WildWestNames()
     await interaction.send(names.random_name(gender, number))
 
 
-@bot.slash_command(description="Deal one or more cards to a player")
-async def deal(interaction: nextcord.Interaction, number: int = 1,
-               player: str = ""):
-    player = determine_player_name(interaction, player)
-    card_game.deal(card_game.get_player(player, add=True), number)
-    await interaction.send(f"{player} was dealt {number} cards.")
+class BlackjackCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.game = None
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        logging.info("Blackjack cog initialized.")
+
+    @nextcord.slash_command(name="new_game", guild_ids=guild_ids)
+    async def new_game(self, interaction: nextcord.Interaction):
+        """Start a game if none in progress"""
+        if self.game:
+            await interaction.send("A game is already in progress.")
+            return
+
+        self.game = Blackjack()
+        await interaction.send("New game started.")
 
 
-@bot.slash_command(description="Deal one or more cards to all players")
-async def deal_all(interaction: nextcord.Interaction, number: int = 1):
-    if not card_game.players:
-        await interaction.send("No players to deal to.")
-        return
-    for player in card_game.players:
-        card_game.deal(player, number)
-    await interaction.send(f"All players were dealt {number} cards.")
-
-
-@bot.slash_command(description="Discard a card from a player")
-async def discard(interaction: nextcord.Interaction, card_value: str,
-                  card_suit: str, player: str = ""):
-    player = determine_player_name(interaction, player)
-    try:
-        card = Card(card_suit, int(card_value))
-    except CardGameError as e:
-        await interaction.send(e)
-        return
-
-    if not card_game.has_card(card_game.get_player(player), card):
-        await interaction.send(f"{player} does not have {card}.")
-        return
-
-    try:
-        card_game.discard(card_game.get_player(player), card)
-    except PlayerNotFoundError as e:
-        await interaction.send(e)
-        return
-
-    await interaction.send(f"{player} discarded {card}.")
-
-
-@bot.slash_command(description="Discard all cards from a player")
-async def discard_all(interaction: nextcord.Interaction, player: str = ""):
-    player = determine_player_name(interaction, player)
-    try:
-        card_game.discard_all(card_game.get_player(player))
-    except PlayerNotFoundError as e:
-        await interaction.send(e)
-        return
-    await interaction.send(f"{player} discarded all their cards.")
-
-
-@bot.slash_command(description="Shuffle the deck")
-async def shuffle_deck(interaction: nextcord.Interaction):
-    card_game.shuffle()
-    await interaction.send("The deck was shuffled.")
-
-
-@bot.slash_command(description="Show a player's hand")
-async def show_hand(interaction: nextcord.Interaction, player: str = "",
-                    short: bool = False):
-    player = determine_player_name(interaction, player)
-    hand = card_game.get_player(player, add=True).hand
-    hand_str = ", ".join(card.str(short) for card
-                         in hand) if hand else "<empty>"
-    await interaction.send(f"{player}'s hand: {hand_str}")
-
-
+bot.add_cog(BlackjackCog(bot))
 bot.run(os.getenv("DISCORD_TOKEN"))

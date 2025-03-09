@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 from .card_game import CardGame, CardGameError, Player
 
@@ -199,6 +200,7 @@ class Blackjack(CardGame):
         await self.end_hand()
 
     async def tick(self):
+        logging.debug('tick')
         if self.game_in_progress():
             if not self.players:
                 await self.output("All players have left the table.")

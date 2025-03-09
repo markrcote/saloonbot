@@ -3,12 +3,18 @@ import os
 import subprocess
 
 import nextcord
-from nextcord.ext import commands
+from nextcord.ext import commands, tasks
 
 from cardgames.blackjack import Blackjack
 from wwnames.wwnames import WildWestNames
 
-logging.basicConfig(level=logging.INFO)
+debug_logging = os.getenv("WWNAMES_DEBUG")
+if debug_logging:
+    log_level = logging.DEBUG
+else:
+    log_level = logging.INFO
+
+logging.basicConfig(level=log_level)
 
 guild_ids_env = os.getenv("DISCORD_GUILDS")
 guild_ids = [int(x) for x in guild_ids_env.split(",")] if guild_ids_env else None
@@ -47,6 +53,11 @@ class BlackjackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.game = None
+        self.game_channel = None
+        self.tick.start()
+
+    def cog_unload(self):
+        self.tick.stop()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -59,8 +70,15 @@ class BlackjackCog(commands.Cog):
             await interaction.send("A game is already in progress.")
             return
 
+        self.game_channel = interaction.channel
         self.game = Blackjack()
+        self.game.output_func = self.game_channel.send
         await interaction.send("New game started.")
+
+    @tasks.loop(seconds=3.0)
+    async def tick(self):
+        if self.game:
+            await self.game.tick()
 
 
 bot.add_cog(BlackjackCog(bot))

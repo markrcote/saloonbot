@@ -24,6 +24,8 @@ class Blackjack(CardGame):
     PERIOD_LAST_AMBIENT = 10
     TIME_BETWEEN_HANDS = 5
 
+    SECS_TO_WAIT_FOR_PLAYERS = 30
+
     def __init__(self):
         super().__init__()
         self.dealer = Dealer()
@@ -31,6 +33,7 @@ class Blackjack(CardGame):
         self.current_player_idx = None
         self.time_last_hand_ended = None
         self.time_last_ambient = time.time()
+        self.time_since_game_started = None
         self.output_func = None
 
     async def output(self, output):
@@ -216,6 +219,10 @@ class Blackjack(CardGame):
             if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
                 self.time_last_hand_ended = None
                 await self.new_hand()
+
+        if self.game_in_progress():
+            if time.time() > self.time_since_game_started + self.SECS_TO_WAIT_FOR_PLAYERS:
+                pass
 
         if time.time() > self.time_last_ambient + self.PERIOD_LAST_AMBIENT:
             # await self.output("The dealer clears his throat.")

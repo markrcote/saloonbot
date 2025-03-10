@@ -24,16 +24,19 @@ class Blackjack(CardGame):
     PERIOD_LAST_AMBIENT = 10
     TIME_BETWEEN_HANDS = 5
 
-    SECS_TO_WAIT_FOR_PLAYERS = 30
-
     def __init__(self):
         super().__init__()
         self.dealer = Dealer()
         self.players_waiting = []
+
+        # `current_player_idx` is one of the following:
+        #  None: no hand is in progress.
+        #  int < len(self.players): that player's turn
+        #  int == len(self.players): dealer's turn
         self.current_player_idx = None
+
         self.time_last_hand_ended = None
         self.time_last_ambient = time.time()
-        self.time_since_game_started = None
         self.output_func = None
 
     async def output(self, output):
@@ -45,7 +48,8 @@ class Blackjack(CardGame):
         if self.players[self.current_player_idx] != player:
             raise NotPlayerTurnError(player)
 
-    def _check_game_in_progress(self):
+    def _check_hand_in_progress(self):
+        '''Raise exception if no hand in progress.'''
         if self.current_player_idx is None:
             raise CardGameError("No game in progress")
 
@@ -70,6 +74,7 @@ class Blackjack(CardGame):
     async def new_hand(self):
         self.players.extend(self.players_waiting)
         self.players_waiting = []
+
         if not self.players:
             raise CardGameError("No players")
 
@@ -120,7 +125,7 @@ class Blackjack(CardGame):
         self.current_player_idx = None
 
     async def hit(self, player):
-        self._check_game_in_progress()
+        self._check_hand_in_progress()
         self._check_turn(player)
         self.deal(player)
         await self.output(f"{player} is dealt {player.hand[-1]}")
@@ -136,12 +141,12 @@ class Blackjack(CardGame):
         self.next_turn()
 
     async def stand(self, player):
-        self._check_game_in_progress()
+        self._check_hand_in_progress()
         self._check_turn(player)
         await self.output(f"{player} stands.")
         self.next_turn()
 
-    def game_in_progress(self):
+    def hand_in_progress(self):
         return self.current_player_idx is not None
 
     def is_player_turn(self):
@@ -203,26 +208,27 @@ class Blackjack(CardGame):
         await self.end_hand()
 
     async def tick(self):
-        logging.debug('tick')
-        if self.game_in_progress():
+        logging.debug("tick")
+        if self.hand_in_progress():
             if not self.players:
                 await self.output("All players have left the table.")
+                # TODO: clean up bets and cards.
                 self.current_player_idx = None
             elif self.is_dealer_turn():
                 await self.output("Dealer's turn")
                 await self.dealer_turn()
 
-        if not self.game_in_progress() and (self.players or self.players_waiting):
+        if not self.hand_in_progress() and (self.players or self.players_waiting):
             if self.time_last_hand_ended is None:
                 self.time_last_hand_ended = time.time()
 
             if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
-                self.time_last_hand_ended = None
-                await self.new_hand()
-
-        if self.game_in_progress():
-            if time.time() > self.time_since_game_started + self.SECS_TO_WAIT_FOR_PLAYERS:
-                pass
+                if self.players or self.players_waiting:
+                    self.time_last_hand_ended = None
+                    await self.new_hand()
+                else:
+                    # Wait another period for one or more players to join.
+                    self.time_last_hand_ended = time.time()
 
         if time.time() > self.time_last_ambient + self.PERIOD_LAST_AMBIENT:
             # await self.output("The dealer clears his throat.")

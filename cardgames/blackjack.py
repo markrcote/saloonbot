@@ -70,7 +70,7 @@ class Blackjack(CardGame):
             raise CardGameError("No players")
 
         await self.output("New hand started.")
-        await self.output(f"Players: {", ".join([str(x) for x in self.players])}")
+        await self.output(f"Players: {', '.join([str(x) for x in self.players])}")
 
         for player in self.players:
             self.discard_all(player)

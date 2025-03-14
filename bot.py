@@ -75,6 +75,22 @@ class BlackjackCog(commands.Cog):
         self.game.output_func = self.game_channel.send
         await interaction.send("New game started.")
 
+    @nextcord.slash_command(name="status", guild_ids=guild_ids)
+    async def status(self, interaction: nextcord.Interaction):
+        """Arguably this is better in the Blackjack class."""
+        status_str = ""
+        if self.game:
+            status_str = "A game is in progress."
+            if self.game.hand_in_progress():
+                # It will never be the dealer's turn, since that is handled
+                # synchronously entirely in one tick() call.
+                status_str += f" It is {self.game.players[self.game.current_player_idx]}'s turn."
+            else:
+                status_str += " Waiting for the next hand to begin."
+        else:
+            status_str = "There is no game in progress."
+        await interaction.send(status_str)
+
     @tasks.loop(seconds=3.0)
     async def tick(self):
         if self.game:

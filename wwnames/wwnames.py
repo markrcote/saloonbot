@@ -4,19 +4,19 @@ import os
 
 class WildWestNames:
     def __init__(self):
-        self.male_names = self.load_names('M')
-        self.female_names = self.load_names('F')
-        self.surnames = self.load_names('S')
+        self.male_names = self.load_names("M")
+        self.female_names = self.load_names("F")
+        self.surnames = self.load_names("S")
 
     def load_names(self, name_type):
         curdir = os.path.dirname(os.path.abspath(__file__))
-        with open(f'{curdir}/names/{name_type}.txt') as inf:
+        with open(f"{curdir}/names/{name_type}.txt") as inf:
             return [name.strip() for name in inf.readlines()]
 
     def random_name(self, gender=None, number=1):
         if gender:
             gender = gender.upper()[0]
-            if gender not in 'MF':
+            if gender not in "MF":
                 gender = None
 
         names = []
@@ -24,13 +24,13 @@ class WildWestNames:
         for _ in range(0, number):
             cur_gender = gender
             if not cur_gender:
-                cur_gender = random.choice('MF')
+                cur_gender = random.choice("MF")
 
-            first_names = (self.female_names if cur_gender == 'F' else
+            first_names = (self.female_names if cur_gender == "F" else
                            self.male_names)
-            gender_symbol = '♀' if cur_gender == 'F' else '♂'
+            gender_symbol = "♀" if cur_gender == "F" else "♂"
 
-            names.append(f'{gender_symbol} {random.choice(first_names)} '
-                         f'{random.choice(self.surnames)}')
+            names.append(f"{gender_symbol} {random.choice(first_names)} "
+                         f"{random.choice(self.surnames)}")
 
-        return '\n'.join(names)
+        return "\n".join(names)

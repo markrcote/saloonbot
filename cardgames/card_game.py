@@ -11,26 +11,26 @@ class PlayerNotFoundError(CardGameError):
         self.playername = playername
 
     def __str__(self):
-        return f'Player {self.playername} not found'
+        return f"Player {self.playername} not found"
 
 
 class Card:
-    SUIT_EMOJIS = {'H': '♥', 'D': '♦', 'C': '♣', 'S': '♠'}
-    SUIT_STRINGS = {'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs',
-                    'S': 'Spades'}
-    SUIT_FACE_CARDS = {11: 'Jack', 12: 'Queen', 13: 'King', 14: 'Ace'}
+    SUIT_EMOJIS = {"H": "♥", "D": "♦", "C": "♣", "S": "♠"}
+    SUIT_STRINGS = {"H": "Hearts", "D": "Diamonds", "C": "Clubs",
+                    "S": "Spades"}
+    SUIT_FACE_CARDS = {11: "Jack", 12: "Queen", 13: "King", 14: "Ace"}
 
     def __init__(self, suit, value):
         self.suit = suit.upper()[0]
         self.value = value
 
         if self.suit not in self.SUIT_EMOJIS:
-            raise CardGameError(f'Invalid suit: {suit}')
+            raise CardGameError(f"Invalid suit: {suit}")
         if self.value not in range(2, 15):
-            raise CardGameError(f'Invalid value: {self.value}')
+            raise CardGameError(f"Invalid value: {self.value}")
 
     def __repr__(self):
-        return f'{self.valuestr()} of {self.SUIT_STRINGS[self.suit]}'
+        return f"{self.valuestr()} of {self.SUIT_STRINGS[self.suit]}"
 
     def __eq__(self, other):
         if isinstance(other, Card):
@@ -61,7 +61,7 @@ class Card:
             else self.SUIT_FACE_CARDS[self.value][:1 if short else None]
 
     def shortstr(self):
-        return f'{self.valuestr(short=True)}{self.SUIT_EMOJIS[self.suit]}'
+        return f"{self.valuestr(short=True)}{self.SUIT_EMOJIS[self.suit]}"
 
     def str(self, short=False):
         return self.shortstr() if short else str(self)
@@ -73,13 +73,13 @@ class Player:
         self.hand = []
 
     def __repr__(self):
-        return f'{self.name}'
+        return f"{self.name}"
 
     def __str__(self):
-        return f'{self.name}'
+        return f"{self.name}"
 
     def hand_str(self):
-        return ', '.join([card.str() for card in self.hand])
+        return ", ".join([card.str() for card in self.hand])
 
 
 class CardGame:
@@ -100,7 +100,7 @@ class CardGame:
     def create_deck(self):
         # Initialize self.deck to a random deck of cards
         self.deck = []
-        for suit in ['H', 'D', 'C', 'S']:
+        for suit in ["H", "D", "C", "S"]:
             for value in range(2, 15):
                 self.deck.append(Card(suit, value))
         self.shuffle()
@@ -117,7 +117,7 @@ class CardGame:
             player.hand.append(self.deck.pop())
 
     def discard(self, player, card):
-        # Discard a card from player's hand
+        # Discard a card from player"s hand
         if self.has_card(player, card):
             player.hand.remove(card)
             self.deck.append(card)

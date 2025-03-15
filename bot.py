@@ -6,6 +6,7 @@ import nextcord
 from nextcord.ext import commands, tasks
 
 from cardgames.blackjack import Blackjack
+from cardgames.card_game import Player, PlayerNotFoundError
 from wwnames.wwnames import WildWestNames
 
 debug_logging = os.getenv("WWNAMES_DEBUG")
@@ -53,6 +54,11 @@ class BlackjackCog(commands.Cog):
     def cog_unload(self):
         self.tick.stop()
 
+    async def _check_game(self, interaction):
+        if not self.game:
+            await interaction.send("No game currently in progress.")
+        return bool(self.game)
+
     @commands.Cog.listener()
     async def on_ready(self):
         logging.info("Blackjack cog initialized.")
@@ -72,13 +78,29 @@ class BlackjackCog(commands.Cog):
 
     @nextcord.slash_command(name="sitdown", guild_ids=guild_ids)
     async def sit_down(self, interaction: nextcord.Interaction):
-        if not self.game:
-            await interaction.send("No game currently in progress.")
+        if not await self._check_game(interaction):
             return
 
-        player_name = interaction.user.name
-        self.game.sit_down(self.game.get_player(player_name, add=True))
-        await interaction.send(f"{player_name} will join the next hand.")
+        player = Player(interaction.user.name)
+
+        await self.game.sit_down(player)
+        await interaction.send(f"{interaction.user.name} will join the next hand.")
+
+    @nextcord.slash_command(name="hit", guild_ids=guild_ids)
+    async def hit(self, interaction: nextcord.Interaction):
+        if not await self._check_game(interaction):
+            return
+
+        await self.game.hit(self.game.get_player(interaction.user.name))
+        await interaction.send(".")
+
+    @nextcord.slash_command(name="stand", guild_ids=guild_ids)
+    async def stand(self, interaction: nextcord.Interaction):
+        if not await self._check_game(interaction):
+            return
+
+        await self.game.stand(self.game.get_player(interaction.user.name))
+        await interaction.send(".")
 
     @nextcord.slash_command(name="status", guild_ids=guild_ids)
     async def status(self, interaction: nextcord.Interaction):

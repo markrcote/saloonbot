@@ -26,12 +26,6 @@ git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
 game = None
 
 
-def determine_player_name(interaction, player):
-    if player == "":
-        player = interaction.user.name
-    return player
-
-
 @bot.event
 async def on_ready():
     logging.info("Howdy folks.")
@@ -63,7 +57,7 @@ class BlackjackCog(commands.Cog):
     async def on_ready(self):
         logging.info("Blackjack cog initialized.")
 
-    @nextcord.slash_command(name="new_game", guild_ids=guild_ids)
+    @nextcord.slash_command(name="newgame", guild_ids=guild_ids)
     async def new_game(self, interaction: nextcord.Interaction):
         """Start a game if none in progress"""
         if self.game:
@@ -72,8 +66,19 @@ class BlackjackCog(commands.Cog):
 
         self.game_channel = interaction.channel
         self.game = Blackjack()
+        self.game.output_func_is_async = True
         self.game.output_func = self.game_channel.send
         await interaction.send("New game started.")
+
+    @nextcord.slash_command(name="sitdown", guild_ids=guild_ids)
+    async def sit_down(self, interaction: nextcord.Interaction):
+        if not self.game:
+            await interaction.send("No game currently in progress.")
+            return
+
+        player_name = interaction.user.name
+        self.game.sit_down(self.game.get_player(player_name, add=True))
+        await interaction.send(f"{player_name} will join the next hand.")
 
     @nextcord.slash_command(name="status", guild_ids=guild_ids)
     async def status(self, interaction: nextcord.Interaction):

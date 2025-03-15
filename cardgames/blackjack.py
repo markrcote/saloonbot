@@ -38,10 +38,14 @@ class Blackjack(CardGame):
         self.time_last_hand_ended = None
         self.time_last_ambient = time.time()
         self.output_func = None
+        self.output_func_is_async = False
 
     async def output(self, output):
         if self.output_func:
-            self.output_func(output)
+            if self.output_func_is_async:
+                await self.output_func(output)
+            else:
+                self.output_func(output)
             await asyncio.sleep(0.5)
 
     def _check_turn(self, player):

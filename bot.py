@@ -19,11 +19,13 @@ logging.basicConfig(level=log_level)
 guild_ids_env = os.getenv("DISCORD_GUILDS")
 guild_ids = [int(x) for x in guild_ids_env.split(",")] if guild_ids_env else None
 
-bot = commands.Bot()
 git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                          text=True).stdout.strip()
 
-game = None
+intents = nextcord.Intents.default()
+intents.message_content = True  # Enable message content
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 @bot.event
@@ -56,6 +58,31 @@ class BlackjackCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logging.info("Blackjack cog initialized.")
+
+    @commands.Cog.listener()
+    async def on_message(self, message: nextcord.Message):
+        if message.author == self.bot.user:
+            return
+
+        if not self.game:
+            return
+
+        player = None
+        for p in self.game.players:
+            if p.name == message.author.name:
+                player = p
+                break
+
+        if player is None:
+            return
+
+        if self.game.current_player_idx is None or self.game.players[self.game.current_player_idx] != player:
+            return
+
+        if message.content.startswith('hit'):
+            await self.game.hit(player)
+        elif message.content.startswith('stand'):
+            await self.game.stand(player)
 
     @nextcord.slash_command(name="newgame", guild_ids=guild_ids)
     async def new_game(self, interaction: nextcord.Interaction):

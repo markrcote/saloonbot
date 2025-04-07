@@ -12,4 +12,4 @@ multidict==6.1.0
 nextcord==3.0.1
 propcache==0.3.0
 typing_extensions==4.12.2
-yarl==1.18.3
+yarl==1.19.0

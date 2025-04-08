@@ -85,6 +85,7 @@ class Player:
 class CardGame:
     def __init__(self):
         self.deck = []
+        self.discards = []
         self.players = []
         self.create_deck()
 
@@ -100,30 +101,36 @@ class CardGame:
     def create_deck(self):
         # Initialize self.deck to a random deck of cards
         self.deck = []
+        self.discards = []
         for suit in ["H", "D", "C", "S"]:
             for value in range(2, 15):
                 self.deck.append(Card(suit, value))
         self.shuffle()
 
     def shuffle(self):
+        self.deck.extend(self.discards)
+        self.discards = []
         random.shuffle(self.deck)
 
     def has_card(self, player, card):
         return card in player.hand
 
     def deal(self, player, cards=1):
+        assert len(self.deck) + len(self.discards) >= cards
         # Deal cards to player
         for _ in range(cards):
+            if not self.deck:
+                self.shuffle()
             player.hand.append(self.deck.pop())
 
     def discard(self, player, card):
         # Discard a card from player"s hand
         if self.has_card(player, card):
             player.hand.remove(card)
-            self.deck.append(card)
+            self.discards.append(card)
 
     def discard_all(self, player):
         # Discard all cards from player
         for card in player.hand:
-            self.deck.append(card)
+            self.discards.append(card)
         player.hand = []

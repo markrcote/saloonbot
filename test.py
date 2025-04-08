@@ -74,9 +74,12 @@ class TestCardGame(unittest.TestCase):
         self.game.deal(self.game.players[0], 3)
         self.game.discard(self.game.players[0], Card("H", 7))
         self.assertEqual(len(self.game.players[0].hand), 2)
-        self.assertEqual(self.game.deck[-1].suit, "H")
-        self.assertEqual(self.game.deck[-1].value, 7)
+        self.assertEqual(self.game.discards[-1].suit, "H")
+        self.assertEqual(self.game.discards[-1].value, 7)
+        # test discarding nonexistent card (should this raise an exception?)
         self.game.discard(self.game.players[0], Card("D", 3))
+        self.assertEqual(len(self.game.deck), 3)
+        self.assertEqual(len(self.game.discards), 1)
         self.assertEqual(len(self.game.players[0].hand), 2)
 
     def test_discard_all(self):
@@ -86,11 +89,17 @@ class TestCardGame(unittest.TestCase):
         self.game.deal(self.game.players[1], 7)
         self.assertEqual(len(self.game.deck), 38)
         self.game.discard_all(self.game.players[0])
-        self.assertEqual(len(self.game.deck), 45)
+        self.assertEqual(len(self.game.deck), 38)
+        self.assertEqual(len(self.game.discards), 7)
         self.game.discard_all(self.game.players[1])
         # Check if each hand is empty
         for player in self.game.players:
             self.assertEqual(len(player.hand), 0)
+        self.assertEqual(len(self.game.deck), 38)
+        self.assertEqual(len(self.game.discards), 14)
+        self.game.shuffle()
+        self.assertEqual(len(self.game.deck), 52)
+        self.assertEqual(len(self.game.discards), 0)
 
     def test_compare(self):
         card1 = Card("H", 5)
@@ -128,12 +137,15 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.game.deck), 2)
 
     async def test_dealer_has_21(self):
-        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 14),
-                          Card("H", 10)]
+        self.game.deck = [Card("D", 4), Card("D", 5), Card("H", 3), Card("H", 2),
+                          Card("H", 14), Card("H", 10)]
         await self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)
         self.assertEqual(self.game.current_player_idx, None)
+        await self.game.new_hand()
+        self.assertEqual(self.game.get_score(self.game.dealer), 5)
+        self.assertEqual(self.game.get_score(self.game.players[0]), 9)
 
     async def test_hit(self):
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),

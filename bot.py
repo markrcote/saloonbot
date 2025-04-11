@@ -8,22 +8,22 @@ from nextcord.ext import commands, tasks
 from cardgames.blackjack import Blackjack
 from wwnames.wwnames import WildWestNames
 
-debug_logging = os.getenv("WWNAMES_DEBUG")
-if debug_logging:
-    log_level = logging.DEBUG
+DEBUG_LOGGING = os.getenv("WWNAMES_DEBUG")
+if DEBUG_LOGGING:
+    LOG_LEVEL = logging.DEBUG
 else:
-    log_level = logging.INFO
+    LOG_LEVEL = logging.INFO
 
-logging.basicConfig(level=log_level)
+logging.basicConfig(level=LOG_LEVEL)
 
 # This will intentionally cause the bot to fail fast with a KeyError exception
 # if the token is not found.
-discard_token = os.environ["DISCORD_TOKEN"]
+DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 
-guild_ids_env = os.getenv("DISCORD_GUILDS")
-guild_ids = [int(x) for x in guild_ids_env.split(",")] if guild_ids_env else None
+GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
+GUILD_IDS = [int(x) for x in GUILD_IDS_ENV.split(",")] if GUILD_IDS_ENV else None
 
-git_sha = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+GIT_SHA = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                          text=True).stdout.strip()
 
 intents = nextcord.Intents.default()
@@ -37,12 +37,12 @@ async def on_ready():
     logging.info("Howdy folks.")
 
 
-@bot.slash_command(description="Version", guild_ids=guild_ids)
+@bot.slash_command(description="Version", guild_ids=GUILD_IDS)
 async def wwname_version(interaction: nextcord.Interaction):
-    await interaction.send(git_sha)
+    await interaction.send(GIT_SHA)
 
 
-@bot.slash_command(description="Generate a name", guild_ids=guild_ids)
+@bot.slash_command(description="Generate a name", guild_ids=GUILD_IDS)
 async def wwname(interaction: nextcord.Interaction, gender: str = "",
                  number: int = 1):
     names = WildWestNames()
@@ -88,7 +88,7 @@ class BlackjackCog(commands.Cog):
         elif message.content.startswith('stand'):
             await self.game.stand(player)
 
-    @nextcord.slash_command(name="newgame", guild_ids=guild_ids)
+    @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(self, interaction: nextcord.Interaction):
         """Start a game if none in progress"""
         if self.game:
@@ -101,7 +101,7 @@ class BlackjackCog(commands.Cog):
         self.game.output_func = self.game_channel.send
         await interaction.send("New game started.")
 
-    @nextcord.slash_command(name="sitdown", guild_ids=guild_ids)
+    @nextcord.slash_command(name="sitdown", guild_ids=GUILD_IDS)
     async def sit_down(self, interaction: nextcord.Interaction):
         if not self.game:
             await interaction.send("No game currently in progress.")
@@ -111,7 +111,7 @@ class BlackjackCog(commands.Cog):
         self.game.sit_down(self.game.get_player(player_name, add=True))
         await interaction.send(f"{player_name} will join the next hand.")
 
-    @nextcord.slash_command(name="status", guild_ids=guild_ids)
+    @nextcord.slash_command(name="status", guild_ids=GUILD_IDS)
     async def status(self, interaction: nextcord.Interaction):
         """Arguably this is better in the Blackjack class."""
         status_str = ""
@@ -134,4 +134,4 @@ class BlackjackCog(commands.Cog):
 
 
 bot.add_cog(BlackjackCog(bot))
-bot.run(discard_token)
+bot.run(DISCORD_TOKEN)

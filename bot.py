@@ -16,6 +16,10 @@ else:
 
 logging.basicConfig(level=log_level)
 
+# This will intentionally cause the bot to fail fast with a KeyError exception
+# if the token is not found.
+discard_token = os.environ["DISCORD_TOKEN"]
+
 guild_ids_env = os.getenv("DISCORD_GUILDS")
 guild_ids = [int(x) for x in guild_ids_env.split(",")] if guild_ids_env else None
 
@@ -130,4 +134,4 @@ class BlackjackCog(commands.Cog):
 
 
 bot.add_cog(BlackjackCog(bot))
-bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(discard_token)

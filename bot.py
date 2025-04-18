@@ -23,8 +23,21 @@ DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
 GUILD_IDS = [int(x) for x in GUILD_IDS_ENV.split(",")] if GUILD_IDS_ENV else None
 
-GIT_SHA = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
-                         text=True).stdout.strip()
+VERSION = None
+
+try:
+    with open('.version') as version_file:
+        VERSION = version_file.readline().strip()
+except FileNotFoundError:
+    pass
+
+if not VERSION:
+    try:
+        VERSION = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                                 text=True).stdout.strip()
+    except FileNotFoundError:
+        pass
+
 
 intents = nextcord.Intents.default()
 intents.message_content = True  # Enable message content
@@ -39,7 +52,11 @@ async def on_ready():
 
 @bot.slash_command(description="Version", guild_ids=GUILD_IDS)
 async def wwname_version(interaction: nextcord.Interaction):
-    await interaction.send(GIT_SHA)
+    if VERSION:
+        response = VERSION
+    else:
+        response = "?"
+    await interaction.send(response)
 
 
 @bot.slash_command(description="Generate a name", guild_ids=GUILD_IDS)

@@ -8,7 +8,7 @@ from nextcord.ext import commands, tasks
 from cardgames.blackjack import Blackjack
 from wwnames.wwnames import WildWestNames
 
-DEBUG_LOGGING = os.getenv("WWNAMES_DEBUG")
+DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
     LOG_LEVEL = logging.DEBUG
 else:

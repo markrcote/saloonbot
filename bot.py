@@ -51,7 +51,7 @@ async def on_ready():
 
 
 @bot.slash_command(description="Version", guild_ids=GUILD_IDS)
-async def wwname_version(interaction: nextcord.Interaction):
+async def version(interaction: nextcord.Interaction):
     if VERSION:
         response = VERSION
     else:

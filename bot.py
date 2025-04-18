@@ -118,6 +118,16 @@ class BlackjackCog(commands.Cog):
         self.game.output_func = self.game_channel.send
         await interaction.send("New game started.")
 
+    @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS)
+    async def stop_game(self, interaction: nextcord.Interaction):
+        """Stop a game in progress."""
+        if not self.game:
+            await interaction.send("No game in progress.")
+            return
+
+        self.game = None
+        await interaction.send("Game stopped.")
+
     @nextcord.slash_command(name="sitdown", guild_ids=GUILD_IDS)
     async def sit_down(self, interaction: nextcord.Interaction):
         if not self.game:

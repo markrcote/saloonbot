@@ -6,7 +6,7 @@ async-timeout==5.0.1
 attrs==25.3.0
 audioop-lts==0.2.1
 charset-normalizer==3.4.1
-frozenlist==1.5.0
+frozenlist==1.6.0
 idna==3.10
 multidict==6.4.3
 nextcord==3.0.1

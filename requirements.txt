@@ -9,7 +9,7 @@ charset-normalizer==3.4.1
 frozenlist==1.5.0
 idna==3.10
 multidict==6.4.3
-nextcord==3.0.1
+nextcord==3.1.0
 propcache==0.3.1
 typing_extensions==4.13.2
 yarl==1.19.0

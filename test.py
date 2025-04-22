@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from cardgames.blackjack import Blackjack
-from cardgames.card_game import Card, CardGame, CardGameError, Player
+from cardgames.card_game import Card, CardGame, CardGameError
+from cardgames.player import Player
 
 from wwnames.wwnames import WildWestNames
 
@@ -130,8 +131,8 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(CardGameError):
             await self.game.new_hand()
 
-        await self.game.sit_down(Player("Player 1"))
-        await self.game.sit_down(Player("Player 2"))
+        self.game.sit_down(Player("Player 1"))
+        self.game.sit_down(Player("Player 2"))
         await self.game.new_hand()
         self.assertEqual(len(self.game.players), 2)
         self.assertEqual(len(self.game.deck), 2)
@@ -139,7 +140,7 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
     async def test_dealer_has_21(self):
         self.game.deck = [Card("D", 4), Card("D", 5), Card("H", 3), Card("H", 2),
                           Card("H", 14), Card("H", 10)]
-        await self.game.sit_down(Player("Player 1"))
+        self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)
         self.assertEqual(self.game.current_player_idx, None)
@@ -151,7 +152,7 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
 
-        await self.game.sit_down(Player("Player 1"))
+        self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(len(self.game.dealer.hand), 2)
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
@@ -166,10 +167,10 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.game.get_score(self.game.players[0]), 22)
 
     async def test_dealer_turn(self):
-        self.assertFalse(self.game.is_dealer_turn()) 
+        self.assertFalse(self.game.is_dealer_turn())
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
-        await self.game.sit_down(Player("Player 1"))
+        self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         await self.game.stand(self.game.players[0])
@@ -186,7 +187,7 @@ class TestBlackjack(unittest.IsolatedAsyncioTestCase):
         await self.game.tick()  # shouldn"t do anything
         self.game.time_last_hand_ended = None
 
-        await self.game.sit_down(Player("Player 1"))
+        self.game.sit_down(Player("Player 1"))
         await self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         await self.game.stand(self.game.players[0])

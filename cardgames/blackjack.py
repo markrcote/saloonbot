@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import time
-from .card_game import CardGame, CardGameError, Player
+from .card_game import CardGame, CardGameError
+from .player import Player
 
 
 class NotPlayerTurnError(CardGameError):
@@ -57,14 +58,13 @@ class Blackjack(CardGame):
         if self.current_player_idx is None:
             raise CardGameError("No game in progress")
 
-    async def sit_down(self, player):
+    def sit_down(self, player):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
 
         self.players_waiting.append(player)
-        await self.output(f"{player} sits down and will join the next game.")
 
-    async def stand_up(self, player):
+    def stand_up(self, player):
         if player not in self.players:
             raise CardGameError(f"{player} is not at the table")
 
@@ -72,8 +72,6 @@ class Blackjack(CardGame):
             self.players_waiting.remove(player)
         else:
             self.players.remove(player)
-
-        await self.output(f"{player} leaves the table.")
 
     async def new_hand(self):
         self.players.extend(self.players_waiting)

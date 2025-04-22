@@ -6,6 +6,7 @@ import nextcord
 from nextcord.ext import commands, tasks
 
 from cardgames.blackjack import Blackjack
+from cardgames.player import registry as player_registry
 from wwnames.wwnames import WildWestNames
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
@@ -88,11 +89,7 @@ class BlackjackCog(commands.Cog):
         if not self.game:
             return
 
-        player = None
-        for p in self.game.players:
-            if p.name == message.author.name:
-                player = p
-                break
+        player = player_registry.get_player(message.author.name)
 
         if player is None:
             return
@@ -135,8 +132,18 @@ class BlackjackCog(commands.Cog):
             return
 
         player_name = interaction.user.name
-        self.game.sit_down(self.game.get_player(player_name, add=True))
+        self.game.sit_down(player_registry.get_player(player_name, add=True))
         await interaction.send(f"{player_name} will join the next hand.")
+
+    @nextcord.slash_command(name="standup", guild_ids=GUILD_IDS)
+    async def stand_up(self, interaction: nextcord.Interaction):
+        if not self.game:
+            await interaction.send("No game currently in progress.")
+            return
+
+        player_name = interaction.user.name
+        self.game.stand_up(player_registry.get_player(player_name))
+        await interaction.send(f"{player_name} leaves the table.")
 
     @nextcord.slash_command(name="status", guild_ids=GUILD_IDS)
     async def status(self, interaction: nextcord.Interaction):

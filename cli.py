@@ -39,9 +39,9 @@ async def process_command(player, cmd, args):
             "  surrender",
         ])
     elif cmd == "standup":
-        await game.stand_up(player)
+        game.stand_up(player)
     elif cmd == "sitdown":
-        await game.sit_down(player)
+        game.sit_down(player)
     elif cmd == "hit":
         await game.hit(player)
     elif cmd == "stand":

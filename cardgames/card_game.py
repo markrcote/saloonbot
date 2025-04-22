@@ -1,17 +1,10 @@
 import random
 
+from .player import Player
+
 
 class CardGameError(Exception):
     pass
-
-
-class PlayerNotFoundError(CardGameError):
-
-    def __init__(self, playername):
-        self.playername = playername
-
-    def __str__(self):
-        return f"Player {self.playername} not found"
 
 
 class Card:
@@ -67,36 +60,12 @@ class Card:
         return self.shortstr() if short else str(self)
 
 
-class Player:
-    def __init__(self, name):
-        self.name = name
-        self.hand = []
-
-    def __repr__(self):
-        return f"{self.name}"
-
-    def __str__(self):
-        return f"{self.name}"
-
-    def hand_str(self):
-        return ", ".join([card.str() for card in self.hand])
-
-
 class CardGame:
     def __init__(self):
         self.deck = []
         self.discards = []
         self.players = []
         self.create_deck()
-
-    def get_player(self, name, add=False):
-        for player in self.players:
-            if player.name == name:
-                return player
-        if add:
-            self.players.append(Player(name))
-            return self.players[-1]
-        raise PlayerNotFoundError(name)
 
     def create_deck(self):
         # Initialize self.deck to a random deck of cards

@@ -11,5 +11,5 @@ idna==3.10
 multidict==6.4.4
 nextcord==3.1.0
 propcache==0.3.2
-typing_extensions==4.13.2
+typing_extensions==4.14.0
 yarl==1.20.0

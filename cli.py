@@ -1,98 +1,54 @@
 import asyncio
+import json
 import logging
 
 import aioconsole
-
-from cardgames.card_game import Player
-from cardgames.blackjack import Blackjack
+import redis.asyncio as redis
 
 logging.basicConfig(level=logging.INFO)
 
-game = Blackjack()
-game.output_func = print
+rcli = redis.Redis()
+player_name = None
+quit = False
 
-
-async def get_command(prompt):
-    line = await aioconsole.ainput("> " if prompt else "")
-    if line:
-        args = line.strip().split()
-        return (args[0], args[1:])
-    return (None, [])
-
-
-async def process_command(player, cmd, args):
-    output = []
-
-    if cmd == "quit":
-        raise KeyboardInterrupt
-    elif cmd == "help":
-        output.extend([
-            "Commands:",
-            "  quit",
-            "  help",
-            "  hit",
-            "  stand",
-            "  bet <amount>",
-            "  split",
-            "  double",
-            "  insurance",
-            "  surrender",
-        ])
-    elif cmd == "standup":
-        game.stand_up(player)
-    elif cmd == "sitdown":
-        game.sit_down(player)
-    elif cmd == "hit":
-        await game.hit(player)
-    elif cmd == "stand":
-        await game.stand(player)
-    elif cmd.startswith("bet"):
-        try:
-            amount = int(args[0])
-        except ValueError:
-            output.append("Invalid bet amount")
-        else:
-            game.bet(amount)
-    elif cmd == "split":
-        game.split(player)
-    elif cmd == "double":
-        game.double(player)
-    elif cmd == "insurance":
-        game.insurance(player)
-    elif cmd == "surrender":
-        game.surrender(player)
-    else:
-        output.append("Unknown command")
-    return output
-
-
-async def main():
-    await game.tick()
-
-    player_name = input("Enter your name: ")
-    player = Player(player_name)
-    print(f"Welcome {player.name}")
-
-    quit = False
-    timed_out = False
-
+async def process_commands():
+    global quit
     while not quit:
-        cmd = None
-        args = []
-
-        try:
-            cmd, args = await asyncio.wait_for(get_command(prompt=not timed_out), timeout=1)
-            timed_out = False
-        except asyncio.TimeoutError:
-            timed_out = True
-
-        await game.tick()
-
-        if cmd:
+        line = await aioconsole.ainput("> ")
+        if line:
+            args = line.strip().split()
+            cmd = args[0]
             if cmd == "quit":
                 quit = True
             else:
-                await process_command(player, cmd, args)
+                message = {
+                    "player": player_name,
+                    "event_type": "player_action",
+                    "action": cmd
+                }
+                await rcli.publish("blackjack", json.dumps(message))
+
+async def get_updates():
+    global quit
+    pubsub = rcli.pubsub()
+    await pubsub.subscribe("game_updates_0")
+    while not quit:
+        message = await pubsub.get_message(ignore_subscribe_messages=True,
+                                           timeout=2.0)
+        if not message:
+            continue
+        data = json.loads(message['data'])
+        print(data['text'])
+
+
+async def main():
+    global player_name
+    player_name = input("Enter your name: ")
+    print(f"Welcome {player_name}")
+
+    async with asyncio.TaskGroup() as tg:
+        cmd_task = tg.create_task(process_commands())
+        update_task = tg.create_task(get_updates())
 
 
 if __name__ == "__main__":

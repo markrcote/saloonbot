@@ -1,4 +1,5 @@
-import logging
+imporfrom cardgames.player import registry as player_registry
+t logging
 import os
 import subprocess
 
@@ -6,7 +7,6 @@ import nextcord
 from nextcord.ext import commands, tasks
 
 from cardgames.blackjack import Blackjack
-from cardgames.player import registry as player_registry
 from wwnames.wwnames import WildWestNames
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")

@@ -1,7 +1,7 @@
 import logging
 import os
 
-from cardgames.blackjack_engine import Blackjack
+from cardgames.casino import Casino
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
@@ -12,8 +12,8 @@ else:
 logging.basicConfig(level=LOG_LEVEL)
 
 def main():
-    blackjack_game = Blackjack()
-    blackjack_game.listen()
+    casino = Casino()
+    casino.listen()
 
 
 if __name__ == "__main__":

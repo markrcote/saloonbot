@@ -2,8 +2,6 @@ import json
 import logging
 import time
 
-import redis
-
 from .card_game import CardGame, CardGameError
 from .player import Player, PlayerNotFoundError, registry as player_registry
 
@@ -28,10 +26,10 @@ class Blackjack(CardGame):
     PERIOD_LAST_AMBIENT = 10
     TIME_BETWEEN_HANDS = 5
 
-    def __init__(self, game_id=0):
+    def __init__(self, game_id, casino):
         super().__init__()
         self.game_id = game_id
-        self.redis = redis.Redis()
+        self.casino = casino
         self.dealer = Dealer()
         self.players_waiting = []
 
@@ -45,10 +43,7 @@ class Blackjack(CardGame):
         self.time_last_ambient = time.time()
 
     def output(self, output):
-        self.redis.publish(
-            f"game_updates_{self.game_id}",
-            json.dumps({'text': output})
-        )
+        self.casino.game_output(self.game_id, output)
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -211,30 +206,20 @@ class Blackjack(CardGame):
         self.output("Dealer stands.")
         self.end_hand()
 
-    def listen(self):
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe("blackjack")
-        while True:
-            message = pubsub.get_message(ignore_subscribe_messages=True,
-                                         timeout=2.0)
-            if message:
-                data = json.loads(message['data'])
+    def action(self, data):
+        if data['event_type'] == 'player_action':
+            # Eventually we'll want to manage players properly with a datastore
+            # but for now always add them.
+            player = player_registry.get_player(data['player'], add=True)
 
-                if data['event_type'] == 'player_action':
-                    # Eventually we'll want to manage players properly with a datastore
-                    # but for now always add them.
-                    player = player_registry.get_player(data['player'], add=True)
-
-                    if data['action'] == 'join':
-                        self.join(player)
-                    elif data['action'] == 'leave':
-                        self.leave(player)
-                    elif data['action'] == 'hit':
-                        self.hit(player)
-                    elif data['action'] == 'stand':
-                        self.stand(player)
-
-            self.tick()
+            if data['action'] == 'join':
+                self.join(player)
+            elif data['action'] == 'leave':
+                self.leave(player)
+            elif data['action'] == 'hit':
+                self.hit(player)
+            elif data['action'] == 'stand':
+                self.stand(player)
 
     def tick(self):
         logging.debug("tick")

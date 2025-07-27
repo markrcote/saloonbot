@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import patch
 
 from cardgames.blackjack import Blackjack
-from cardgames.casino import Casino
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.player import Player
 
@@ -120,8 +119,7 @@ class TestCardGame(unittest.TestCase):
 
 class TestBlackjack(unittest.TestCase):
     def setUp(self):
-        self.casino = Casino()
-        self.game = self.casino.games[self.casino.new_game()]
+        self.game = Blackjack(game_id="test_game", casino=None)
 
     def test_new_hand(self):
         # Set up a mock deck to ensure that the dealer never has 21.

@@ -27,6 +27,12 @@ class Blackjack(CardGame):
     TIME_BETWEEN_HANDS = 5
 
     def __init__(self, game_id, casino):
+        """ Initialize a new Blackjack game.
+        :param game_id: Unique identifier for the game.
+        :param casino: The casino managing this game.
+
+        If casino is None, this game will not output to a casino.
+        """
         super().__init__()
         self.game_id = game_id
         self.casino = casino
@@ -43,7 +49,8 @@ class Blackjack(CardGame):
         self.time_last_ambient = time.time()
 
     def output(self, output):
-        self.casino.game_output(self.game_id, output)
+        if self.casino:
+            self.casino.game_output(self.game_id, output)
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:

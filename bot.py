@@ -8,7 +8,9 @@ import nextcord
 import redis.asyncio as redis
 from nextcord.ext import commands, tasks
 
+from cardgames import aws
 from wwnames.wwnames import WildWestNames
+
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
@@ -21,11 +23,16 @@ REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=LOG_LEVEL)
 
-# This will intentionally cause the bot to fail fast with a KeyError exception
-# if the token is not found.
-DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+if aws.is_ec2_instance():
+    secret = json.loads(aws.get_secret())
+    DISCORD_TOKEN = secret["DISCORD_TOKEN"]
+    GUILD_IDS_ENV = secret["DISCORD_GUILDS"]
+else:
+    # This will intentionally cause the bot to fail fast with a KeyError exception
+    # if the token is not found.
+    DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+    GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
 
-GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
 GUILD_IDS = [int(x) for x in GUILD_IDS_ENV.split(",")] if GUILD_IDS_ENV else None
 
 VERSION = None
@@ -130,8 +137,8 @@ class BlackjackCog(commands.Cog):
         await self.redis.publish("casino", json.dumps(message))
         await interaction.send("Starting new game...")
 
-    @nextcord.slash_command(name="join", guild_ids=GUILD_IDS)
-    async def join(self, interaction: nextcord.Interaction):
+    @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
+    async def join_game(self, interaction: nextcord.Interaction):
         if not self.game_id:
             await interaction.send("No game currently in progress.")
             return
@@ -139,8 +146,8 @@ class BlackjackCog(commands.Cog):
         await self.send_command(interaction.user.name, "join")
         await interaction.send("Joining game...")
 
-    @nextcord.slash_command(name="leave", guild_ids=GUILD_IDS)
-    async def stand_up(self, interaction: nextcord.Interaction):
+    @nextcord.slash_command(name="leavegame", guild_ids=GUILD_IDS)
+    async def leave_game(self, interaction: nextcord.Interaction):
         if not self.game_id:
             await interaction.send("No game currently in progress.")
             return

@@ -1,12 +1,13 @@
+import json
 import logging
 import os
 import subprocess
+import uuid
 
 import nextcord
+import redis.asyncio as redis
 from nextcord.ext import commands, tasks
 
-from cardgames.blackjack import Blackjack
-from cardgames.player import registry as player_registry
 from wwnames.wwnames import WildWestNames
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
@@ -14,6 +15,9 @@ if DEBUG_LOGGING:
     LOG_LEVEL = logging.DEBUG
 else:
     LOG_LEVEL = logging.INFO
+
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=LOG_LEVEL)
 
@@ -70,15 +74,31 @@ async def wwname(interaction: nextcord.Interaction, gender: str = "",
 class BlackjackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.game = None
+        self.redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
+        self.pubsub = self.redis.pubsub()
+        self.game_request_id = None
+        self.game_id = None
         self.game_channel = None
-        self.tick.start()
 
     def cog_unload(self):
-        self.tick.stop()
+        self.listen.stop()
+
+    def game_topic(self):
+        return f"game_updates_{self.game_id}"
+
+    async def send_command(self, player_name, cmd):
+        message = {
+            "player": player_name,
+            "event_type": "player_action",
+            "game_id" : self.game_id,
+            "action": cmd
+        }
+        await self.redis.publish("casino", json.dumps(message))
 
     @commands.Cog.listener()
     async def on_ready(self):
+        await self.pubsub.subscribe("casino_update")
+        self.listen.start()
         logging.info("Blackjack cog initialized.")
 
     @commands.Cog.listener()
@@ -86,85 +106,84 @@ class BlackjackCog(commands.Cog):
         if message.author == self.bot.user:
             return
 
-        if not self.game:
+        if not self.game_id:
             return
 
-        player = player_registry.get_player(message.author.name)
-
-        if player is None:
-            return
-
-        if self.game.current_player_idx is None or self.game.players[self.game.current_player_idx] != player:
-            return
-
-        if message.content.startswith('hit'):
-            await self.game.hit(player)
-        elif message.content.startswith('stand'):
-            await self.game.stand(player)
+        command = message.content.split()[0]
+        await self.send_command(message.author.name, command)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(self, interaction: nextcord.Interaction):
         """Start a game if none in progress"""
-        if self.game:
+        if self.game_id:
             await interaction.send("A game is already in progress.")
             return
 
+        self.game_request_id = str(uuid.uuid4())
         self.game_channel = interaction.channel
-        self.game = Blackjack()
-        self.game.output_func_is_async = True
-        self.game.output_func = self.game_channel.send
-        await interaction.send("New game started.")
 
-    @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS)
-    async def stop_game(self, interaction: nextcord.Interaction):
-        """Stop a game in progress."""
-        if not self.game:
-            await interaction.send("No game in progress.")
-            return
+        message = {
+            'event_type': 'casino_action',
+            'action': 'new_game',
+            'request_id': self.game_request_id
+        }
+        await self.redis.publish("casino", json.dumps(message))
+        await interaction.send("Starting new game...")
 
-        self.game = None
-        await interaction.send("Game stopped.")
-
-    @nextcord.slash_command(name="sitdown", guild_ids=GUILD_IDS)
-    async def sit_down(self, interaction: nextcord.Interaction):
-        if not self.game:
+    @nextcord.slash_command(name="join", guild_ids=GUILD_IDS)
+    async def join(self, interaction: nextcord.Interaction):
+        if not self.game_id:
             await interaction.send("No game currently in progress.")
             return
 
-        player_name = interaction.user.name
-        self.game.sit_down(player_registry.get_player(player_name, add=True))
-        await interaction.send(f"{player_name} will join the next hand.")
+        await self.send_command(interaction.user.name, "join")
+        await interaction.send("Joining game...")
 
-    @nextcord.slash_command(name="standup", guild_ids=GUILD_IDS)
+    @nextcord.slash_command(name="leave", guild_ids=GUILD_IDS)
     async def stand_up(self, interaction: nextcord.Interaction):
-        if not self.game:
+        if not self.game_id:
             await interaction.send("No game currently in progress.")
             return
 
-        player_name = interaction.user.name
-        self.game.stand_up(player_registry.get_player(player_name))
-        await interaction.send(f"{player_name} leaves the table.")
-
-    @nextcord.slash_command(name="status", guild_ids=GUILD_IDS)
-    async def status(self, interaction: nextcord.Interaction):
-        """Arguably this is better in the Blackjack class."""
-        status_str = ""
-        if self.game:
-            status_str = "A game is in progress."
-            if self.game.hand_in_progress():
-                # It will never be the dealer's turn, since that is handled
-                # synchronously entirely in one tick() call.
-                status_str += f" It is {self.game.players[self.game.current_player_idx]}'s turn."
-            else:
-                status_str += " Waiting for the next hand to begin."
-        else:
-            status_str = "There is no game in progress."
-        await interaction.send(status_str)
+        await self.send_command(interaction.user.name, "leave")
+        await interaction.send("Leaving game...")
 
     @tasks.loop(seconds=3.0)
-    async def tick(self):
-        if self.game:
-            await self.game.tick()
+    async def listen(self):
+        message = await self.pubsub.get_message(ignore_subscribe_messages=True,
+                                                timeout=3.0)
+
+        if not message:
+            return
+
+        await self.process_message(message)
+
+        # drain messages
+        while True:
+            message = await self.pubsub.get_message(ignore_subscribe_messages=True,
+                                                    timeout=0)
+            if not message:
+                break
+            await self.process_message(message)
+
+    async def process_message(self, message):
+        logging.debug(f"Got message: {message}")
+
+        data = json.loads(message['data'])
+        topic = message['channel'].decode()
+
+        if topic == "casino_update":
+            if data.get('event_type') == 'new_game' and self.game_id is None and data.get('request_id') == self.game_request_id:
+                self.game_id = data.get('game_id')
+                await self.game_channel.send(f"Game created.")
+                logging.debug(f"Game created: {self.game_id}")
+                await self.pubsub.subscribe(self.game_topic())
+        elif topic == self.game_topic():
+            logging.debug("Got game message")
+            await self.game_channel.send(data["text"])
+        else:
+            logging.debug(f"Got unknown message from channel {message['channel']}")
+            logging.debug(f"Game topic is {self.game_topic()}")
 
 
 bot.add_cog(BlackjackCog(bot))

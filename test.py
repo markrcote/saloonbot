@@ -1,9 +1,9 @@
-import asyncio
 import time
 import unittest
 from unittest.mock import patch
 
 from cardgames.blackjack import Blackjack
+from cardgames.casino import Casino
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.player import Player
 
@@ -118,83 +118,84 @@ class TestCardGame(unittest.TestCase):
         self.assertEqual("2♦", Card("D", 2).str(short=True))
 
 
-class TestBlackjack(unittest.IsolatedAsyncioTestCase):
+class TestBlackjack(unittest.TestCase):
     def setUp(self):
-        self.game = Blackjack()
+        self.casino = Casino()
+        self.game = self.casino.games[self.casino.new_game()]
 
-    async def test_new_hand(self):
+    def test_new_hand(self):
         # Set up a mock deck to ensure that the dealer never has 21.
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 14),
                           Card("H", 10)]
 
         # Verify that an error is raised when no players are present
         with self.assertRaises(CardGameError):
-            await self.game.new_hand()
+            self.game.new_hand()
 
-        self.game.sit_down(Player("Player 1"))
-        self.game.sit_down(Player("Player 2"))
-        await self.game.new_hand()
+        self.game.join(Player("Player 1"))
+        self.game.join(Player("Player 2"))
+        self.game.new_hand()
         self.assertEqual(len(self.game.players), 2)
         self.assertEqual(len(self.game.deck), 2)
 
-    async def test_dealer_has_21(self):
+    def test_dealer_has_21(self):
         self.game.deck = [Card("D", 4), Card("D", 5), Card("H", 3), Card("H", 2),
                           Card("H", 14), Card("H", 10)]
-        self.game.sit_down(Player("Player 1"))
-        await self.game.new_hand()
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)
         self.assertEqual(self.game.current_player_idx, None)
-        await self.game.new_hand()
+        self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 5)
         self.assertEqual(self.game.get_score(self.game.players[0]), 9)
 
-    async def test_hit(self):
+    def test_hit(self):
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
 
-        self.game.sit_down(Player("Player 1"))
-        await self.game.new_hand()
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
         self.assertEqual(len(self.game.dealer.hand), 2)
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.assertEqual(len(self.game.players[0].hand), 2)
         self.assertEqual(self.game.get_score(self.game.players[0]), 9)
-        await self.game.hit(self.game.players[0])
+        self.game.hit(self.game.players[0])
         self.assertEqual(len(self.game.players[0].hand), 3)
         self.assertEqual(self.game.get_score(self.game.players[0]), 12)
         self.assertEqual(len(self.game.deck), 1)  # from the mock deck
         self.assertEqual(self.game.current_player_idx, 0)
-        await self.game.hit(self.game.players[0])
+        self.game.hit(self.game.players[0])
         self.assertEqual(self.game.get_score(self.game.players[0]), 22)
 
-    async def test_dealer_turn(self):
+    def test_dealer_turn(self):
         self.assertFalse(self.game.is_dealer_turn())
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
-        self.game.sit_down(Player("Player 1"))
-        await self.game.new_hand()
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
-        await self.game.stand(self.game.players[0])
+        self.game.stand(self.game.players[0])
         with self.assertRaises(CardGameError):
-            await self.game.next_turn()
-        await self.game.dealer_turn()
+            self.game.next_turn()
+        self.game.dealer_turn()
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
 
-    async def test_tick(self):
+    def test_tick(self):
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
         self.game.time_last_hand_ended = time.time() - self.game.TIME_BETWEEN_HANDS
-        await self.game.tick()  # shouldn"t do anything
+        self.game.tick()  # shouldn"t do anything
         self.game.time_last_hand_ended = None
 
-        self.game.sit_down(Player("Player 1"))
-        await self.game.new_hand()
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
-        await self.game.stand(self.game.players[0])
-        await self.game.tick()
+        self.game.stand(self.game.players[0])
+        self.game.tick()
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
-        await self.game.tick()
+        self.game.tick()
 
 
 if __name__ == "__main__":

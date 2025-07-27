@@ -4,7 +4,7 @@ import uuid
 
 import redis
 
-from .blackjack_engine import Blackjack
+from .blackjack import Blackjack
 
 
 class Casino:

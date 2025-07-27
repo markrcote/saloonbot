@@ -16,6 +16,9 @@ if DEBUG_LOGGING:
 else:
     LOG_LEVEL = logging.INFO
 
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", 6379)
+
 logging.basicConfig(level=LOG_LEVEL)
 
 # This will intentionally cause the bot to fail fast with a KeyError exception
@@ -71,7 +74,7 @@ async def wwname(interaction: nextcord.Interaction, gender: str = "",
 class BlackjackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.redis = redis.Redis()
+        self.redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
         self.pubsub = self.redis.pubsub()
         self.game_request_id = None
         self.game_id = None

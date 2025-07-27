@@ -9,10 +9,13 @@ if DEBUG_LOGGING:
 else:
     LOG_LEVEL = logging.INFO
 
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", 6379)
+
 logging.basicConfig(level=LOG_LEVEL)
 
 def main():
-    casino = Casino()
+    casino = Casino(REDIS_HOST, REDIS_PORT)
     casino.listen()
 
 

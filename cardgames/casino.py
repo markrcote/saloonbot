@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import time
 import uuid
 
 import redis
@@ -8,9 +10,9 @@ from .blackjack import Blackjack
 
 
 class Casino:
-    def __init__(self):
+    def __init__(self, redis_host, redis_port):
         self.games = {}
-        self.redis = redis.Redis()
+        self.redis = redis.Redis(host=redis_host, port=redis_port)
 
     def new_game(self):
         while True:
@@ -32,7 +34,19 @@ class Casino:
 
     def listen(self):
         pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino")
+        backoff = None
+        while True:
+            try:
+                pubsub.subscribe("casino")
+                break
+            except redis.exceptions.ConnectionError as e:
+                if backoff is None:
+                    backoff = 1
+                else:
+                    backoff *= 2
+                logging.info(f"Couldn't connect to redis; sleeping for {backoff} seconds...")
+                time.sleep(backoff)
+
         logging.info("Casino online.")
 
         while True:

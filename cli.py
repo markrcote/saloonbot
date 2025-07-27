@@ -1,17 +1,21 @@
 import asyncio
 import json
 import logging
+import os
 import uuid
 
 import aioconsole
 import redis.asyncio as redis
+
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=logging.INFO)
 
 
 class CasinoCli:
     def __init__(self):
-        self.redis = redis.Redis()
+        self.redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
         self.pubsub = self.redis.pubsub()
         self.player_name = None
         self.game_id = None
@@ -29,7 +33,7 @@ class CasinoCli:
                     message = {
                         "player": self.player_name,
                         "event_type": "player_action",
-                        "game_id" : self.game_id,
+                        "game_id": self.game_id,
                         "action": cmd
                     }
                     await self.redis.publish("casino", json.dumps(message))
@@ -73,8 +77,8 @@ class CasinoCli:
         print(f"Game created: {self.game_id}")
 
         async with asyncio.TaskGroup() as tg:
-            cmd_task = tg.create_task(self.process_commands())
-            update_task = tg.create_task(self.get_updates())
+            tg.create_task(self.process_commands())
+            tg.create_task(self.get_updates())
 
 
 if __name__ == "__main__":

@@ -3,9 +3,11 @@ import logging
 import os
 import subprocess
 import uuid
+import asyncio
 
 import nextcord
-import redis.asyncio as redis
+import redis.asyncio
+import redis.exceptions
 from nextcord.ext import commands, tasks
 
 from cardgames import aws
@@ -82,14 +84,18 @@ async def wwname(interaction: nextcord.Interaction, gender: str = "",
 class BlackjackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
+        self.redis = redis.asyncio.Redis(host=REDIS_HOST, port=REDIS_PORT)
         self.pubsub = self.redis.pubsub()
         self.game_request_id = None
         self.game_id = None
         self.game_channel = None
+        self.subscribed = asyncio.Event()
+        self.subscribe_task = None
 
     def cog_unload(self):
         self.listen.stop()
+        if self.subscribe_task:
+            self.subscribe_task.cancel()
 
     def game_topic(self):
         return f"game_updates_{self.game_id}"
@@ -101,12 +107,31 @@ class BlackjackCog(commands.Cog):
             "game_id" : self.game_id,
             "action": cmd
         }
-        await self.redis.publish("casino", json.dumps(message))
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error: {e}")
+
+    async def try_subscribe(self):
+        backoff = 2
+        while True:
+            try:
+                await self.pubsub.subscribe("casino_update")
+                self.subscribed.set()
+                logging.info("Subscribed to casino_update.")
+                return
+            except redis.exceptions.ConnectionError as e:
+                self.subscribed.clear()
+                logging.warning(f"Failed to subscribe to casino_update: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)  # Exponential backoff up to 60s
 
     @commands.Cog.listener()
     async def on_ready(self):
-        await self.pubsub.subscribe("casino_update")
-        self.listen.start()
+        if self.subscribe_task is None or self.subscribe_task.done():
+            self.subscribe_task = asyncio.create_task(self.try_subscribe())
+        if not self.listen.is_running():
+            self.listen.start()
         logging.info("Blackjack cog initialized.")
 
     @commands.Cog.listener()
@@ -135,8 +160,12 @@ class BlackjackCog(commands.Cog):
             'action': 'new_game',
             'request_id': self.game_request_id
         }
-        await self.redis.publish("casino", json.dumps(message))
-        await interaction.send("Starting new game...")
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+            await interaction.send("Starting new game...")
+        except redis.exceptions.ConnectionError as e:
+            logging.error(f"Redis publish error: {e}")
+            await interaction.send("Failed to communicate with game server.")
 
     @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
     async def join_game(self, interaction: nextcord.Interaction):
@@ -158,21 +187,24 @@ class BlackjackCog(commands.Cog):
 
     @tasks.loop(seconds=3.0)
     async def listen(self):
-        message = await self.pubsub.get_message(ignore_subscribe_messages=True,
-                                                timeout=3.0)
-
-        if not message:
-            return
-
-        await self.process_message(message)
-
-        # drain messages
-        while True:
-            message = await self.pubsub.get_message(ignore_subscribe_messages=True,
-                                                    timeout=0)
-            if not message:
-                break
-            await self.process_message(message)
+        # Wait until subscription is live
+        await self.subscribed.wait()
+        try:
+            message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=3.0)
+            if message:
+                await self.process_message(message)
+            # drain messages
+            while True:
+                message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
+                if not message:
+                    break
+                await self.process_message(message)
+        except Exception as e:
+            logging.error(f"Redis pubsub error: {e}")
+            self.subscribed.clear()
+            # Start a background resubscribe loop
+            if self.subscribe_task is None or self.subscribe_task.done():
+                self.subscribe_task = asyncio.create_task(self.try_subscribe())
 
     async def process_message(self, message):
         logging.debug(f"Got message: {message}")
@@ -185,7 +217,10 @@ class BlackjackCog(commands.Cog):
                 self.game_id = data.get('game_id')
                 await self.game_channel.send(f"Game created.")
                 logging.debug(f"Game created: {self.game_id}")
-                await self.pubsub.subscribe(self.game_topic())
+                try:
+                    await self.pubsub.subscribe(self.game_topic())
+                except Exception as e:
+                    logging.error(f"Failed to subscribe to game topic: {e}")
         elif topic == self.game_topic():
             logging.debug("Got game message")
             await self.game_channel.send(data["text"])

@@ -23,9 +23,11 @@ def is_ec2_instance():
         return False
 
 
-def get_secret():
-
-    secret_name = "saloonbot/discord"
+def get_secret(dev_discord_server):
+    if dev_discord_server:
+        secret_name = "saloonbot/discord-dev"
+    else:
+        secret_name = "saloonbot/discord"
     region_name = "ca-central-1"
 
     # Create a Secrets Manager client

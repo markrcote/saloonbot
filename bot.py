@@ -12,6 +12,7 @@ from cardgames import aws
 from wwnames.wwnames import WildWestNames
 
 
+DEV_DISCORD_SERVER = os.getenv("SALOONBOT_DEV_DISCORD_SERVER")
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
     LOG_LEVEL = logging.DEBUG
@@ -24,7 +25,7 @@ REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 logging.basicConfig(level=LOG_LEVEL)
 
 if aws.is_ec2_instance():
-    secret = json.loads(aws.get_secret())
+    secret = json.loads(aws.get_secret(DEV_DISCORD_SERVER))
     DISCORD_TOKEN = secret["DISCORD_TOKEN"]
     GUILD_IDS_ENV = secret["DISCORD_GUILDS"]
 else:

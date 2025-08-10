@@ -1,11 +1,24 @@
 services:
-  saloonbot:
+  saloonbot-server:
     build:
       context: .
       dockerfile: Dockerfile.server
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+    env_file:
+      - .env
+    depends_on:
+      - redis
+  saloonbot-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env
     depends_on:
       - redis
   redis:

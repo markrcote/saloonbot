@@ -119,12 +119,12 @@ class BlackjackCog(commands.Cog):
             logging.info("Trying to subscribe to casino_update...")
             try:
                 await self.pubsub.subscribe("casino_update")
-                self.subscribed.set()
                 logging.info("Subscribed to casino_update.")
-                return
+                self.subscribed.set()
+                break
             except redis.exceptions.ConnectionError as e:
-                self.subscribed.clear()
                 logging.warning(f"Failed to subscribe to casino_update: {e}")
+                self.subscribed.clear()
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)  # Exponential backoff up to 60s
 
@@ -202,6 +202,8 @@ class BlackjackCog(commands.Cog):
 
         # Wait until subscription is live
         await self.subscribed.wait()
+
+        logging.debug("Lock acquired.")
 
         try:
             logging.debug("Getting message...")

@@ -13,7 +13,6 @@ from nextcord.ext import commands, tasks
 from cardgames import aws
 from wwnames.wwnames import WildWestNames
 
-
 DEV_DISCORD_SERVER = os.getenv("SALOONBOT_DEV_DISCORD_SERVER")
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
@@ -104,17 +103,20 @@ class BlackjackCog(commands.Cog):
         message = {
             "player": player_name,
             "event_type": "player_action",
-            "game_id" : self.game_id,
+            "game_id": self.game_id,
             "action": cmd
         }
+        logging.debug(f"Sending message: {message}")
         try:
             await self.redis.publish("casino", json.dumps(message))
         except Exception as e:
             logging.error(f"Redis publish error: {e}")
+        logging.debug("Message sent.")
 
     async def try_subscribe(self):
         backoff = 2
         while True:
+            logging.info("Trying to subscribe to casino_update...")
             try:
                 await self.pubsub.subscribe("casino_update")
                 self.subscribed.set()
@@ -128,6 +130,7 @@ class BlackjackCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
+        logging.debug("Initializing Blackjack cog...")
         if self.subscribe_task is None or self.subscribe_task.done():
             self.subscribe_task = asyncio.create_task(self.try_subscribe())
         if not self.listen.is_running():
@@ -148,6 +151,8 @@ class BlackjackCog(commands.Cog):
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(self, interaction: nextcord.Interaction):
         """Start a game if none in progress"""
+        logging.debug("New game command received")
+
         if self.game_id:
             await interaction.send("A game is already in progress.")
             return
@@ -160,8 +165,11 @@ class BlackjackCog(commands.Cog):
             'action': 'new_game',
             'request_id': self.game_request_id
         }
+
         try:
+            logging.debug(f"Sending new_game message: {message}")
             await self.redis.publish("casino", json.dumps(message))
+            logging.debug("Message sent.")
             await interaction.send("Starting new game...")
         except redis.exceptions.ConnectionError as e:
             logging.error(f"Redis publish error: {e}")
@@ -169,6 +177,7 @@ class BlackjackCog(commands.Cog):
 
     @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
     async def join_game(self, interaction: nextcord.Interaction):
+        logging.debug("Join game command received")
         if not self.game_id:
             await interaction.send("No game currently in progress.")
             return
@@ -178,6 +187,7 @@ class BlackjackCog(commands.Cog):
 
     @nextcord.slash_command(name="leavegame", guild_ids=GUILD_IDS)
     async def leave_game(self, interaction: nextcord.Interaction):
+        logging.debug("Leave game command received")
         if not self.game_id:
             await interaction.send("No game currently in progress.")
             return
@@ -187,13 +197,22 @@ class BlackjackCog(commands.Cog):
 
     @tasks.loop(seconds=3.0)
     async def listen(self):
+        logging.debug("Listening for messages...")
+        logging.debug("Waiting on lock...")
+
         # Wait until subscription is live
         await self.subscribed.wait()
+
         try:
+            logging.debug("Getting message...")
             message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=3.0)
+            logging.debug("get_message returned.")
+
             if message:
                 await self.process_message(message)
+
             # drain messages
+
             while True:
                 message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
                 if not message:

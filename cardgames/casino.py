@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import time
 import uuid
 
@@ -12,14 +11,18 @@ from .blackjack import Blackjack
 class Casino:
     def __init__(self, redis_host, redis_port):
         self.games = {}
+        logging.debug("Setting up redis...")
         self.redis = redis.Redis(host=redis_host, port=redis_port)
+        logging.debug("Redis set up.")
 
     def new_game(self):
+        logging.debug("Creating new game...")
         while True:
             game_id = str(uuid.uuid4())
             if game_id not in self.games.keys():
                 break
         self.games[game_id] = Blackjack(game_id, self)
+        logging.debug(f"Game created: {game_id}")
         return game_id
 
     def publish_event(self, event_type, data):
@@ -33,13 +36,18 @@ class Casino:
         )
 
     def listen(self):
+        logging.debug("Creating pubsub...")
         pubsub = self.redis.pubsub()
+        logging.debug("Pubsub created.")
+
         backoff = None
+
         while True:
             try:
+                logging.debug("Subscribing to casino...")
                 pubsub.subscribe("casino")
                 break
-            except redis.exceptions.ConnectionError as e:
+            except redis.exceptions.ConnectionError:
                 if backoff is None:
                     backoff = 1
                 else:
@@ -50,9 +58,14 @@ class Casino:
         logging.info("Casino online.")
 
         while True:
+            logging.debug("Waiting for message...")
             message = pubsub.get_message(ignore_subscribe_messages=True,
                                          timeout=2.0)
+
+            logging.debug("get_message returned.")
+
             if message:
+                logging.debug(f"Got message: {message}")
                 data = json.loads(message['data'])
                 game_id = data.get('game_id')
 
@@ -79,4 +92,6 @@ class Casino:
 
             # TODO: This is too often.
             for game in self.games.values():
+                logging.debug("Tick...")
                 game.tick()
+                logging.debug("Tock.")

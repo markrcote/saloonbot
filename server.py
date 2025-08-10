@@ -14,7 +14,9 @@ REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=LOG_LEVEL)
 
+
 def main():
+    logging.info("Setting up casino...")
     casino = Casino(REDIS_HOST, REDIS_PORT)
     casino.listen()
 

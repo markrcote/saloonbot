@@ -10,7 +10,6 @@ import redis.asyncio
 import redis.exceptions
 from nextcord.ext import commands, tasks
 
-from cardgames import aws
 from wwnames.wwnames import WildWestNames
 
 
@@ -26,15 +25,10 @@ REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=LOG_LEVEL)
 
-if aws.is_ec2_instance():
-    secret = json.loads(aws.get_secret(DEV_DISCORD_SERVER))
-    DISCORD_TOKEN = secret["DISCORD_TOKEN"]
-    GUILD_IDS_ENV = secret["DISCORD_GUILDS"]
-else:
-    # This will intentionally cause the bot to fail fast with a KeyError exception
-    # if the token is not found.
-    DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
-    GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
+# This will intentionally cause the bot to fail fast with a KeyError exception
+# if the token is not found.
+DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
+GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
 
 GUILD_IDS = [int(x) for x in GUILD_IDS_ENV.split(",")] if GUILD_IDS_ENV else None
 

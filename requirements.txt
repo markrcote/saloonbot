@@ -20,7 +20,7 @@ propcache==0.3.2
 pycodestyle==2.14.0
 pyflakes==3.4.0
 python-dateutil==2.9.0.post0
-redis==6.2.0
+redis==6.4.0
 requests==2.32.4
 s3transfer==0.13.1
 six==1.17.0

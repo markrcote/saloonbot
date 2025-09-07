@@ -67,6 +67,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     logging.info("Howdy folks.")
+    logging.debug("Debug logs enabled.")
 
 
 @bot.slash_command(description="Version", guild_ids=GUILD_IDS)
@@ -84,15 +85,34 @@ async def wwname(interaction: nextcord.Interaction, gender: str = "",
     names = WildWestNames()
     await interaction.send(names.random_name(gender, number))
 
+class BlackjackGame:
+    STATES = {
+        "WAITING": 0,
+        "ACTIVE": 1,
+        "FINISHED": 2
+    }
+
+    def __init__(self, guild_id, channel_id, channel, state=0):
+        self.guild_id = guild_id
+        self.channel_id = channel_id
+        self.channel = channel
+        self.state = state
+        self.game_id = None
+        self.request_id = None
+
+    def generate_request_id(self):
+        self.request_id = str(uuid.uuid4())
+
+    def topic(self):
+        return f"game_updates_{self.game_id}"
+
 
 class BlackjackCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.redis = redis.asyncio.Redis(host=REDIS_HOST, port=REDIS_PORT)
         self.pubsub = self.redis.pubsub()
-        self.game_request_id = None
-        self.game_id = None
-        self.game_channel = None
+        self.games = []
         self.subscribed = asyncio.Event()
         self.subscribe_task = None
 
@@ -100,35 +120,6 @@ class BlackjackCog(commands.Cog):
         self.listen.stop()
         if self.subscribe_task:
             self.subscribe_task.cancel()
-
-    def game_topic(self):
-        return f"game_updates_{self.game_id}"
-
-    async def send_command(self, player_name, cmd):
-        message = {
-            "player": player_name,
-            "event_type": "player_action",
-            "game_id" : self.game_id,
-            "action": cmd
-        }
-        try:
-            await self.redis.publish("casino", json.dumps(message))
-        except Exception as e:
-            logging.error(f"Redis publish error: {e}")
-
-    async def try_subscribe(self):
-        backoff = 2
-        while True:
-            try:
-                await self.pubsub.subscribe("casino_update")
-                self.subscribed.set()
-                logging.info("Subscribed to casino_update.")
-                return
-            except redis.exceptions.ConnectionError as e:
-                self.subscribed.clear()
-                logging.warning(f"Failed to subscribe to casino_update: {e}")
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 60)  # Exponential backoff up to 60s
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -143,26 +134,29 @@ class BlackjackCog(commands.Cog):
         if message.author == self.bot.user:
             return
 
-        if not self.game_id:
+        game = self.find_game(message.guild.id, message.channel.id)
+        if not game:
             return
 
         command = message.content.split()[0]
-        await self.send_command(message.author.name, command)
+        await self.send_command(message.author.name, game, command)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(self, interaction: nextcord.Interaction):
-        """Start a game if none in progress"""
-        if self.game_id:
-            await interaction.send("A game is already in progress.")
+        """Start a game if none in progress in this guild and channel."""
+        game = self.find_game_by_interaction(interaction)
+        if game:
+            await interaction.send("A game is already in progress in this channel.")
             return
 
-        self.game_request_id = str(uuid.uuid4())
-        self.game_channel = interaction.channel
+        game = BlackjackGame(interaction.guild_id, interaction.channel_id, interaction.channel)
+        game.generate_request_id()
+        self.games.append(game)
 
         message = {
             'event_type': 'casino_action',
             'action': 'new_game',
-            'request_id': self.game_request_id
+            'request_id': game.request_id
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -173,24 +167,29 @@ class BlackjackCog(commands.Cog):
 
     @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
     async def join_game(self, interaction: nextcord.Interaction):
-        if not self.game_id:
+        game = self.find_game_by_interaction(interaction)
+        if game:
+            if game.state != BlackjackGame.STATES["ACTIVE"]:
+                await interaction.send("Game is not active.")
+            else:
+                await self.send_command(interaction.user.name, game, "join")
+                await interaction.send("Joining game...")
+        else:
             await interaction.send("No game currently in progress.")
-            return
-
-        await self.send_command(interaction.user.name, "join")
-        await interaction.send("Joining game...")
 
     @nextcord.slash_command(name="leavegame", guild_ids=GUILD_IDS)
     async def leave_game(self, interaction: nextcord.Interaction):
-        if not self.game_id:
+        game = self.find_game_by_interaction(interaction)
+        if not game:
             await interaction.send("No game currently in progress.")
             return
 
-        await self.send_command(interaction.user.name, "leave")
+        await self.send_command(interaction.user.name, game, "leave")
         await interaction.send("Leaving game...")
 
     @tasks.loop(seconds=3.0)
     async def listen(self):
+        '''Background tasks that listens for messages on self.pubsub.'''
         # Wait until subscription is live
         await self.subscribed.wait()
         try:
@@ -217,20 +216,68 @@ class BlackjackCog(commands.Cog):
         topic = message['channel'].decode()
 
         if topic == "casino_update":
-            if data.get('event_type') == 'new_game' and self.game_id is None and data.get('request_id') == self.game_request_id:
-                self.game_id = data.get('game_id')
-                await self.game_channel.send(f"Game created.")
-                logging.debug(f"Game created: {self.game_id}")
-                try:
-                    await self.pubsub.subscribe(self.game_topic())
-                except Exception as e:
-                    logging.error(f"Failed to subscribe to game topic: {e}")
-        elif topic == self.game_topic():
-            logging.debug("Got game message")
-            await self.game_channel.send(data["text"])
+            if data.get("event_type") == "new_game":
+                game = self.find_game_by_request_id(data.get("request_id"))
+                if game:
+                    if game.state != BlackjackGame.STATES["WAITING"]:
+                        logging.error(f"Got new-game message for game in state {game.state}")
+                        return
+                    game.state = BlackjackGame.STATES["ACTIVE"]
+                    game.game_id = data.get("game_id")
+                    await game.channel.send(f"Game {game.game_id} created.")
+                    logging.debug(f"Game created: {game.game_id}")
+                    try:
+                        await self.pubsub.subscribe(game.topic())
+                    except Exception as e:
+                        logging.error(f"Failed to subscribe to game topic: {e}")
         else:
-            logging.debug(f"Got unknown message from channel {message['channel']}")
-            logging.debug(f"Game topic is {self.game_topic()}")
+            for game in self.games:
+                if game.topic() == topic:
+                    logging.debug("Got game message")
+                    await game.channel.send(data["text"])
+            else:
+                logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
+
+    async def send_command(self, player_name, game, cmd):
+        message = {
+            "player": player_name,
+            "event_type": "player_action",
+            "game_id" : game.game_id,
+            "action": cmd
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error: {e}")
+
+    async def try_subscribe(self):
+        backoff = 2
+        while True:
+            try:
+                await self.pubsub.subscribe("casino_update")
+                self.subscribed.set()
+                logging.info("Subscribed to casino_update.")
+                return
+            except redis.exceptions.ConnectionError as e:
+                self.subscribed.clear()
+                logging.warning(f"Failed to subscribe to casino_update: {e}")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60)  # Exponential backoff up to 60s
+
+    def find_game(self, guild_id, channel_id):
+        for game in self.games:
+            if game.guild_id == guild_id and game.channel_id == channel_id:
+                return game
+        return None
+
+    def find_game_by_interaction(self, interaction):
+        return self.find_game(interaction.guild_id, interaction.channel_id)
+
+    def find_game_by_request_id(self, request_id):
+        for game in self.games:
+            if game.request_id == request_id:
+                return game
+        return None
 
 
 bot.add_cog(BlackjackCog(bot))

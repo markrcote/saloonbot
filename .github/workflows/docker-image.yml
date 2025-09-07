@@ -1,0 +1,21 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the Docker image
+      run: |
+        GIT_SHA=$(git rev-parse HEAD)
+        docker build . --build-arg GIT_SHA=$GIT_SHA --file Dockerfile.server --tag saloonbot/saloonbot-server:$(date +%s)
+        docker build . --build-arg GIT_SHA=$GIT_SHA --file Dockerfile.bot --tag saloonbot/saloonbot-bot:$(date +%s)

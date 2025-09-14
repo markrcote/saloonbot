@@ -1,5 +1,8 @@
 services:
   saloonbot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
     image: ghcr.io/markrcote/saloonbot-server:main
     restart: always
     environment:
@@ -8,6 +11,9 @@ services:
     depends_on:
       - redis
   saloonbot-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
     image: ghcr.io/markrcote/saloonbot-bot:main
     restart: always
     environment:
@@ -28,5 +34,5 @@ services:
 secrets:
   discord_token:
     file: discord_token.txt
-  discord_guidlds:
+  discord_guilds:
     file: discord_guilds.txt

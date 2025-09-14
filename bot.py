@@ -2,7 +2,9 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import uuid
+
 import asyncio
 
 import nextcord
@@ -13,7 +15,13 @@ from nextcord.ext import commands, tasks
 from wwnames.wwnames import WildWestNames
 
 
-DEV_DISCORD_SERVER = os.getenv("SALOONBOT_DEV_DISCORD_SERVER")
+def read_env_file(env_var):
+    filename = os.getenv(env_var)
+    if not filename:
+        return None
+    return open(filename).read().strip()
+
+
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
     LOG_LEVEL = logging.DEBUG
@@ -25,12 +33,14 @@ REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
 logging.basicConfig(level=LOG_LEVEL)
 
-# This will intentionally cause the bot to fail fast with a KeyError exception
-# if the token is not found.
-DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
-GUILD_IDS_ENV = os.getenv("DISCORD_GUILDS")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN") or read_env_file("DISCORD_TOKEN_FILE")
+GUILD_IDS_STR = os.getenv("DISCORD_GUILDS") or read_env_file("DISCORD_GUILDS_FILE")
 
-GUILD_IDS = [int(x) for x in GUILD_IDS_ENV.split(",")] if GUILD_IDS_ENV else None
+if not DISCORD_TOKEN:
+    logging.error("No Discord token provided.")
+    sys.exit(1)
+
+GUILD_IDS = [int(x) for x in GUILD_IDS_STR.split(",")] if GUILD_IDS_STR else None
 
 VERSION = None
 

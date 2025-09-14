@@ -1,14 +1,32 @@
 services:
-  saloonbot:
-    build:
-      context: .
-      dockerfile: Dockerfile.server
+  saloonbot-server:
+    image: ghcr.io/markrcote/saloonbot-server:main
+    restart: always
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     depends_on:
       - redis
+  saloonbot-bot:
+    image: ghcr.io/markrcote/saloonbot-bot:main
+    restart: always
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - DISCORD_GUILDS_FILE=/run/secrets/discord_guilds
+    secrets:
+      - discord_token
+      - discord_guilds
+    depends_on:
+      - redis
   redis:
     image: redis:alpine
+    restart: always
     ports:
       - "6379:6379"
+secrets:
+  discord_token:
+    file: discord_token.txt
+  discord_guidlds:
+    file: discord_guilds.txt

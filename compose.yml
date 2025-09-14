@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
+      args:
+        GIT_SHA=${GIT_SHA}
     image: ghcr.io/markrcote/saloonbot-server:main
     restart: always
     environment:
@@ -14,6 +16,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bot
+      args:
+        GIT_SHA=${GIT_SHA}
     image: ghcr.io/markrcote/saloonbot-bot:main
     restart: always
     environment:

@@ -158,12 +158,26 @@ class BlackjackCog(commands.Cog):
             'action': 'new_game',
             'request_id': game.request_id
         }
-        try:
-            await self.redis.publish("casino", json.dumps(message))
-            await interaction.send("Starting new game...")
-        except redis.exceptions.ConnectionError as e:
-            logging.error(f"Redis publish error: {e}")
-            await interaction.send("Failed to communicate with game server.")
+        if not await self.send_casino_message(message):
+            return
+        await interaction.send("Starting new game...")
+
+    @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS)
+    async def stop_game(self, interaction: nextcord.Interaction):
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("No game currently in progress.")
+            return
+
+        message = {
+            'event_type': 'casino_action',
+            'action': 'stop_game',
+            'game_id': game.game_id
+        }
+        await self.send_casino_message(message)
+        if not await self.send_casino_message(message):
+            return
+        await interaction.send("Stopping game...")
 
     @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
     async def join_game(self, interaction: nextcord.Interaction):
@@ -237,6 +251,15 @@ class BlackjackCog(commands.Cog):
                     await game.channel.send(data["text"])
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
+
+    async def send_casino_message(self, message):
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except redis.exceptions.ConnectionError as e:
+            logging.error(f"Redis publish error: {e}")
+            await interaction.send("Failed to communicate with game server.")
+            return False
+        return True
 
     async def send_command(self, player_name, game, cmd):
         message = {

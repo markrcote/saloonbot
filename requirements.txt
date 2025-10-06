@@ -5,7 +5,7 @@ aiosignal==1.4.0
 async-timeout==5.0.1
 attrs==25.3.0
 audioop-lts==0.2.2
-certifi==2025.8.3
+certifi==2025.10.5
 charset-normalizer==3.4.2
 flake8==7.3.0
 frozenlist==1.7.0

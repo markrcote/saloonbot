@@ -19,6 +19,8 @@ def read_env_file(env_var):
     filename = os.getenv(env_var)
     if not filename:
         return None
+    if not os.path.isfile(filename):
+        return None
     return open(filename).read().strip()
 
 

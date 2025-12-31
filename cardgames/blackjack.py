@@ -23,7 +23,7 @@ class Blackjack(CardGame):
 
     dealer = "dealer"
 
-    PERIOD_LAST_AMBIENT = 10
+    PERIOD_REMINDER_PLAYER_TURN = 30
     TIME_BETWEEN_HANDS = 5
 
     def __init__(self, game_id, casino):
@@ -46,7 +46,7 @@ class Blackjack(CardGame):
         self.current_player_idx = None
 
         self.time_last_hand_ended = None
-        self.time_last_ambient = time.time()
+        self.time_last_event = time.time()
 
     def output(self, output):
         if self.casino:
@@ -60,6 +60,9 @@ class Blackjack(CardGame):
         '''Raise exception if no hand in progress.'''
         if self.current_player_idx is None:
             raise CardGameError("No game in progress")
+
+    def _update_time_last_event(self):
+        self.time_last_event = time.time()
 
     def join(self, player):
         if player in self.players or player in self.players_waiting:
@@ -133,6 +136,7 @@ class Blackjack(CardGame):
     def hit(self, player):
         self._check_hand_in_progress()
         self._check_turn(player)
+        self._update_time_last_event()
         self.deal(player)
         self.output(f"{player} is dealt {player.hand[-1]}")
         self.output(f"{player} has {player.hand_str()}")
@@ -149,6 +153,7 @@ class Blackjack(CardGame):
     def stand(self, player):
         self._check_hand_in_progress()
         self._check_turn(player)
+        self._update_time_last_event()
         self.output(f"{player} stands.")
         self.next_turn()
 
@@ -240,18 +245,23 @@ class Blackjack(CardGame):
                 self.output("Dealer's turn")
                 self.dealer_turn()
 
-        if not self.hand_in_progress() and (self.players or self.players_waiting):
-            if self.time_last_hand_ended is None:
-                self.time_last_hand_ended = time.time()
-
-            if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
-                if self.players or self.players_waiting:
-                    self.time_last_hand_ended = None
-                    self.new_hand()
-                else:
-                    # Wait another period for one or more players to join.
+        if not self.hand_in_progress():
+            if self.players or self.players_waiting:
+                if self.time_last_hand_ended is None:
                     self.time_last_hand_ended = time.time()
+                    self._update_time_last_event()
 
-        if time.time() > self.time_last_ambient + self.PERIOD_LAST_AMBIENT:
-            # self.output("The dealer clears his throat.")
-            self.time_last_ambient = time.time()
+                if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
+                    if self.players or self.players_waiting:
+                        self.time_last_hand_ended = None
+                        self.new_hand()
+                    else:
+                        # Wait another period for one or more players to join.
+                        self.time_last_hand_ended = time.time()
+
+        if self.hand_in_progress():
+            if time.time() > self.time_last_event + self.PERIOD_REMINDER_PLAYER_TURN:
+                    if self.is_player_turn():
+                        f_curr_player = self.players[self.current_player_idx]
+                        self.output(f"{f_curr_player}, it's your turn.")
+                        self._update_time_last_event()

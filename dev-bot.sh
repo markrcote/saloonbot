@@ -1,6 +1,15 @@
 #!/bin/bash
 # Start server + redis, run bot locally
 
+# Cleanup function
+cleanup() {
+    echo "Stopping background services..."
+    docker compose -f compose.dev-bot-local.yml down
+}
+
+# Set trap to ensure cleanup happens on exit, interrupt, or error
+trap cleanup EXIT INT TERM
+
 echo "Starting server and redis..."
 docker compose -f compose.dev-bot-local.yml up -d
 
@@ -15,7 +24,3 @@ export DISCORD_GUILDS="${DISCORD_GUILDS}"
 export SALOONBOT_DEBUG=1
 
 python bot.py
-
-# Cleanup on exit
-echo "Stopping background services..."
-docker compose -f compose.dev-bot-local.yml down

@@ -1,0 +1,20 @@
+services:
+  saloonbot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+      args:
+        GIT_SHA: ${GIT_SHA}
+    image: ghcr.io/markrcote/saloonbot-server:main
+    restart: always
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+    depends_on:
+      - redis
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"

@@ -184,7 +184,6 @@ class Casino:
             return
 
         try:
-
             db_game = session.query(DBGame).filter(
                 DBGame.game_id == uuid.UUID(game_id)
             ).first()

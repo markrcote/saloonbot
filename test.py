@@ -1,10 +1,14 @@
+import os
 import time
 import unittest
 from unittest.mock import patch
 
+# Disable database for tests
+os.environ['USE_DATABASE'] = 'false'
+
 from cardgames.blackjack import Blackjack
 from cardgames.card_game import Card, CardGame, CardGameError
-from cardgames.player import Player
+from cardgames.player import Player, registry as player_registry
 
 from wwnames.wwnames import WildWestNames
 
@@ -14,6 +18,8 @@ class TestWildWestNames(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.wild_west_names = WildWestNames()
+        # Disable database for player registry
+        player_registry.use_db = False
 
     @patch("random.choice")
     def test_random_name_male(self, mock_choice):
@@ -119,6 +125,8 @@ class TestCardGame(unittest.TestCase):
 
 class TestBlackjack(unittest.TestCase):
     def setUp(self):
+        # Disable database for player registry during tests
+        player_registry.use_db = False
         self.game = Blackjack(game_id="test_game", casino=None)
 
     def test_new_hand(self):

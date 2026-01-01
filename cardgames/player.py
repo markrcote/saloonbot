@@ -54,14 +54,14 @@ class PlayerRegistry:
 
     def get_player(self, player_name, add=False):
         """Get or create a player.
-        
+
         Args:
             player_name: The player's name (can be discord_id)
             add: If True, create player if not found
-        
+
         Returns:
             Player object
-        
+
         Raises:
             PlayerNotFoundError: If player not found and add=False
         """
@@ -79,7 +79,7 @@ class PlayerRegistry:
                     db_user = session.query(User).filter(
                         (User.discord_id == player_name) | (User.name == player_name)
                     ).first()
-                    
+
                     if db_user:
                         player = Player(
                             name=db_user.name,
@@ -101,7 +101,7 @@ class PlayerRegistry:
         if add:
             player = Player(player_name)
             self.players[player_name] = player
-            
+
             # Save to database if enabled
             if self.use_db:
                 session = self._get_db_session()
@@ -120,20 +120,20 @@ class PlayerRegistry:
                         import logging
                         logging.warning(f"Error saving player to database: {e}")
                         session.rollback()
-            
+
             return player
-        
+
         raise PlayerNotFoundError(player_name)
 
     def save_player(self, player):
         """Save player statistics to database."""
         if not self.use_db:
             return
-        
+
         session = self._get_db_session()
         if not session:
             return
-        
+
         try:
             from .db import User
             if player.db_id:

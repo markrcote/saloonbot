@@ -21,17 +21,89 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 * `/version`: Outputs the current git sha.
 
+## Database Setup
+
+SaloonBot uses PostgreSQL to persist game state and user data across server restarts. This ensures that active games can continue even after the bot or server restarts.
+
+### Environment Variables
+
+Configure the database connection using either a full connection string or individual parameters:
+
+**Option 1: Full connection string**
+```bash
+DATABASE_URL=postgresql://user:pass@host:port/dbname
+```
+
+**Option 2: Individual parameters** (used if `DATABASE_URL` is not set)
+```bash
+POSTGRES_HOST=localhost      # Default: localhost
+POSTGRES_PORT=5432           # Default: 5432
+POSTGRES_DB=saloonbot        # Default: saloonbot
+POSTGRES_USER=saloonbot      # Default: saloonbot
+POSTGRES_PASSWORD=saloonbot  # Default: saloonbot
+```
+
+**Disable database** (run in memory-only mode)
+```bash
+USE_DATABASE=false
+```
+
+### Running Migrations
+
+The database schema is automatically created on server startup using SQLAlchemy models. No manual migration is needed for the initial setup.
+
+For manual migration management using Alembic:
+
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "Description of changes"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+
+# View migration history
+alembic history
+```
+
+### Backup and Restore
+
+**Backup the database:**
+```bash
+# Using Docker
+docker compose exec postgres pg_dump -U saloonbot saloonbot > backup.sql
+
+# Using local PostgreSQL
+pg_dump -h localhost -U saloonbot saloonbot > backup.sql
+```
+
+**Restore from backup:**
+```bash
+# Using Docker
+docker compose exec -T postgres psql -U saloonbot saloonbot < backup.sql
+
+# Using local PostgreSQL
+psql -h localhost -U saloonbot saloonbot < backup.sql
+```
+
+**Backup just the game state data:**
+```bash
+pg_dump -h localhost -U saloonbot -t users -t games -t game_players --data-only saloonbot > game_data.sql
+```
+
 ## Development
 
-SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis.
+SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of three main components: the Discord bot (`bot.py`), the server component (`server.py`), and PostgreSQL for persistence, all communicating through Redis.
 
 ### Development Scenarios
 
 There are three development compose files, each designed for a different workflow:
 
-1. **`compose.dev-bot-local.yml`** - Runs server + redis in Docker, allowing you to run `bot.py` locally
-2. **`compose.dev-server-local.yml`** - Runs bot + redis in Docker, allowing you to run `server.py` locally
-3. **`compose.dev-redis-only.yml`** - Runs only redis in Docker, allowing you to run both components locally
+1. **`compose.dev-bot-local.yml`** - Runs server + redis + postgres in Docker, allowing you to run `bot.py` locally
+2. **`compose.dev-server-local.yml`** - Runs bot + redis + postgres in Docker, allowing you to run `server.py` locally
+3. **`compose.dev-redis-only.yml`** - Runs redis + postgres in Docker, allowing you to run both components locally
 
 ### Using Helper Scripts
 
@@ -41,27 +113,31 @@ For convenience, helper scripts are provided for each scenario:
 ```bash
 ./dev-bot.sh
 ```
-This starts the server and redis containers, then runs the bot locally. Requires `DISCORD_TOKEN` and `DISCORD_GUILDS` environment variables.
+This starts the server, redis, and postgres containers, then runs the bot locally. Requires `DISCORD_TOKEN` and `DISCORD_GUILDS` environment variables.
 
 #### Run server locally (bot in Docker)
 ```bash
 ./dev-server.sh
 ```
-This starts the bot and redis containers, then runs the server locally. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
+This starts the bot, redis, and postgres containers, then runs the server locally. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
 
-#### Run both components locally (redis only in Docker)
+#### Run both components locally (redis + postgres in Docker)
 ```bash
 ./dev-redis.sh
 ```
-This starts only redis. You can then run `bot.py` and `server.py` separately in different terminals:
+This starts redis and postgres. You can then run `bot.py` and `server.py` separately in different terminals:
 ```bash
 # Terminal 1
 export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
+export POSTGRES_HOST=localhost POSTGRES_PORT=5432
+export POSTGRES_DB=saloonbot POSTGRES_USER=saloonbot POSTGRES_PASSWORD=saloonbot
 export DISCORD_TOKEN="your-token" DISCORD_GUILDS="your-guild-ids"
 python bot.py
 
 # Terminal 2
 export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
+export POSTGRES_HOST=localhost POSTGRES_PORT=5432
+export POSTGRES_DB=saloonbot POSTGRES_USER=saloonbot POSTGRES_PASSWORD=saloonbot
 python server.py
 ```
 

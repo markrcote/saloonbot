@@ -199,7 +199,8 @@ class Blackjack(CardGame):
             raise CardGameError("Players still have turns")
 
         self.output(f"Dealer is showing {self.dealer.hand[0]}.")
-        self.output(f"Dealer flips over the second card: {self.dealer.hand[-1]}")
+        self.output("Dealer flips over the second card.")
+        self.output(f"Dealer has {self.dealer.hand_str()}")
 
         while self.get_score(self.dealer) < 17:
             self.deal(self.dealer)

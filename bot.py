@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import uuid
+from enum import Enum
 
 import asyncio
 
@@ -87,14 +88,16 @@ async def wwname(interaction: nextcord.Interaction, gender: str = "",
     names = WildWestNames()
     await interaction.send(names.random_name(gender, number))
 
-class BlackjackGame:
-    STATES = {
-        "WAITING": 0,
-        "ACTIVE": 1,
-        "FINISHED": 2
-    }
 
-    def __init__(self, guild_id, channel_id, channel, state=0):
+class GameState(Enum):
+    """Explicit states for a blackjack game."""
+    WAITING = "waiting"
+    ACTIVE = "active"
+    FINISHED = "finished"
+
+
+class BlackjackGame:
+    def __init__(self, guild_id, channel_id, channel, state=GameState.WAITING):
         self.guild_id = guild_id
         self.channel_id = channel_id
         self.channel = channel
@@ -171,7 +174,7 @@ class BlackjackCog(commands.Cog):
     async def join_game(self, interaction: nextcord.Interaction):
         game = self.find_game_by_interaction(interaction)
         if game:
-            if game.state != BlackjackGame.STATES["ACTIVE"]:
+            if game.state != GameState.ACTIVE:
                 await interaction.send("Game is not active.")
             else:
                 await self.send_command(interaction.user.name, game, "join")
@@ -221,10 +224,10 @@ class BlackjackCog(commands.Cog):
             if data.get("event_type") == "new_game":
                 game = self.find_game_by_request_id(data.get("request_id"))
                 if game:
-                    if game.state != BlackjackGame.STATES["WAITING"]:
+                    if game.state != GameState.WAITING:
                         logging.error(f"Got new-game message for game in state {game.state}")
                         return
-                    game.state = BlackjackGame.STATES["ACTIVE"]
+                    game.state = GameState.ACTIVE
                     game.game_id = data.get("game_id")
                     await game.channel.send(f"Game {game.game_id} created.")
                     await game.channel.send(f"Waiting for players.")
@@ -245,7 +248,7 @@ class BlackjackCog(commands.Cog):
         message = {
             "player": player_name,
             "event_type": "player_action",
-            "game_id" : game.game_id,
+            "game_id": game.game_id,
             "action": cmd
         }
         try:

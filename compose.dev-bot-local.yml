@@ -11,10 +11,31 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=saloonbot
+      - POSTGRES_USER=saloonbot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-saloonbot}
+      - USE_DATABASE=true
     depends_on:
       - redis
+      - postgres
   redis:
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=saloonbot
+      - POSTGRES_USER=saloonbot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-saloonbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+volumes:
+  postgres_data:
+

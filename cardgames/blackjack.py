@@ -24,7 +24,7 @@ class Blackjack(CardGame):
     dealer = "dealer"
 
     PERIOD_REMINDER_PLAYER_TURN = 30
-    TIME_BETWEEN_HANDS = 5
+    TIME_BETWEEN_HANDS = 10
 
     def __init__(self, game_id, casino):
         """ Initialize a new Blackjack game.
@@ -114,7 +114,7 @@ class Blackjack(CardGame):
         wins = []
         ties = []
         losses = []
-        self.output("End of hand.")
+        self.output("!---- End of hand. ----!")
         self.output(f"Dealer has {self.get_score(self.dealer)}.")
         for player in self.players:
             if self.get_score(player) > 21:
@@ -123,7 +123,7 @@ class Blackjack(CardGame):
             else:
                 self.output(f"{player} has {self.get_score(player)}.")
                 if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
-                    self.output(f"{player} wins.")
+                    self.output(f"{player} wins!!!")
                     wins.append(player)
                 elif self.get_score(player) == self.get_score(self.dealer):
                     self.output(f"{player} ties with dealer.")
@@ -199,7 +199,8 @@ class Blackjack(CardGame):
             raise CardGameError("Players still have turns")
 
         self.output(f"Dealer is showing {self.dealer.hand[0]}.")
-        self.output(f"Dealer flips over the second card: {self.dealer.hand[-1]}")
+        self.output("Dealer flips over the second card.")
+        self.output(f"Dealer has {self.dealer.hand_str()}")
 
         while self.get_score(self.dealer) < 17:
             self.deal(self.dealer)
@@ -216,7 +217,7 @@ class Blackjack(CardGame):
             self.end_hand()
             return
 
-        self.output("Dealer stands.")
+        self.output(f"Dealer stands with {self.get_score(self.dealer)}.")
         self.end_hand()
 
     def action(self, data):

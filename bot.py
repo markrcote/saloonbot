@@ -120,6 +120,7 @@ class BlackjackCog(commands.Cog):
         self.games = []
         self.subscribed = asyncio.Event()
         self.subscribe_task = None
+        self.games_loaded = False
 
     def cog_unload(self):
         self.listen.stop()
@@ -132,7 +133,63 @@ class BlackjackCog(commands.Cog):
             self.subscribe_task = asyncio.create_task(self.try_subscribe())
         if not self.listen.is_running():
             self.listen.start()
+        
+        # Load active games from database on first ready event
+        if not self.games_loaded:
+            await self._load_active_games()
+            self.games_loaded = True
+        
         logging.info("Blackjack cog initialized.")
+
+    async def _load_active_games(self):
+        """Load active games from database and resubscribe to their channels."""
+        try:
+            from cardgames.db import get_session, Game as DBGame
+            
+            session = get_session()
+            try:
+                # Load games that are not finished
+                active_games = session.query(DBGame).filter(
+                    DBGame.state.in_(['waiting', 'active'])
+                ).all()
+                
+                logging.info(f"Loading {len(active_games)} active games from database")
+                
+                for db_game in active_games:
+                    try:
+                        # Find the channel
+                        guild = self.bot.get_guild(db_game.guild_id)
+                        if not guild:
+                            logging.warning(f"Guild {db_game.guild_id} not found for game {db_game.game_id}")
+                            continue
+                        
+                        channel = guild.get_channel(db_game.channel_id)
+                        if not channel:
+                            logging.warning(f"Channel {db_game.channel_id} not found for game {db_game.game_id}")
+                            continue
+                        
+                        # Create game object and add to tracking
+                        game = BlackjackGame(
+                            db_game.guild_id,
+                            db_game.channel_id,
+                            channel,
+                            state=GameState.ACTIVE if db_game.state == 'active' else GameState.WAITING
+                        )
+                        game.game_id = str(db_game.game_id)
+                        self.games.append(game)
+                        
+                        # Subscribe to game updates
+                        await self.pubsub.subscribe(game.topic())
+                        logging.info(f"Resubscribed to game {game.game_id}")
+                        
+                        # Notify channel that bot has reconnected
+                        await channel.send(f"Game {game.game_id} resumed after restart.")
+                    except Exception as e:
+                        logging.error(f"Failed to restore game {db_game.game_id}: {e}")
+            finally:
+                session.close()
+        except Exception as e:
+            logging.warning(f"Failed to load active games (database may not be available): {e}")
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message):
@@ -161,7 +218,9 @@ class BlackjackCog(commands.Cog):
         message = {
             'event_type': 'casino_action',
             'action': 'new_game',
-            'request_id': game.request_id
+            'request_id': game.request_id,
+            'guild_id': interaction.guild_id,
+            'channel_id': interaction.channel_id
         }
         try:
             await self.redis.publish("casino", json.dumps(message))

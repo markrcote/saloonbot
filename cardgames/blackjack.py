@@ -1,8 +1,9 @@
 import json
 import logging
 import time
+import uuid
 
-from .card_game import CardGame, CardGameError
+from .card_game import Card, CardGame, CardGameError
 from .player import Player, PlayerNotFoundError, registry as player_registry
 
 
@@ -131,6 +132,20 @@ class Blackjack(CardGame):
                 else:
                     self.output(f"{player} loses.")
                     losses.append(player)
+        
+        # Update player statistics
+        for player in self.players:
+            player.games_played += 1
+        for player in wins:
+            player.games_won += 1
+            player_registry.save_player(player)
+        for player in ties:
+            player.games_tied += 1
+            player_registry.save_player(player)
+        for player in losses:
+            player.games_lost += 1
+            player_registry.save_player(player)
+        
         self.current_player_idx = None
 
     def hit(self, player):
@@ -266,3 +281,57 @@ class Blackjack(CardGame):
                         f_curr_player = self.players[self.current_player_idx]
                         self.output(f"{f_curr_player}, it's your turn.")
                         self._update_time_last_event()
+
+    def _serialize_card(self, card):
+        """Serialize a card to a dict."""
+        return {'suit': card.suit, 'value': card.value}
+
+    def _deserialize_card(self, card_dict):
+        """Deserialize a card from a dict."""
+        return Card(card_dict['suit'], card_dict['value'])
+
+    def serialize_state(self):
+        """Serialize the complete game state to a dict for JSON storage."""
+        return {
+            'current_player_idx': self.current_player_idx,
+            'time_last_hand_ended': self.time_last_hand_ended,
+            'time_last_event': self.time_last_event,
+            'players_waiting': [p.name for p in self.players_waiting],
+            'dealer_hand': [self._serialize_card(c) for c in self.dealer.hand],
+            'deck': [self._serialize_card(c) for c in self.deck],
+            'discards': [self._serialize_card(c) for c in self.discards]
+        }
+
+    def restore_state(self, game_data, players_data):
+        """Restore game state from serialized data.
+        
+        Args:
+            game_data: Dict with game state (from serialize_state)
+            players_data: List of dicts with player info [{'name': ..., 'hand': [...], 'position': ...}]
+        """
+        # Restore basic state
+        self.current_player_idx = game_data.get('current_player_idx')
+        self.time_last_hand_ended = game_data.get('time_last_hand_ended')
+        self.time_last_event = game_data.get('time_last_event', time.time())
+        
+        # Restore deck and discards
+        self.deck = [self._deserialize_card(c) for c in game_data.get('deck', [])]
+        self.discards = [self._deserialize_card(c) for c in game_data.get('discards', [])]
+        
+        # Restore dealer hand
+        self.dealer.hand = [self._deserialize_card(c) for c in game_data.get('dealer_hand', [])]
+        
+        # Restore players (sorted by position)
+        self.players = []
+        sorted_players = sorted(players_data, key=lambda p: p['position'])
+        for player_data in sorted_players:
+            player = player_registry.get_player(player_data['name'], add=True)
+            player.hand = [self._deserialize_card(c) for c in player_data.get('hand', [])]
+            self.players.append(player)
+        
+        # Restore waiting players
+        waiting_names = game_data.get('players_waiting', [])
+        self.players_waiting = []
+        for name in waiting_names:
+            player = player_registry.get_player(name, add=True)
+            self.players_waiting.append(player)

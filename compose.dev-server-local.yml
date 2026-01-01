@@ -14,18 +14,38 @@ services:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - DISCORD_GUILDS_FILE=/run/secrets/discord_guilds
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=saloonbot
+      - POSTGRES_USER=saloonbot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-saloonbot}
     secrets:
       - discord_token
       - discord_guilds
     depends_on:
       - redis
+      - postgres
   redis:
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=saloonbot
+      - POSTGRES_USER=saloonbot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-saloonbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
 secrets:
   discord_token:
     file: discord_token.txt
   discord_guilds:
     file: discord_guilds.txt
+volumes:
+  postgres_data:
+

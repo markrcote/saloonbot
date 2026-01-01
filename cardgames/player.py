@@ -39,18 +39,6 @@ class PlayerRegistry:
     def __init__(self, use_db=True):
         self.players = {}
         self.use_db = use_db
-        self._db_session = None
-
-    def _get_db_session(self):
-        """Get database session (lazy initialization)."""
-        if self.use_db and self._db_session is None:
-            try:
-                from .db import get_session
-                self._db_session = get_session()
-            except Exception:
-                # If DB is not available, fall back to memory-only mode
-                self.use_db = False
-        return self._db_session
 
     def get_player(self, player_name, add=False):
         """Get or create a player.
@@ -72,10 +60,11 @@ class PlayerRegistry:
 
         # Try to load from database if enabled
         if self.use_db:
-            session = self._get_db_session()
-            if session:
+            try:
+                from .db import get_session, User
+
+                session = get_session()
                 try:
-                    from .db import User
                     db_user = session.query(User).filter(
                         (User.discord_id == player_name) | (User.name == player_name)
                     ).first()
@@ -93,9 +82,11 @@ class PlayerRegistry:
                         player.games_tied = db_user.games_tied or 0
                         self.players[player_name] = player
                         return player
-                except Exception as e:
-                    import logging
-                    logging.warning(f"Error loading player from database: {e}")
+                finally:
+                    session.close()
+            except Exception as e:
+                import logging
+                logging.warning(f"Error loading player from database: {e}")
 
         # Create new player if requested
         if add:
@@ -104,10 +95,11 @@ class PlayerRegistry:
 
             # Save to database if enabled
             if self.use_db:
-                session = self._get_db_session()
-                if session:
+                try:
+                    from .db import get_session, User
+
+                    session = get_session()
                     try:
-                        from .db import User
                         db_user = User(
                             discord_id=player.discord_id,
                             name=player.name,
@@ -120,6 +112,11 @@ class PlayerRegistry:
                         import logging
                         logging.warning(f"Error saving player to database: {e}")
                         session.rollback()
+                    finally:
+                        session.close()
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Failed to get database session: {e}")
 
             return player
 
@@ -130,12 +127,16 @@ class PlayerRegistry:
         if not self.use_db:
             return
 
-        session = self._get_db_session()
-        if not session:
+        try:
+            from .db import get_session, User
+
+            session = get_session()
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to get database session: {e}")
             return
 
         try:
-            from .db import User
             if player.db_id:
                 db_user = session.query(User).filter(User.id == player.db_id).first()
                 if db_user:
@@ -149,6 +150,11 @@ class PlayerRegistry:
             import logging
             logging.warning(f"Error saving player statistics: {e}")
             session.rollback()
+        finally:
+            session.close()
 
 
-registry = PlayerRegistry()
+# Create global registry - determine use_db from environment
+import os
+_use_db = os.getenv("USE_DATABASE", "true").lower() in ("true", "1", "yes")
+registry = PlayerRegistry(use_db=_use_db)

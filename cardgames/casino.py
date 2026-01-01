@@ -14,29 +14,24 @@ class Casino:
         self.games = {}
         self.redis = redis.Redis(host=redis_host, port=redis_port)
         self.use_db = use_db
-        self._db_session = None
-        
+
         # Load active games from database on startup
         if self.use_db:
             self._load_active_games()
 
-    def _get_db_session(self):
-        """Get database session (lazy initialization)."""
-        if self.use_db and self._db_session is None:
-            try:
-                from .db import get_session
-                self._db_session = get_session()
-            except Exception as e:
-                logging.warning(f"Database not available, running in memory-only mode: {e}")
-                self.use_db = False
-        return self._db_session
-
     def _load_active_games(self):
         """Load active games from database on startup."""
-        session = self._get_db_session()
-        if not session:
+        if not self.use_db:
             return
-        
+
+        try:
+            from .db import get_session
+            session = get_session()
+        except Exception as e:
+            logging.warning(f"Database not available, running in memory-only mode: {e}")
+            self.use_db = False
+            return
+
         try:
             from .db import Game as DBGame, GamePlayer
             
@@ -64,17 +59,19 @@ class Casino:
                             'position': gp.position,
                             'hand': gp.hand or []
                         })
-                    
+
                     # Restore game state
                     if db_game.game_data:
                         game.restore_state(db_game.game_data, players_data)
-                    
+
                     self.games[str(db_game.game_id)] = game
                     logging.info(f"Restored game {db_game.game_id}")
                 except Exception as e:
                     logging.error(f"Failed to restore game {db_game.game_id}: {e}")
         except Exception as e:
             logging.error(f"Failed to load active games: {e}")
+        finally:
+            session.close()
 
     def new_game(self, guild_id=None, channel_id=None):
         while True:
@@ -93,24 +90,27 @@ class Casino:
 
     def _save_game_to_db(self, game, guild_id=None, channel_id=None, state='active'):
         """Save or update game in database."""
-        session = self._get_db_session()
-        if not session:
+        if not self.use_db:
             return
-        
+
         try:
-            from .db import Game as DBGame, GamePlayer, User
-            
-            # Check if game exists
+            from .db import get_session, Game as DBGame, GamePlayer, User
+
+            session = get_session()
+        except Exception as e:
+            logging.warning(f"Failed to get database session: {e}")
+            return
+
+        try:
             db_game = session.query(DBGame).filter(
                 DBGame.game_id == uuid.UUID(game.game_id)
             ).first()
-            
+
             if db_game:
                 # Update existing game
                 db_game.state = state
                 db_game.game_data = game.serialize_state()
-                db_game.updated_at = time.time()
-                
+
                 # Update players
                 # First, remove old player associations
                 session.query(GamePlayer).filter(
@@ -143,7 +143,7 @@ class Casino:
                     )
                     session.add(db_user)
                     session.flush()
-                
+
                 # Create game-player association
                 game_player = GamePlayer(
                     game_id=db_game.id,
@@ -152,12 +152,14 @@ class Casino:
                     hand=[game._serialize_card(c) for c in player.hand]
                 )
                 session.add(game_player)
-            
+
             session.commit()
             logging.debug(f"Game {game.game_id} saved to database")
         except Exception as e:
             logging.error(f"Failed to save game to database: {e}")
             session.rollback()
+        finally:
+            session.close()
 
     def persist_game(self, game_id):
         """Persist game state to database."""
@@ -172,24 +174,29 @@ class Casino:
         """Mark a game as finished in the database."""
         if not self.use_db:
             return
-        
-        session = self._get_db_session()
-        if not session:
-            return
-        
+
         try:
-            from .db import Game as DBGame
-            
+            from .db import get_session, Game as DBGame
+
+            session = get_session()
+        except Exception as e:
+            logging.warning(f"Failed to get database session: {e}")
+            return
+
+        try:
+
             db_game = session.query(DBGame).filter(
                 DBGame.game_id == uuid.UUID(game_id)
             ).first()
-            
+
             if db_game:
                 db_game.state = 'finished'
                 session.commit()
         except Exception as e:
             logging.error(f"Failed to mark game as finished: {e}")
             session.rollback()
+        finally:
+            session.close()
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")

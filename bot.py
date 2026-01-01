@@ -227,6 +227,7 @@ class BlackjackCog(commands.Cog):
                     game.state = BlackjackGame.STATES["ACTIVE"]
                     game.game_id = data.get("game_id")
                     await game.channel.send(f"Game {game.game_id} created.")
+                    await game.channel.send(f"Waiting for players.")
                     logging.debug(f"Game created: {game.game_id}")
                     try:
                         await self.pubsub.subscribe(game.topic())

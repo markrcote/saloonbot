@@ -52,20 +52,36 @@ USE_DATABASE=false
 
 The database schema is automatically created on server startup using SQLAlchemy models. No manual migration is needed for the initial setup.
 
-For manual migration management using Alembic:
+For manual migration management, use the provided `migrate.py` script:
 
 ```bash
-# Create a new migration
-alembic revision --autogenerate -m "Description of changes"
+# Initialize database (create all tables)
+python migrate.py init
 
+# Create a new migration
+python migrate.py create "Description of changes"
+
+# Apply migrations
+python migrate.py upgrade
+
+# Rollback one migration
+python migrate.py downgrade
+
+# View migration history
+python migrate.py history
+```
+
+Alternatively, you can use Alembic directly:
+
+```bash
 # Apply migrations
 alembic upgrade head
 
 # Rollback one migration
 alembic downgrade -1
 
-# View migration history
-alembic history
+# Create a new migration
+alembic revision --autogenerate -m "Description of changes"
 ```
 
 ### Backup and Restore

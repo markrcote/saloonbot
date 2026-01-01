@@ -4,12 +4,11 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    BigInteger, Column, DateTime, ForeignKey, Integer, 
+    BigInteger, Column, DateTime, ForeignKey, Integer,
     Numeric, String, Text, Index
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
 Base = declarative_base()

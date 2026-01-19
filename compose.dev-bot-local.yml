@@ -10,11 +10,31 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=saloonbot
+      - MYSQL_PASSWORD=saloonbot_password
+      - MYSQL_DATABASE=saloonbot
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
     depends_on:
       - redis
+      - mysql
   redis:
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=saloonbot
+      - MYSQL_USER=saloonbot
+      - MYSQL_PASSWORD=saloonbot_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+volumes:
+  mysql_data:

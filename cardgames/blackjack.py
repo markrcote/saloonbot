@@ -68,6 +68,13 @@ class Blackjack(CardGame):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
 
+        # Add user to database if casino has a database connection
+        if self.casino and self.casino.db:
+            try:
+                self.casino.db.add_user(player.name)
+            except Exception as e:
+                logging.error(f"Failed to add user to database: {e}")
+
         self.output(f"Player {player} will join the next game.")
         self.players_waiting.append(player)
 

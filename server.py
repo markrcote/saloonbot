@@ -2,6 +2,7 @@ import logging
 import os
 
 from cardgames.casino import Casino
+from cardgames.database import Database
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
@@ -23,8 +24,10 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+
 def main():
-    casino = Casino(REDIS_HOST, REDIS_PORT)
+    db = Database(MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE)
+    casino = Casino(REDIS_HOST, REDIS_PORT, db)
     casino.listen()
 
 

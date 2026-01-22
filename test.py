@@ -1,6 +1,6 @@
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from cardgames.blackjack import Blackjack
 from cardgames.card_game import Card, CardGame, CardGameError
@@ -194,6 +194,47 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
         self.game.tick()
+
+
+class TestDatabaseIntegration(unittest.TestCase):
+    def test_join_game_with_database(self):
+        # Create a mock database
+        mock_db = MagicMock()
+        mock_db.add_user.return_value = True
+
+        # Create a mock casino with the database
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        # Create a blackjack game with the casino
+        game = Blackjack(game_id="test_game", casino=mock_casino)
+
+        # Join a player
+        player = Player("TestPlayer")
+        game.join(player)
+
+        # Verify that add_user was called with the player name
+        mock_db.add_user.assert_called_once_with("TestPlayer")
+
+        # Verify player was added to waiting list
+        self.assertIn(player, game.players_waiting)
+
+    def test_join_game_without_database(self):
+        # Create a casino without a database
+        mock_casino = MagicMock()
+        mock_casino.db = None
+        mock_casino.game_output = MagicMock()
+
+        # Create a blackjack game
+        game = Blackjack(game_id="test_game", casino=mock_casino)
+
+        # Join a player (should not raise an exception)
+        player = Player("TestPlayer")
+        game.join(player)
+
+        # Verify player was added to waiting list
+        self.assertIn(player, game.players_waiting)
 
 
 if __name__ == "__main__":

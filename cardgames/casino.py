@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import time
 import uuid
 
@@ -10,9 +9,10 @@ from .blackjack import Blackjack
 
 
 class Casino:
-    def __init__(self, redis_host, redis_port):
+    def __init__(self, redis_host, redis_port, db=None):
         self.games = {}
         self.redis = redis.Redis(host=redis_host, port=redis_port)
+        self.db = db
 
     def new_game(self):
         while True:

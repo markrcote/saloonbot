@@ -19,6 +19,11 @@ sleep 2
 echo "Starting server locally..."
 export REDIS_HOST=localhost
 export REDIS_PORT=6379
+export MYSQL_HOST=localhost
+export MYSQL_PORT=3306
+export MYSQL_USER=saloonbot
+export MYSQL_PASSWORD=saloonbot_password
+export MYSQL_DATABASE=saloonbot
 export SALOONBOT_DEBUG=1
 
 python server.py

@@ -17,15 +17,23 @@ class Database:
     def _connect(self):
         """Create a database connection."""
         try:
-            if self.connection is None or not self.connection.is_connected():
-                self.connection = mysql.connector.connect(
-                    host=self.host,
-                    port=self.port,
-                    user=self.user,
-                    password=self.password,
-                    database=self.database
-                )
-                logging.info("Connected to MySQL database")
+            # Check if connection is valid before attempting to reconnect
+            if self.connection is not None:
+                try:
+                    if self.connection.is_connected():
+                        return
+                except Error:
+                    # Connection exists but is invalid, will reconnect below
+                    pass
+
+            self.connection = mysql.connector.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                database=self.database
+            )
+            logging.info("Connected to MySQL database")
         except Error as e:
             logging.error(f"Error connecting to MySQL: {e}")
             raise

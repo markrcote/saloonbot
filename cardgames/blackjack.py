@@ -2,6 +2,8 @@ import json
 import logging
 import time
 
+import mysql.connector
+
 from .card_game import CardGame, CardGameError
 from .player import Player, PlayerNotFoundError, registry as player_registry
 
@@ -72,7 +74,7 @@ class Blackjack(CardGame):
         if self.casino and self.casino.db:
             try:
                 self.casino.db.add_user(player.name)
-            except Exception as e:
+            except mysql.connector.Error as e:
                 logging.error(f"Failed to add user to database: {e}")
 
         self.output(f"Player {player} will join the next game.")

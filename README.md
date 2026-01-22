@@ -23,15 +23,15 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ## Development
 
-SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis.
+SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis. The server also connects to a MySQL database to store user information.
 
 ### Development Scenarios
 
 There are three development compose files, each designed for a different workflow:
 
-1. **`compose.dev-bot-local.yml`** - Runs server + redis in Docker, allowing you to run `bot.py` locally
-2. **`compose.dev-server-local.yml`** - Runs bot + redis in Docker, allowing you to run `server.py` locally
-3. **`compose.dev-redis-only.yml`** - Runs only redis in Docker, allowing you to run both components locally
+1. **`compose.dev-bot-local.yml`** - Runs server + redis + mysql in Docker, allowing you to run `bot.py` locally
+2. **`compose.dev-server-local.yml`** - Runs bot + redis + mysql in Docker, allowing you to run `server.py` locally
+3. **`compose.dev-redis-only.yml`** - Runs redis + mysql in Docker, allowing you to run both components locally
 
 ### Using Helper Scripts
 
@@ -47,13 +47,20 @@ This starts the server and redis containers, then runs the bot locally. Requires
 ```bash
 ./dev-server.sh
 ```
-This starts the bot and redis containers, then runs the server locally. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
+This starts the bot, redis, and mysql containers, then runs the server locally. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
 
-#### Run both components locally (redis only in Docker)
+The server will connect to MySQL using these default values:
+- Host: `localhost`
+- Port: `3306`
+- User: `saloonbot`
+- Password: `saloonbot_password`
+- Database: `saloonbot`
+
+#### Run both components locally (redis and mysql only in Docker)
 ```bash
 ./dev-redis.sh
 ```
-This starts only redis. You can then run `bot.py` and `server.py` separately in different terminals:
+This starts redis and mysql in Docker. You can then run `bot.py` and `server.py` separately in different terminals:
 ```bash
 # Terminal 1
 export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
@@ -62,6 +69,9 @@ python bot.py
 
 # Terminal 2
 export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
+export MYSQL_HOST=localhost MYSQL_PORT=3306
+export MYSQL_USER=saloonbot MYSQL_PASSWORD=saloonbot_password
+export MYSQL_DATABASE=saloonbot
 python server.py
 ```
 

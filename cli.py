@@ -10,7 +10,10 @@ import redis.asyncio as redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 
 class CasinoCli:
@@ -47,12 +50,12 @@ class CasinoCli:
             if not message:
                 continue
             data = json.loads(message['data'])
-            print(data['text'])
+            logging.info(data['text'])
 
     async def main(self):
         self.player_name = input("Enter your name: ")
-        print(f"Welcome {self.player_name}")
-        print("Creating new game...")
+        logging.info(f"Welcome {self.player_name}")
+        logging.info("Creating new game...")
 
         request_id = str(uuid.uuid4())
         await self.pubsub.subscribe("casino_update")
@@ -67,14 +70,14 @@ class CasinoCli:
             message = await self.pubsub.get_message(ignore_subscribe_messages=True,
                                                     timeout=3.0)
             if not message:
-                print("Still waiting...")
+                logging.info("Still waiting...")
                 continue
 
             data = json.loads(message['data'])
             if data.get('event_type') == 'new_game' and data.get('request_id') == request_id:
                 self.game_id = data.get('game_id')
 
-        print(f"Game created: {self.game_id}")
+        logging.info(f"Game created: {self.game_id}")
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self.process_commands())

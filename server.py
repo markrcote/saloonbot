@@ -18,7 +18,10 @@ MYSQL_USER = os.getenv("MYSQL_USER", "saloonbot")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "saloonbot")
 
-logging.basicConfig(level=LOG_LEVEL)
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 def main():
     casino = Casino(REDIS_HOST, REDIS_PORT)

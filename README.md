@@ -1,4 +1,4 @@
-# discord_wwnames
+# saloonbot
 
 [![Lint and test](https://github.com/markrcote/discord_wwnames/actions/workflows/lint-and-test.yml/badge.svg)](https://github.com/markrcote/discord_wwnames/actions/workflows/lint-and-test.yml)
 

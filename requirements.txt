@@ -12,7 +12,7 @@ frozenlist==1.8.0
 idna==3.11
 mccabe==0.7.0
 multidict==6.7.1
-mysql-connector-python==9.5.0
+mysql-connector-python==9.6.0
 nextcord==3.1.1
 propcache==0.4.1
 pycodestyle==2.14.0

@@ -9,7 +9,7 @@ certifi==2026.1.4
 charset-normalizer==3.4.4
 flake8==7.3.0
 frozenlist==1.8.0
-idna==3.10
+idna==3.11
 mccabe==0.7.0
 multidict==6.7.1
 mysql-connector-python==9.1.0

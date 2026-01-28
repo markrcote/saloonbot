@@ -35,3 +35,6 @@ jobs:
     - name: Test with unittest
       run: |
         python test.py
+    - name: Run end-to-end tests
+      run: |
+        python test_e2e.py

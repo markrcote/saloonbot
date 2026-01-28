@@ -78,12 +78,16 @@ class EndToEndTestCase(unittest.TestCase):
         cls.server_process = subprocess.Popen(
             ['python', 'server.py'],
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
 
         # Wait for server to be online
         time.sleep(3)
+
+        # Verify server is running
+        if cls.server_process.poll() is not None:
+            raise RuntimeError("Server process failed to start")
 
         logging.info("Server process started")
 
@@ -91,7 +95,7 @@ class EndToEndTestCase(unittest.TestCase):
     def tearDownClass(cls):
         """Stop the server and docker-compose services."""
         # Stop the server process
-        if cls.server_process:
+        if cls.server_process and cls.server_process.poll() is None:
             logging.info("Stopping server process...")
             cls.server_process.send_signal(signal.SIGTERM)
             try:
@@ -99,6 +103,10 @@ class EndToEndTestCase(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.server_process.kill()
                 cls.server_process.wait()
+
+        # Close Redis connection
+        if cls.redis:
+            cls.redis.close()
 
         # Stop docker-compose services
         logging.info("Stopping docker-compose services...")
@@ -130,6 +138,33 @@ class EndToEndTestCase(unittest.TestCase):
         cursor.close()
         db.close()
 
+    def create_game(self):
+        """Helper method to create a game and return the game_id."""
+        pubsub = self.redis.pubsub()
+        try:
+            pubsub.subscribe("casino_update")
+            pubsub.get_message(timeout=1)  # Skip subscribe confirmation
+
+            request_id = f"test-request-{time.time()}"
+            message = {
+                'event_type': 'casino_action',
+                'action': 'new_game',
+                'request_id': request_id
+            }
+            self.redis.publish("casino", json.dumps(message))
+
+            # Wait for game creation response
+            for _ in range(20):  # Increased from 10 to give more time
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    if response.get('request_id') == request_id:
+                        return response['game_id']
+
+            self.fail("Failed to create game")
+        finally:
+            pubsub.close()
+
 
 class TestGameCreation(EndToEndTestCase):
     """Test game creation through Redis interface."""
@@ -137,67 +172,40 @@ class TestGameCreation(EndToEndTestCase):
     def test_create_new_game(self):
         """Test creating a new game and receiving the game_id."""
         pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino_update")
+        try:
+            pubsub.subscribe("casino_update")
 
-        # Skip the subscribe confirmation message
-        pubsub.get_message(timeout=1)
+            # Skip the subscribe confirmation message
+            pubsub.get_message(timeout=1)
 
-        # Request a new game
-        request_id = "test-request-123"
-        message = {
-            'event_type': 'casino_action',
-            'action': 'new_game',
-            'request_id': request_id
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Request a new game
+            request_id = "test-request-123"
+            message = {
+                'event_type': 'casino_action',
+                'action': 'new_game',
+                'request_id': request_id
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Wait for response
-        response = None
-        for _ in range(10):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                response = json.loads(msg['data'])
-                break
-            time.sleep(0.5)
+            # Wait for response
+            response = None
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    break
 
-        self.assertIsNotNone(response, "Should receive a response for new game request")
-        self.assertEqual(response['event_type'], 'new_game')
-        self.assertEqual(response['request_id'], request_id)
-        self.assertIn('game_id', response)
-        self.assertIsInstance(response['game_id'], str)
-
-        pubsub.close()
+            self.assertIsNotNone(response, "Should receive a response for new game request")
+            self.assertEqual(response['event_type'], 'new_game')
+            self.assertEqual(response['request_id'], request_id)
+            self.assertIn('game_id', response)
+            self.assertIsInstance(response['game_id'], str)
+        finally:
+            pubsub.close()
 
 
 class TestPlayerActions(EndToEndTestCase):
     """Test player actions in a game."""
-
-    def create_game(self):
-        """Helper method to create a game and return the game_id."""
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino_update")
-        pubsub.get_message(timeout=1)  # Skip subscribe confirmation
-
-        request_id = f"test-request-{time.time()}"
-        message = {
-            'event_type': 'casino_action',
-            'action': 'new_game',
-            'request_id': request_id
-        }
-        self.redis.publish("casino", json.dumps(message))
-
-        # Wait for game creation response
-        for _ in range(10):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                response = json.loads(msg['data'])
-                if response.get('request_id') == request_id:
-                    pubsub.close()
-                    return response['game_id']
-            time.sleep(0.5)
-
-        pubsub.close()
-        self.fail("Failed to create game")
 
     def test_player_join_game(self):
         """Test a player joining a game."""
@@ -205,32 +213,32 @@ class TestPlayerActions(EndToEndTestCase):
 
         # Subscribe to game updates
         pubsub = self.redis.pubsub()
-        pubsub.subscribe(f"game_updates_{game_id}")
-        pubsub.get_message(timeout=1)  # Skip subscribe confirmation
+        try:
+            pubsub.subscribe(f"game_updates_{game_id}")
+            pubsub.get_message(timeout=1)  # Skip subscribe confirmation
 
-        # Player joins the game
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': 'TestPlayer1',
-            'action': 'join'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player joins the game
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': 'TestPlayer1',
+                'action': 'join'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Wait for join confirmation
-        updates = []
-        for _ in range(10):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                update = json.loads(msg['data'])
-                updates.append(update['text'])
-            time.sleep(0.5)
+            # Wait for join confirmation
+            updates = []
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    update = json.loads(msg['data'])
+                    updates.append(update['text'])
 
-        # Check that player joined
-        join_messages = [u for u in updates if 'TestPlayer1' in u and 'join' in u]
-        self.assertGreater(len(join_messages), 0, "Player should have joined the game")
-
-        pubsub.close()
+            # Check that player joined
+            join_messages = [u for u in updates if 'TestPlayer1' in u and 'join' in u]
+            self.assertGreater(len(join_messages), 0, "Player should have joined the game")
+        finally:
+            pubsub.close()
 
     def test_database_user_creation(self):
         """Test that joining a game creates a user in the database."""
@@ -238,70 +246,45 @@ class TestPlayerActions(EndToEndTestCase):
 
         # Subscribe to game updates
         pubsub = self.redis.pubsub()
-        pubsub.subscribe(f"game_updates_{game_id}")
-        pubsub.get_message(timeout=1)
+        try:
+            pubsub.subscribe(f"game_updates_{game_id}")
+            pubsub.get_message(timeout=1)
 
-        # Player joins
-        player_name = 'DatabaseTestPlayer'
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': player_name,
-            'action': 'join'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player joins
+            player_name = 'DatabaseTestPlayer'
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': player_name,
+                'action': 'join'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Give it time to process
-        time.sleep(2)
+            # Give it time to process
+            time.sleep(2)
 
-        # Check database
-        db = mysql.connector.connect(
-            host='localhost',
-            port=3306,
-            user='saloonbot',
-            password='saloonbot_password',
-            database='saloonbot'
-        )
-        cursor = db.cursor()
-        cursor.execute("SELECT username FROM users WHERE username = %s", (player_name,))
-        result = cursor.fetchone()
-        cursor.close()
-        db.close()
+            # Check database
+            db = mysql.connector.connect(
+                host='localhost',
+                port=3306,
+                user='saloonbot',
+                password='saloonbot_password',
+                database='saloonbot'
+            )
+            cursor = db.cursor()
+            cursor.execute("SELECT username FROM users WHERE username = %s", (player_name,))
+            result = cursor.fetchone()
+            cursor.close()
+            db.close()
 
-        self.assertIsNotNone(result, "User should be created in database")
-        self.assertEqual(result[0], player_name)
-
-        pubsub.close()
+            self.assertIsNotNone(result, "User should be created in database")
+            self.assertEqual(result[0], player_name)
+        finally:
+            pubsub.close()
 
 
 class TestBlackjackGame(EndToEndTestCase):
     """Test a complete blackjack game flow."""
-
-    def create_game(self):
-        """Helper method to create a game and return the game_id."""
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino_update")
-        pubsub.get_message(timeout=1)
-
-        request_id = f"test-request-{time.time()}"
-        message = {
-            'event_type': 'casino_action',
-            'action': 'new_game',
-            'request_id': request_id
-        }
-        self.redis.publish("casino", json.dumps(message))
-
-        for _ in range(10):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                response = json.loads(msg['data'])
-                if response.get('request_id') == request_id:
-                    pubsub.close()
-                    return response['game_id']
-            time.sleep(0.5)
-
-        pubsub.close()
-        self.fail("Failed to create game")
 
     def test_complete_blackjack_hand(self):
         """Test a complete blackjack hand with player actions."""
@@ -309,109 +292,109 @@ class TestBlackjackGame(EndToEndTestCase):
 
         # Subscribe to game updates
         pubsub = self.redis.pubsub()
-        pubsub.subscribe(f"game_updates_{game_id}")
-        pubsub.get_message(timeout=1)
+        try:
+            pubsub.subscribe(f"game_updates_{game_id}")
+            pubsub.get_message(timeout=1)
 
-        # Player joins
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': 'Player1',
-            'action': 'join'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player joins
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': 'Player1',
+                'action': 'join'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Collect messages for initial join and hand start
-        # The hand should start after TIME_BETWEEN_HANDS (10 seconds)
-        all_updates = []
-        start_time = time.time()
-        while time.time() - start_time < 15:  # Wait up to 15 seconds
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                update = json.loads(msg['data'])
-                all_updates.append(update['text'])
+            # Collect messages for initial join and hand start
+            # The hand should start after TIME_BETWEEN_HANDS (10 seconds)
+            all_updates = []
+            start_time = time.time()
+            while time.time() - start_time < 15:  # Wait up to 15 seconds
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    update = json.loads(msg['data'])
+                    all_updates.append(update['text'])
 
-        # Check that hand started
-        hand_started = any('New hand started' in u for u in all_updates)
-        self.assertTrue(hand_started, "A hand should have started")
+            # Check that hand started
+            hand_started = any('New hand started' in u for u in all_updates)
+            self.assertTrue(hand_started, "A hand should have started")
 
-        # Player stands
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': 'Player1',
-            'action': 'stand'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player stands
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': 'Player1',
+                'action': 'stand'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Wait for dealer turn and end of hand
-        for _ in range(10):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                update = json.loads(msg['data'])
-                all_updates.append(update['text'])
-            time.sleep(0.5)
+            # Wait for dealer turn and end of hand
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    update = json.loads(msg['data'])
+                    all_updates.append(update['text'])
 
-        # Verify game flow
-        hand_ended = any('End of hand' in u for u in all_updates)
-        self.assertTrue(hand_ended, "Hand should have ended")
+            # Verify game flow
+            hand_ended = any('End of hand' in u for u in all_updates)
+            self.assertTrue(hand_ended, "Hand should have ended")
 
-        # Verify dealer played
-        dealer_messages = [u for u in all_updates if 'Dealer' in u]
-        self.assertGreater(len(dealer_messages), 0, "Dealer should have played")
-
-        pubsub.close()
+            # Verify dealer played
+            dealer_messages = [u for u in all_updates if 'Dealer' in u]
+            self.assertGreater(len(dealer_messages), 0, "Dealer should have played")
+        finally:
+            pubsub.close()
 
     def test_player_hit_action(self):
         """Test player hitting (requesting a card)."""
         game_id = self.create_game()
 
         pubsub = self.redis.pubsub()
-        pubsub.subscribe(f"game_updates_{game_id}")
-        pubsub.get_message(timeout=1)
+        try:
+            pubsub.subscribe(f"game_updates_{game_id}")
+            pubsub.get_message(timeout=1)
 
-        # Player joins
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': 'HitPlayer',
-            'action': 'join'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player joins
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': 'HitPlayer',
+                'action': 'join'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Wait for hand to start
-        all_updates = []
-        start_time = time.time()
-        while time.time() - start_time < 15:
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                update = json.loads(msg['data'])
-                all_updates.append(update['text'])
-                if 'New hand started' in update['text']:
-                    break
+            # Wait for hand to start (depends on server's TIME_BETWEEN_HANDS = 10 seconds)
+            all_updates = []
+            start_time = time.time()
+            while time.time() - start_time < 15:
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    update = json.loads(msg['data'])
+                    all_updates.append(update['text'])
+                    if 'New hand started' in update['text']:
+                        break
 
-        # Player hits
-        message = {
-            'event_type': 'player_action',
-            'game_id': game_id,
-            'player': 'HitPlayer',
-            'action': 'hit'
-        }
-        self.redis.publish("casino", json.dumps(message))
+            # Player hits
+            message = {
+                'event_type': 'player_action',
+                'game_id': game_id,
+                'player': 'HitPlayer',
+                'action': 'hit'
+            }
+            self.redis.publish("casino", json.dumps(message))
 
-        # Wait for hit result
-        for _ in range(5):
-            msg = pubsub.get_message(timeout=1)
-            if msg and msg['type'] == 'message':
-                update = json.loads(msg['data'])
-                all_updates.append(update['text'])
-            time.sleep(0.5)
+            # Wait for hit result
+            for _ in range(10):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    update = json.loads(msg['data'])
+                    all_updates.append(update['text'])
 
-        # Verify hit action was processed
-        hit_messages = [u for u in all_updates if 'dealt' in u and 'HitPlayer' in u]
-        self.assertGreater(len(hit_messages), 0, "Player should have been dealt a card")
-
-        pubsub.close()
+            # Verify hit action was processed
+            hit_messages = [u for u in all_updates if 'dealt' in u and 'HitPlayer' in u]
+            self.assertGreater(len(hit_messages), 0, "Player should have been dealt a card")
+        finally:
+            pubsub.close()
 
 
 if __name__ == "__main__":

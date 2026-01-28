@@ -102,4 +102,33 @@ This runs all components (bot, server, and redis) in Docker containers.
 
 ## Tests
 
-To run tests, run `python test.py`.
+### Unit Tests
+
+To run unit tests, run:
+```bash
+python test.py
+```
+
+### End-to-End Tests
+
+End-to-end tests validate the complete system integration using the Redis interface with real MySQL and Redis services (no mocking). These tests:
+- Start Redis and MySQL via docker-compose
+- Run the actual server process
+- Simulate client interactions through Redis pub/sub
+- Verify game logic, database persistence, and server behavior
+
+To run end-to-end tests:
+```bash
+python test_e2e.py
+```
+
+Or use the helper script:
+```bash
+./run-e2e-tests.sh
+```
+
+**Requirements:**
+- Docker and Docker Compose must be installed and running
+- The tests will automatically start and stop the necessary services
+
+**Note:** End-to-end tests take longer to run (~2 minutes) as they start/stop Docker containers and wait for game timing events.

@@ -22,46 +22,91 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+# Module-level resources shared across all test classes
+_redis = None
+_db = None
+
+
+def setUpModule():
+    """Start docker-compose services once for all tests."""
+    global _redis, _db
+
+    logging.info("Starting docker-compose services...")
+
+    # Start docker-compose services
+    subprocess.run(
+        ['docker', 'compose', '-f', 'compose.test.yml', 'up', '--wait'],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=60
+    )
+
+    # Give services a moment to fully stabilize
+    time.sleep(2)
+
+    logging.info("Docker-compose services ready")
+
+    # Connect to Redis and MySQL to verify they're ready
+    _redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
+    _redis.ping()
+
+    # Test MySQL connection and keep it for the module
+    _db = mysql.connector.connect(
+        host='localhost',
+        port=3306,
+        user='saloonbot',
+        password='saloonbot_password',
+        database='saloonbot'
+    )
+
+    logging.info("Redis and MySQL are ready")
+
+
+def tearDownModule():
+    """Stop docker-compose services after all tests."""
+    # Close Redis connection
+    if _redis:
+        _redis.close()
+
+    # Close MySQL connection
+    if _db:
+        _db.close()
+
+    # Stop docker-compose services
+    logging.info("Stopping docker-compose services...")
+    subprocess.run(
+        ['docker', 'compose', '-f', 'compose.test.yml', 'down', '-v'],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+
+    logging.info("Cleanup complete")
+
 
 class EndToEndTestCase(unittest.TestCase):
-    """Base test case that manages docker-compose and server process."""
+    """Base test case that manages the server process."""
+
+    server_process = None
 
     @classmethod
     def setUpClass(cls):
-        """Start docker-compose services and wait for them to be ready."""
-        logging.info("Starting docker-compose services...")
+        """Start the server process (docker-compose already running)."""
+        # Reference module-level resources
+        cls.redis = _redis
+        cls.db = _db
 
-        # Start docker-compose services
-        cls.compose_process = subprocess.Popen(
-            ['docker', 'compose', '-f', 'compose.test.yml', 'up', '--wait'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+        cls._start_server()
 
-        # Wait for services to be ready
-        cls.compose_process.wait(timeout=60)
+    @classmethod
+    def tearDownClass(cls):
+        """Stop the server process (NOT docker-compose)."""
+        cls._stop_server()
 
-        # Give services a moment to fully stabilize
-        time.sleep(2)
-
-        logging.info("Docker-compose services ready")
-
-        # Connect to Redis and MySQL to verify they're ready
-        cls.redis = redis.Redis(host='localhost', port=6379, decode_responses=True)
-        cls.redis.ping()
-
-        # Test MySQL connection and keep it for the class
-        cls.db = mysql.connector.connect(
-            host='localhost',
-            port=3306,
-            user='saloonbot',
-            password='saloonbot_password',
-            database='saloonbot'
-        )
-
-        logging.info("Redis and MySQL are ready")
-
-        # Start the server process
+    @classmethod
+    def _start_server(cls):
+        """Start the server process."""
         env = os.environ.copy()
         env.update({
             'REDIS_HOST': 'localhost',
@@ -93,9 +138,8 @@ class EndToEndTestCase(unittest.TestCase):
         logging.info("Server process started")
 
     @classmethod
-    def tearDownClass(cls):
-        """Stop the server and docker-compose services."""
-        # Stop the server process
+    def _stop_server(cls):
+        """Stop the server process."""
         if cls.server_process and cls.server_process.poll() is None:
             logging.info("Stopping server process...")
             cls.server_process.send_signal(signal.SIGTERM)
@@ -104,25 +148,6 @@ class EndToEndTestCase(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.server_process.kill()
                 cls.server_process.wait()
-
-        # Close Redis connection
-        if cls.redis:
-            cls.redis.close()
-
-        # Close MySQL connection
-        if cls.db:
-            cls.db.close()
-
-        # Stop docker-compose services
-        logging.info("Stopping docker-compose services...")
-        subprocess.run(
-            ['docker', 'compose', '-f', 'compose.test.yml', 'down', '-v'],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        logging.info("Cleanup complete")
 
     def setUp(self):
         """Set up for each test."""

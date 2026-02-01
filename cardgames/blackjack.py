@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from enum import Enum
 
@@ -49,8 +50,8 @@ class Dealer(Player):
 
 class Blackjack(CardGame):
 
-    PERIOD_REMINDER_PLAYER_TURN = 30
-    TIME_BETWEEN_HANDS = 10
+    PERIOD_REMINDER_PLAYER_TURN = int(os.getenv('BLACKJACK_REMINDER_PERIOD', '30'))
+    TIME_BETWEEN_HANDS = int(os.getenv('BLACKJACK_TIME_BETWEEN_HANDS', '10'))
 
     # Valid actions for each state
     VALID_ACTIONS = {

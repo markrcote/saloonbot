@@ -2,7 +2,6 @@ class Player:
     def __init__(self, name):
         self.name = name  # must be unique
         self.hand = []
-        self.wallet = 0
 
     def __eq__(self, other):
         return self.name == other.name

@@ -29,7 +29,7 @@ class Casino:
     def game_output(self, game_id, output):
         self.publish_event(
             f"game_updates_{game_id}",
-            { 'game_id': game_id, 'text': output }
+            {'game_id': game_id, 'text': output}
         )
 
     def listen(self):
@@ -39,7 +39,7 @@ class Casino:
             try:
                 pubsub.subscribe("casino")
                 break
-            except redis.exceptions.ConnectionError as e:
+            except redis.exceptions.ConnectionError:
                 if backoff is None:
                     backoff = 1
                 else:

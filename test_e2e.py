@@ -198,6 +198,16 @@ class EndToEndTestCase(unittest.TestCase):
             'action': action
         }))
 
+    def place_bet(self, game_id, player_name, amount):
+        """Send a bet action."""
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'player_action',
+            'game_id': game_id,
+            'player': player_name,
+            'action': 'bet',
+            'amount': amount
+        }))
+
     def create_game(self):
         """Helper method to create a game and return the game_id."""
         pubsub = self.redis.pubsub()
@@ -317,8 +327,14 @@ class TestBlackjackGame(EndToEndTestCase):
         try:
             self.join_player(game_id, 'Player1')
 
+            # Wait for betting phase
+            all_updates = self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+
+            # Place a bet
+            self.place_bet(game_id, 'Player1', 10)
+
             # Wait for player's initial hand to be dealt
-            all_updates = self.collect_messages(pubsub, timeout=5, stop_on='Player1 has')
+            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='Player1 has'))
 
             # Check that hand started
             hand_started = any('New hand started' in u for u in all_updates)
@@ -348,9 +364,15 @@ class TestBlackjackGame(EndToEndTestCase):
         try:
             self.join_player(game_id, 'HitPlayer')
 
+            # Wait for betting phase
+            all_updates = self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+
+            # Place a bet
+            self.place_bet(game_id, 'HitPlayer', 10)
+
             # Wait for player's initial hand to be dealt
             # (message like "HitPlayer has <card>, <card>")
-            all_updates = self.collect_messages(pubsub, timeout=5, stop_on='HitPlayer has')
+            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='HitPlayer has'))
 
             # Player hits
             self.player_action(game_id, 'HitPlayer', 'hit')

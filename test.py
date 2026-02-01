@@ -2,7 +2,9 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cardgames.blackjack import Action, Blackjack, HandState, InvalidActionError
+from cardgames.blackjack import (
+    Action, Blackjack, HandState, InvalidActionError, InvalidBetError
+)
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.player import Player
 
@@ -313,6 +315,187 @@ class TestDatabaseIntegration(unittest.TestCase):
 
         # Verify player was added to waiting list
         self.assertIn(player, game.players_waiting)
+
+
+class TestBlackjackBetting(unittest.TestCase):
+    def setUp(self):
+        self.game = Blackjack(game_id="test_game", casino=None)
+        # Set up a mock deck
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9), Card("H", 10)]
+
+    def test_state_transitions_to_betting(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_bet_action_valid_in_betting_state(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        player = self.game.players[0]
+        self.game.bet(player, 10)
+        self.assertEqual(self.game.bets[player.name], 10)
+
+    def test_bet_invalid_in_waiting_state(self):
+        self.assertEqual(self.game.state, HandState.WAITING)
+        self.game.join(Player("Player 1"))
+        player = self.game.players_waiting[0]
+        with self.assertRaises(CardGameError):
+            self.game.bet(player, 10)
+
+    def test_bet_below_minimum_rejected(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        player = self.game.players[0]
+        with self.assertRaises(InvalidBetError):
+            self.game.bet(player, self.game.MIN_BET - 1)
+
+    def test_bet_above_maximum_rejected(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        player = self.game.players[0]
+        with self.assertRaises(InvalidBetError):
+            self.game.bet(player, self.game.MAX_BET + 1)
+
+    def test_all_players_bet_triggers_dealing(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        player = self.game.players[0]
+        self.game.bet(player, 10)
+        self.game.tick()  # All bet -> PLAYING
+        self.assertEqual(self.game.state, HandState.PLAYING)
+
+    def test_timeout_removes_non_betting_players(self):
+        self.game.join(Player("Player 1"))
+        self.game.join(Player("Player 2"))
+        self.game.tick()  # WAITING -> BETTING
+        player1 = self.game.players[0]
+        self.game.bet(player1, 10)
+        # Simulate timeout
+        self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 1
+        self.game.tick()  # Timeout -> remove non-betting player -> PLAYING
+        self.assertEqual(self.game.state, HandState.PLAYING)
+        self.assertEqual(len(self.game.players), 1)
+        self.assertEqual(self.game.players[0].name, "Player 1")
+
+    def test_double_bet_rejected(self):
+        self.game.join(Player("Player 1"))
+        self.game.tick()  # WAITING -> BETTING
+        player = self.game.players[0]
+        self.game.bet(player, 10)
+        with self.assertRaises(CardGameError):
+            self.game.bet(player, 20)
+
+
+class TestBlackjackPayouts(unittest.TestCase):
+    def test_winner_gets_2x_bet(self):
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        # Stack deck so player wins (player gets 20, dealer gets 16 then busts)
+        # Cards dealt from END: dealer gets 2, player gets 2, dealer hits
+        # Deck order: [dealer_hit, player2, player1, dealer2, dealer1]
+        # Dealer: 10, 6 (16), then hits and gets 10 (26 bust)
+        # Player: 10, 10 (20)
+        game.deck = [Card("H", 10), Card("H", 10), Card("H", 10), Card("H", 6),
+                     Card("H", 10)]
+        game.join(Player("Player 1"))
+        game.tick()  # WAITING -> BETTING
+        player = game.players[0]
+        game.bet(player, 20)
+        game.tick()  # BETTING -> PLAYING
+        game.stand(player)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> BETWEEN_HANDS
+
+        # Find the payout call (should be 40 = 2x bet)
+        payout_calls = [call for call in mock_db.update_wallet.call_args_list
+                        if call[0][1] > 0]  # Positive amount = payout
+        self.assertEqual(len(payout_calls), 1)
+        self.assertEqual(payout_calls[0][0], ("Player 1", 40))
+
+    def test_tie_returns_bet(self):
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        # Stack deck for tie - both dealer and player get 20
+        # Dealer: 10, 10 (20)
+        # Player: 10, 10 (20)
+        game.deck = [Card("H", 10), Card("H", 10), Card("S", 10), Card("S", 10)]
+        game.join(Player("Player 1"))
+        game.tick()  # WAITING -> BETTING
+        player = game.players[0]
+        game.bet(player, 20)
+        game.tick()  # BETTING -> PLAYING
+        game.stand(player)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> BETWEEN_HANDS
+
+        # Find the return call (should be 20 = bet returned)
+        payout_calls = [call for call in mock_db.update_wallet.call_args_list
+                        if call[0][1] > 0]  # Positive amount = payout
+        self.assertEqual(len(payout_calls), 1)
+        self.assertEqual(payout_calls[0][0], ("Player 1", 20))
+
+    def test_loser_forfeits_bet(self):
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        # Stack deck so player loses (player gets 15, dealer gets 20)
+        # Cards dealt from END: dealer gets 2, player gets 2
+        # Deck order: [player2, player1, dealer2, dealer1]
+        # Dealer: 10, 10 (20)
+        # Player: 10, 5 (15)
+        game.deck = [Card("H", 5), Card("H", 10), Card("H", 10), Card("H", 10)]
+        game.join(Player("Player 1"))
+        game.tick()  # WAITING -> BETTING
+        player = game.players[0]
+        game.bet(player, 20)
+        game.tick()  # BETTING -> PLAYING
+        game.stand(player)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> BETWEEN_HANDS
+
+        # Should have only one update call (the initial bet deduction)
+        payout_calls = [call for call in mock_db.update_wallet.call_args_list
+                        if call[0][1] > 0]  # Positive amount = payout
+        self.assertEqual(len(payout_calls), 0)
+
+    def test_leave_forfeits_bet(self):
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+        game.join(Player("Player 1"))
+        game.tick()  # WAITING -> BETTING
+        player = game.players[0]
+        game.bet(player, 20)
+        game.leave(player)
+
+        # Should not have any refund calls (bet forfeited)
+        refund_calls = [call for call in mock_db.update_wallet.call_args_list
+                        if call[0][1] > 0]  # Positive amount = refund
+        self.assertEqual(len(refund_calls), 0)
 
 
 if __name__ == "__main__":

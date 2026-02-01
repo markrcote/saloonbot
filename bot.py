@@ -146,8 +146,18 @@ class BlackjackCog(commands.Cog):
         if not game:
             return
 
-        command = message.content.split()[0]
-        await self.send_command(message.author.name, game, command)
+        parts = message.content.split()
+        command = parts[0]
+
+        # Handle bet command with amount
+        if command == "bet" and len(parts) > 1:
+            try:
+                amount = int(parts[1])
+                await self.send_command(message.author.name, game, command, amount=amount)
+            except ValueError:
+                await message.channel.send("Invalid bet amount. Usage: bet <amount>")
+        else:
+            await self.send_command(message.author.name, game, command)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(self, interaction: nextcord.Interaction):
@@ -195,6 +205,21 @@ class BlackjackCog(commands.Cog):
         await self.send_command(interaction.user.name, game, "leave")
         await interaction.send("Leaving game...")
 
+    @nextcord.slash_command(name="bet", guild_ids=GUILD_IDS)
+    async def place_bet(self, interaction: nextcord.Interaction, amount: int):
+        """Place a bet in the current game."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("No game currently in progress.")
+            return
+
+        if game.state != GameState.ACTIVE:
+            await interaction.send("Game is not active.")
+            return
+
+        await self.send_command(interaction.user.name, game, "bet", amount=amount)
+        await interaction.send(f"Placing bet of ${amount}...")
+
     @tasks.loop(seconds=3.0)
     async def listen(self):
         '''Background tasks that listens for messages on self.pubsub.'''
@@ -233,7 +258,7 @@ class BlackjackCog(commands.Cog):
                     game.state = GameState.ACTIVE
                     game.game_id = data.get("game_id")
                     await game.channel.send(f"Game {game.game_id} created.")
-                    await game.channel.send(f"Waiting for players.")
+                    await game.channel.send("Waiting for players.")
                     logging.debug(f"Game created: {game.game_id}")
                     try:
                         await self.pubsub.subscribe(game.topic())
@@ -247,13 +272,14 @@ class BlackjackCog(commands.Cog):
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
 
-    async def send_command(self, player_name, game, cmd):
+    async def send_command(self, player_name, game, cmd, **kwargs):
         message = {
             "player": player_name,
             "event_type": "player_action",
             "game_id": game.game_id,
             "action": cmd
         }
+        message.update(kwargs)
         try:
             await self.redis.publish("casino", json.dumps(message))
         except Exception as e:

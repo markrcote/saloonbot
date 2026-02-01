@@ -1,7 +1,5 @@
 import random
 
-from .player import Player
-
 
 class CardGameError(Exception):
     pass

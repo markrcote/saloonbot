@@ -80,7 +80,7 @@ Discord Users
 ### Key Modules
 
 **cardgames/**
-- `blackjack.py` - Main game logic with states: WAITING → ACTIVE → FINISHED
+- `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS
 - `casino.py` - Redis pub/sub coordinator, manages game instances
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `database.py` - MySQL connection with auto-reconnect
@@ -102,11 +102,16 @@ Discord Users
 | DISCORD_TOKEN | - | Bot token (or use DISCORD_TOKEN_FILE) |
 | DISCORD_GUILDS | - | Comma-separated guild IDs (or use DISCORD_GUILDS_FILE) |
 | SALOONBOT_DEBUG | - | Set to enable debug logging |
+| BLACKJACK_MIN_BET | 5 | Minimum bet amount in dollars |
+| BLACKJACK_MAX_BET | 100 | Maximum bet amount in dollars |
+| BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
+| BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
+| BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
 
 ## Key Patterns
 
 - Bot uses asyncio with `@tasks.loop(seconds=3.0)` for polling Redis
 - Server uses synchronous Redis in blocking game loop
 - Both implement exponential backoff for Redis reconnection
-- Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`
+- Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders

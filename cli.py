@@ -39,6 +39,13 @@ class CasinoCli:
                         "game_id": self.game_id,
                         "action": cmd
                     }
+                    # Handle bet command with amount
+                    if cmd == "bet" and len(args) > 1:
+                        try:
+                            message["amount"] = int(args[1])
+                        except ValueError:
+                            logging.error("Invalid bet amount. Usage: bet <amount>")
+                            continue
                     await self.redis.publish("casino", json.dumps(message))
 
     async def get_updates(self):

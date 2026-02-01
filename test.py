@@ -226,7 +226,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
         self.game.dealer_turn()
         self.assertEqual(self.game.state, HandState.RESOLVING)
 
-    def test_state_transitions_to_waiting_after_time_between_hands(self):
+    def test_state_transitions_to_between_hands_after_resolving(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]
         self.game.join(Player("Player 1"))
@@ -234,6 +234,19 @@ class TestBlackjackStateMachine(unittest.TestCase):
         self.game.stand(self.game.players[0])
         self.game.dealer_turn()
         self.assertEqual(self.game.state, HandState.RESOLVING)
+        # Tick resolves the hand and transitions to BETWEEN_HANDS
+        self.game.tick()
+        self.assertEqual(self.game.state, HandState.BETWEEN_HANDS)
+
+    def test_state_transitions_to_waiting_after_time_between_hands(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.game.stand(self.game.players[0])
+        self.game.dealer_turn()
+        self.game.tick()  # RESOLVING -> BETWEEN_HANDS
+        self.assertEqual(self.game.state, HandState.BETWEEN_HANDS)
         # Simulate time passing
         self.game.time_last_hand_ended = time.time() - self.game.TIME_BETWEEN_HANDS - 1
         self.game.tick()

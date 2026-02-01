@@ -5,15 +5,16 @@ from enum import Enum
 import mysql.connector
 
 from .card_game import CardGame, CardGameError
-from .player import Player, PlayerNotFoundError, registry as player_registry
+from .player import Player, registry as player_registry
 
 
 class HandState(Enum):
     """Explicit states for a blackjack hand."""
-    WAITING = "waiting"          # Between hands, players can join/leave
-    PLAYING = "playing"          # Player turns (hit/stand)
-    DEALER_TURN = "dealer_turn"  # Dealer plays automatically
-    RESOLVING = "resolving"      # Hand finished, waiting for next hand
+    WAITING = "waiting"              # No hand, players can join/leave
+    PLAYING = "playing"              # Player turns (hit/stand)
+    DEALER_TURN = "dealer_turn"      # Dealer plays automatically
+    RESOLVING = "resolving"          # Announce winners, handle payouts
+    BETWEEN_HANDS = "between_hands"  # Wait period before next hand
 
 
 class Action:
@@ -56,7 +57,8 @@ class Blackjack(CardGame):
         HandState.WAITING: {Action.JOIN, Action.LEAVE},
         HandState.PLAYING: {Action.HIT, Action.STAND, Action.LEAVE},
         HandState.DEALER_TURN: {Action.LEAVE},
-        HandState.RESOLVING: {Action.JOIN, Action.LEAVE},
+        HandState.RESOLVING: {Action.LEAVE},
+        HandState.BETWEEN_HANDS: {Action.JOIN, Action.LEAVE},
     }
 
     def __init__(self, game_id, casino):
@@ -148,7 +150,7 @@ class Blackjack(CardGame):
             self.output(
                 f"{self.dealer} reveals {self.dealer.hand[1]}. Dealer wins."
             )
-            self.end_hand()
+            self.state = HandState.RESOLVING
             return
 
         # Deal two cards to each player
@@ -161,6 +163,7 @@ class Blackjack(CardGame):
         self.current_player_idx = 0
 
     def end_hand(self):
+        """Resolve the hand: compare scores and announce winners."""
         wins = []
         ties = []
         losses = []
@@ -182,9 +185,8 @@ class Blackjack(CardGame):
                     self.output(f"{player} loses.")
                     losses.append(player)
 
-        # Transition to resolving state
-        self.state = HandState.RESOLVING
         self.current_player_idx = None
+        self.state = HandState.BETWEEN_HANDS
         self.time_last_hand_ended = time.time()
 
     def hit(self, player):
@@ -247,6 +249,7 @@ class Blackjack(CardGame):
         return score
 
     def dealer_turn(self):
+        """Execute dealer's play: hit until 17 or higher."""
         if self.state != HandState.DEALER_TURN:
             raise CardGameError("Not dealer's turn")
 
@@ -262,15 +265,12 @@ class Blackjack(CardGame):
 
         if self.get_score(self.dealer) == 21:
             self.output("Dealer has 21.")
-            self.end_hand()
-            return
         elif self.get_score(self.dealer) > 21:
             self.output("Dealer busts.")
-            self.end_hand()
-            return
+        else:
+            self.output(f"Dealer stands with {self.get_score(self.dealer)}.")
 
-        self.output(f"Dealer stands with {self.get_score(self.dealer)}.")
-        self.end_hand()
+        self.state = HandState.RESOLVING
 
     def action(self, data):
         if data['event_type'] == 'player_action':
@@ -300,6 +300,8 @@ class Blackjack(CardGame):
             self._tick_dealer_turn()
         elif self.state == HandState.RESOLVING:
             self._tick_resolving()
+        elif self.state == HandState.BETWEEN_HANDS:
+            self._tick_between_hands()
 
     def _tick_waiting(self):
         """Handle WAITING state: start new hand when players are ready."""
@@ -327,6 +329,10 @@ class Blackjack(CardGame):
         self.dealer_turn()
 
     def _tick_resolving(self):
-        """Handle RESOLVING state: wait then transition to WAITING."""
+        """Handle RESOLVING state: resolve the hand."""
+        self.end_hand()
+
+    def _tick_between_hands(self):
+        """Handle BETWEEN_HANDS state: wait then transition to WAITING."""
         if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
             self.state = HandState.WAITING

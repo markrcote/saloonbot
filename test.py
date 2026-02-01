@@ -2,7 +2,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cardgames.blackjack import Blackjack
+from cardgames.blackjack import Action, Blackjack, HandState, InvalidActionError
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.player import Player
 
@@ -194,6 +194,71 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(len(self.game.dealer.hand), 4)
         self.assertEqual(self.game.get_score(self.game.dealer), 26)
         self.game.tick()
+
+
+class TestBlackjackStateMachine(unittest.TestCase):
+    def setUp(self):
+        self.game = Blackjack(game_id="test_game", casino=None)
+
+    def test_initial_state_is_waiting(self):
+        self.assertEqual(self.game.state, HandState.WAITING)
+
+    def test_state_transitions_to_playing_on_new_hand(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(self.game.state, HandState.PLAYING)
+
+    def test_state_transitions_to_dealer_turn_after_all_players_stand(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.game.stand(self.game.players[0])
+        self.assertEqual(self.game.state, HandState.DEALER_TURN)
+
+    def test_state_transitions_to_resolving_after_dealer_turn(self):
+        # Need enough cards for dealer to potentially hit multiple times
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.game.stand(self.game.players[0])
+        self.game.dealer_turn()
+        self.assertEqual(self.game.state, HandState.RESOLVING)
+
+    def test_state_transitions_to_waiting_after_time_between_hands(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.game.stand(self.game.players[0])
+        self.game.dealer_turn()
+        self.assertEqual(self.game.state, HandState.RESOLVING)
+        # Simulate time passing
+        self.game.time_last_hand_ended = time.time() - self.game.TIME_BETWEEN_HANDS - 1
+        self.game.tick()
+        self.assertEqual(self.game.state, HandState.WAITING)
+
+    def test_invalid_action_hit_during_waiting(self):
+        self.assertEqual(self.game.state, HandState.WAITING)
+        with self.assertRaises(InvalidActionError):
+            self.game.action({
+                'event_type': 'player_action',
+                'player': 'TestPlayer',
+                'action': Action.HIT
+            })
+
+    def test_invalid_action_join_during_playing(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+        self.game.join(Player("Player 1"))
+        self.game.new_hand()
+        self.assertEqual(self.game.state, HandState.PLAYING)
+        with self.assertRaises(InvalidActionError):
+            self.game.action({
+                'event_type': 'player_action',
+                'player': 'Player 2',
+                'action': Action.JOIN
+            })
 
 
 class TestDatabaseIntegration(unittest.TestCase):

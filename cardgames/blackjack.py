@@ -1,11 +1,27 @@
-import json
 import logging
 import time
+from enum import Enum
 
 import mysql.connector
 
 from .card_game import CardGame, CardGameError
 from .player import Player, PlayerNotFoundError, registry as player_registry
+
+
+class HandState(Enum):
+    """Explicit states for a blackjack hand."""
+    WAITING = "waiting"          # Between hands, players can join/leave
+    PLAYING = "playing"          # Player turns (hit/stand)
+    DEALER_TURN = "dealer_turn"  # Dealer plays automatically
+    RESOLVING = "resolving"      # Hand finished, waiting for next hand
+
+
+class Action:
+    """Player action constants."""
+    JOIN = "join"
+    LEAVE = "leave"
+    HIT = "hit"
+    STAND = "stand"
 
 
 class NotPlayerTurnError(CardGameError):
@@ -16,6 +32,15 @@ class NotPlayerTurnError(CardGameError):
         return f"It is not {self.player}'s turn"
 
 
+class InvalidActionError(CardGameError):
+    def __init__(self, action, state):
+        self.action = action
+        self.state = state
+
+    def __str__(self):
+        return f"Action '{self.action}' is not valid in state '{self.state.value}'"
+
+
 class Dealer(Player):
     def __init__(self):
         super().__init__("Dealer")
@@ -23,10 +48,16 @@ class Dealer(Player):
 
 class Blackjack(CardGame):
 
-    dealer = "dealer"
-
     PERIOD_REMINDER_PLAYER_TURN = 30
     TIME_BETWEEN_HANDS = 10
+
+    # Valid actions for each state
+    VALID_ACTIONS = {
+        HandState.WAITING: {Action.JOIN, Action.LEAVE},
+        HandState.PLAYING: {Action.HIT, Action.STAND, Action.LEAVE},
+        HandState.DEALER_TURN: {Action.LEAVE},
+        HandState.RESOLVING: {Action.JOIN, Action.LEAVE},
+    }
 
     def __init__(self, game_id, casino):
         """ Initialize a new Blackjack game.
@@ -41,10 +72,11 @@ class Blackjack(CardGame):
         self.dealer = Dealer()
         self.players_waiting = []
 
-        # `current_player_idx` is one of the following:
-        #  None: no hand is in progress.
-        #  int < len(self.players): that player's turn
-        #  int == len(self.players): dealer's turn
+        # Explicit game state
+        self.state = HandState.WAITING
+
+        # Index of current player during PLAYING state
+        # None when not in PLAYING state
         self.current_player_idx = None
 
         self.time_last_hand_ended = None
@@ -58,10 +90,16 @@ class Blackjack(CardGame):
         if self.players[self.current_player_idx] != player:
             raise NotPlayerTurnError(player)
 
-    def _check_hand_in_progress(self):
-        '''Raise exception if no hand in progress.'''
-        if self.current_player_idx is None:
-            raise CardGameError("No game in progress")
+    def _check_playing_state(self):
+        '''Raise exception if not in playing state.'''
+        if self.state != HandState.PLAYING:
+            raise CardGameError("No hand in progress")
+
+    def _validate_action(self, action):
+        '''Raise exception if action is not valid for current state.'''
+        valid_actions = self.VALID_ACTIONS.get(self.state, set())
+        if action not in valid_actions:
+            raise InvalidActionError(action, self.state)
 
     def _update_time_last_event(self):
         self.time_last_event = time.time()
@@ -103,7 +141,6 @@ class Blackjack(CardGame):
             self.discard_all(player)
         self.discard_all(self.dealer)
 
-        self.current_player_idx = 0
         self.deal(self.dealer, 2)
         self.output(f"{self.dealer} shows {self.dealer.hand[0]}")
 
@@ -118,6 +155,10 @@ class Blackjack(CardGame):
         for player in self.players:
             self.deal(player, 2)
             self.output(f"{player} has {player.hand_str()}")
+
+        # Transition to playing state
+        self.state = HandState.PLAYING
+        self.current_player_idx = 0
 
     def end_hand(self):
         wins = []
@@ -140,10 +181,14 @@ class Blackjack(CardGame):
                 else:
                     self.output(f"{player} loses.")
                     losses.append(player)
+
+        # Transition to resolving state
+        self.state = HandState.RESOLVING
         self.current_player_idx = None
+        self.time_last_hand_ended = time.time()
 
     def hit(self, player):
-        self._check_hand_in_progress()
+        self._check_playing_state()
         self._check_turn(player)
         self._update_time_last_event()
         self.deal(player)
@@ -160,29 +205,30 @@ class Blackjack(CardGame):
         self.next_turn()
 
     def stand(self, player):
-        self._check_hand_in_progress()
+        self._check_playing_state()
         self._check_turn(player)
         self._update_time_last_event()
         self.output(f"{player} stands.")
         self.next_turn()
 
     def hand_in_progress(self):
-        return self.current_player_idx is not None
+        return self.state in (HandState.PLAYING, HandState.DEALER_TURN)
 
     def is_player_turn(self):
-        return self.current_player_idx is not None and self.current_player_idx < len(self.players)
+        return self.state == HandState.PLAYING
 
     def is_dealer_turn(self):
-        return self.current_player_idx == len(self.players)
+        return self.state == HandState.DEALER_TURN
 
     def next_turn(self):
-        if self.current_player_idx is None:
-            raise CardGameError("No game in progress")
+        if self.state != HandState.PLAYING:
+            raise CardGameError("No hand in progress")
 
-        if self.current_player_idx < len(self.players):
-            self.current_player_idx += 1
-        else:
-            raise CardGameError("All players have played this hand")
+        self.current_player_idx += 1
+        if self.current_player_idx >= len(self.players):
+            # All players have played, transition to dealer's turn
+            self.state = HandState.DEALER_TURN
+            self.current_player_idx = None
 
     def get_score(self, player):
         sorted_hand = sorted(player.hand, key=lambda card: card.value)
@@ -201,11 +247,8 @@ class Blackjack(CardGame):
         return score
 
     def dealer_turn(self):
-        if self.current_player_idx is None:
-            raise CardGameError("No game in progress")
-
-        if self.current_player_idx < len(self.players):
-            raise CardGameError("Players still have turns")
+        if self.state != HandState.DEALER_TURN:
+            raise CardGameError("Not dealer's turn")
 
         self.output(f"Dealer is showing {self.dealer.hand[0]}.")
         self.output("Dealer flips over the second card.")
@@ -231,47 +274,59 @@ class Blackjack(CardGame):
 
     def action(self, data):
         if data['event_type'] == 'player_action':
-            # Eventually we'll want to manage players properly with a datastore
-            # but for now always add them.
             player = player_registry.get_player(data['player'], add=True)
+            action = data['action']
 
-            if data['action'] == 'join':
+            # Validate action is allowed in current state
+            self._validate_action(action)
+
+            if action == Action.JOIN:
                 self.join(player)
-            elif data['action'] == 'leave':
+            elif action == Action.LEAVE:
                 self.leave(player)
-            elif data['action'] == 'hit':
+            elif action == Action.HIT:
                 self.hit(player)
-            elif data['action'] == 'stand':
+            elif action == Action.STAND:
                 self.stand(player)
 
     def tick(self):
-        logging.debug("tick")
-        if self.hand_in_progress():
-            if not self.players:
-                self.output("All players have left the table.")
-                # TODO: clean up bets and cards.
-                self.current_player_idx = None
-            elif self.is_dealer_turn():
-                self.output("Dealer's turn")
-                self.dealer_turn()
+        logging.debug(f"tick: state={self.state.value}")
 
-        if not self.hand_in_progress():
-            if self.players or self.players_waiting:
-                if self.time_last_hand_ended is None:
-                    self.time_last_hand_ended = time.time()
-                    self._update_time_last_event()
+        if self.state == HandState.WAITING:
+            self._tick_waiting()
+        elif self.state == HandState.PLAYING:
+            self._tick_playing()
+        elif self.state == HandState.DEALER_TURN:
+            self._tick_dealer_turn()
+        elif self.state == HandState.RESOLVING:
+            self._tick_resolving()
 
-                if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
-                    if self.players or self.players_waiting:
-                        self.time_last_hand_ended = None
-                        self.new_hand()
-                    else:
-                        # Wait another period for one or more players to join.
-                        self.time_last_hand_ended = time.time()
+    def _tick_waiting(self):
+        """Handle WAITING state: start new hand when players are ready."""
+        if self.players or self.players_waiting:
+            self.new_hand()
 
-        if self.hand_in_progress():
-            if time.time() > self.time_last_event + self.PERIOD_REMINDER_PLAYER_TURN:
-                    if self.is_player_turn():
-                        f_curr_player = self.players[self.current_player_idx]
-                        self.output(f"{f_curr_player}, it's your turn.")
-                        self._update_time_last_event()
+    def _tick_playing(self):
+        """Handle PLAYING state: check for empty table, remind current player."""
+        if not self.players:
+            self.output("All players have left the table.")
+            # TODO: clean up bets and cards.
+            self.state = HandState.WAITING
+            self.current_player_idx = None
+            return
+
+        # Remind current player if they're taking too long
+        if time.time() > self.time_last_event + self.PERIOD_REMINDER_PLAYER_TURN:
+            current_player = self.players[self.current_player_idx]
+            self.output(f"{current_player}, it's your turn.")
+            self._update_time_last_event()
+
+    def _tick_dealer_turn(self):
+        """Handle DEALER_TURN state: execute dealer's turn."""
+        self.output("Dealer's turn")
+        self.dealer_turn()
+
+    def _tick_resolving(self):
+        """Handle RESOLVING state: wait then transition to WAITING."""
+        if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
+            self.state = HandState.WAITING

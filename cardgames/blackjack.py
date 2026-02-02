@@ -129,6 +129,14 @@ class Blackjack(CardGame):
         if self.casino:
             self.casino.game_output(self.game_id, output)
 
+    def _output_player_result(self, player, result):
+        """Output a player's result with their current wallet balance."""
+        if self.casino and self.casino.db:
+            balance = self.casino.db.get_user_wallet(player.name) or 0
+            self.output(f"{player} {result} Wallet: ${balance:.2f}")
+        else:
+            self.output(f"{player} {result}")
+
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
             raise NotPlayerTurnError(player)
@@ -204,6 +212,14 @@ class Blackjack(CardGame):
         self.output(f"Minimum bet: ${self.MIN_BET}, Maximum bet: ${self.MAX_BET}")
         self.output(f"You have {self.TIME_FOR_BETTING} seconds.")
 
+        # Output all players' wallets before betting
+        if self.casino and self.casino.db:
+            wallet_lines = []
+            for p in self.players:
+                balance = self.casino.db.get_user_wallet(p.name) or 0
+                wallet_lines.append(f"{p}: ${balance:.2f}")
+            self.output("Wallets: " + ", ".join(wallet_lines))
+
     def bet(self, player, amount):
         """Place a bet for a player."""
         if self.state != HandState.BETTING:
@@ -234,7 +250,13 @@ class Blackjack(CardGame):
 
         self.bets[player.name] = amount
         self._update_time_last_event()
-        self.output(f"{player} bets ${amount:.2f}")
+
+        # Output bet and updated wallet
+        if self.casino and self.casino.db:
+            new_balance = self.casino.db.get_user_wallet(player.name) or 0
+            self.output(f"{player} bets ${amount:.2f}. Wallet: ${new_balance:.2f}")
+        else:
+            self.output(f"{player} bets ${amount:.2f}")
 
     def new_hand(self):
         self.players.extend(self.players_waiting)
@@ -285,27 +307,27 @@ class Blackjack(CardGame):
             bet_amount = self.bets.get(player.name, 0)
 
             if self.get_score(player) > 21:
-                self.output(f"{player} busted out. Lost ${bet_amount:.2f}")
                 losses.append(player)
                 # Bet already deducted, nothing to do
+                self._output_player_result(player, f"busted out. Lost ${bet_amount:.2f}")
             else:
                 self.output(f"{player} has {self.get_score(player)}.")
                 if self.get_score(self.dealer) > 21 or \
                    self.get_score(player) > self.get_score(self.dealer):
                     winnings = bet_amount * 2  # Return bet + win equal amount
-                    self.output(f"{player} wins!!! Payout: ${winnings:.2f}")
                     wins.append(player)
                     if self.casino and self.casino.db:
                         self.casino.db.update_wallet(player.name, winnings)
+                    self._output_player_result(player, f"wins!!! Payout: ${winnings:.2f}")
                 elif self.get_score(player) == self.get_score(self.dealer):
-                    self.output(f"{player} ties with dealer. Bet returned: ${bet_amount:.2f}")
                     ties.append(player)
                     if self.casino and self.casino.db:
                         self.casino.db.update_wallet(player.name, bet_amount)
+                    self._output_player_result(player, f"ties with dealer. Bet returned: ${bet_amount:.2f}")
                 else:
-                    self.output(f"{player} loses. Lost ${bet_amount:.2f}")
                     losses.append(player)
                     # Bet already deducted, nothing to do
+                    self._output_player_result(player, f"loses. Lost ${bet_amount:.2f}")
 
         self.bets = {}  # Clear bets for next hand
         self.current_player_idx = None

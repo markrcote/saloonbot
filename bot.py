@@ -277,7 +277,7 @@ class BlackjackCog(commands.Cog):
                     text = data["text"]
 
                     # Use embeds for special messages
-                    if "🏆 strikes gold" in text or "wins" in text.lower():
+                    if "🏆 strikes gold" in text:
                         # Win message - use green/gold
                         embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
                         await game.channel.send(embed=embed)
@@ -287,10 +287,7 @@ class BlackjackCog(commands.Cog):
                         await game.channel.send(embed=embed)
                     elif "✨ ~*~ The dust settles" in text:
                         # End of hand - use blue
-                        embed = nextcord.Embed(
-                            title=text,
-                            color=0x4169e1  # Royal blue
-                        )
+                        embed = nextcord.Embed(description=text, color=0x4169e1)  # Royal blue
                         await game.channel.send(embed=embed)
                     elif "🃏 The dealer shuffles" in text:
                         # New hand - use purple

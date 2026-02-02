@@ -263,11 +263,16 @@ class Blackjack(CardGame):
         # Deal two cards to each player
         for player in self.players:
             self.deal(player, 2)
-            self.output(f"{player} has {player.hand_str()}")
 
-        # Transition to playing state
+        # Transition to playing state before announcing hands
+        # This ensures actions can be processed as soon as clients see hands
         self.state = HandState.PLAYING
         self.current_player_idx = 0
+
+        for player in self.players:
+            self.output(f"{player} has {player.hand_str()}")
+
+        self.output(f"{self.players[0]}, it's your turn.")
 
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""

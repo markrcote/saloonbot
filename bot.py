@@ -89,7 +89,7 @@ async def version(interaction: nextcord.Interaction):
 async def wwname(interaction: nextcord.Interaction, gender: str = "",
                  number: int = 1):
     names = WildWestNames()
-    await interaction.send(names.random_name(gender, number))
+    await interaction.send(f"🤠 {names.random_name(gender, number)}")
 
 
 class GameState(Enum):
@@ -155,7 +155,7 @@ class BlackjackCog(commands.Cog):
                 amount = int(parts[1])
                 await self.send_command(message.author.name, game, command, amount=amount)
             except ValueError:
-                await message.channel.send("Invalid bet amount. Usage: bet <amount>")
+                await message.channel.send("⚠️ Invalid bet amount. Usage: bet <amount>")
         else:
             await self.send_command(message.author.name, game, command)
 
@@ -164,7 +164,7 @@ class BlackjackCog(commands.Cog):
         """Start a game if none in progress in this guild and channel."""
         game = self.find_game_by_interaction(interaction)
         if game:
-            await interaction.send("A game is already in progress in this channel.")
+            await interaction.send("⚠️ A game is already in progress in this channel.")
             return
 
         game = BlackjackGame(interaction.guild_id, interaction.channel_id, interaction.channel)
@@ -178,47 +178,47 @@ class BlackjackCog(commands.Cog):
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
-            await interaction.send("Starting new game...")
+            await interaction.send("🎲 Starting new game...")
         except redis.exceptions.ConnectionError as e:
             logging.error(f"Redis publish error: {e}")
-            await interaction.send("Failed to communicate with game server.")
+            await interaction.send("❌ Failed to communicate with game server.")
 
     @nextcord.slash_command(name="joingame", guild_ids=GUILD_IDS)
     async def join_game(self, interaction: nextcord.Interaction):
         game = self.find_game_by_interaction(interaction)
         if game:
             if game.state != GameState.ACTIVE:
-                await interaction.send("Game is not active.")
+                await interaction.send("⚠️ Game is not active.")
             else:
                 await self.send_command(interaction.user.name, game, "join")
-                await interaction.send("Joining game...")
+                await interaction.send("🎰 Joining game...")
         else:
-            await interaction.send("No game currently in progress.")
+            await interaction.send("⚠️ No game currently in progress.")
 
     @nextcord.slash_command(name="leavegame", guild_ids=GUILD_IDS)
     async def leave_game(self, interaction: nextcord.Interaction):
         game = self.find_game_by_interaction(interaction)
         if not game:
-            await interaction.send("No game currently in progress.")
+            await interaction.send("⚠️ No game currently in progress.")
             return
 
         await self.send_command(interaction.user.name, game, "leave")
-        await interaction.send("Leaving game...")
+        await interaction.send("👋 Leaving game...")
 
     @nextcord.slash_command(name="bet", guild_ids=GUILD_IDS)
     async def place_bet(self, interaction: nextcord.Interaction, amount: int):
         """Place a bet in the current game."""
         game = self.find_game_by_interaction(interaction)
         if not game:
-            await interaction.send("No game currently in progress.")
+            await interaction.send("⚠️ No game currently in progress.")
             return
 
         if game.state != GameState.ACTIVE:
-            await interaction.send("Game is not active.")
+            await interaction.send("⚠️ Game is not active.")
             return
 
         await self.send_command(interaction.user.name, game, "bet", amount=amount)
-        await interaction.send(f"Placing bet of ${amount}...")
+        await interaction.send(f"💵 Placing bet of ${amount}...")
 
     @tasks.loop(seconds=3.0)
     async def listen(self):
@@ -257,8 +257,8 @@ class BlackjackCog(commands.Cog):
                         return
                     game.state = GameState.ACTIVE
                     game.game_id = data.get("game_id")
-                    await game.channel.send(f"Game {game.game_id} created.")
-                    await game.channel.send("Waiting for players.")
+                    await game.channel.send(f"🎲 Game {game.game_id} created.")
+                    await game.channel.send("⏳ Waiting for players.")
                     logging.debug(f"Game created: {game.game_id}")
                     try:
                         await self.pubsub.subscribe(game.topic())

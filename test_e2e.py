@@ -337,17 +337,17 @@ class TestBlackjackGame(EndToEndTestCase):
             all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='Player1 has'))
 
             # Check that hand started
-            hand_started = any('New hand started' in u for u in all_updates)
+            hand_started = any('shuffles and deals' in u for u in all_updates)
             self.assertTrue(hand_started, "A hand should have started")
 
             # Player stands
             self.player_action(game_id, 'Player1', 'stand')
 
             # Wait for dealer turn and end of hand
-            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='End of hand'))
+            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='dust settles'))
 
             # Verify game flow
-            hand_ended = any('End of hand' in u for u in all_updates)
+            hand_ended = any('dust settles' in u for u in all_updates)
             self.assertTrue(hand_ended, f"Hand should have ended. Messages: {all_updates}")
 
             # Verify dealer played
@@ -380,8 +380,8 @@ class TestBlackjackGame(EndToEndTestCase):
             # Wait for hit result
             all_updates.extend(self.collect_messages(pubsub, timeout=5))
 
-            # Verify hit action was processed (message like "HitPlayer is dealt <card>")
-            hit_messages = [u for u in all_updates if 'is dealt' in u and 'HitPlayer' in u]
+            # Verify hit action was processed (message like "HitPlayer draws... <card>")
+            hit_messages = [u for u in all_updates if 'draws' in u and 'HitPlayer' in u]
             self.assertGreater(len(hit_messages), 0, "Player should have been dealt a card")
         finally:
             pubsub.close()

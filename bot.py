@@ -257,8 +257,14 @@ class BlackjackCog(commands.Cog):
                         return
                     game.state = GameState.ACTIVE
                     game.game_id = data.get("game_id")
-                    await game.channel.send(f"🎲 Game {game.game_id} created.")
-                    await game.channel.send("⏳ Waiting for players.")
+
+                    # Use embed for game creation
+                    embed = nextcord.Embed(
+                        title="🎲 New Blackjack Game",
+                        description=f"Game {game.game_id} created.\n⏳ Waiting for players.",
+                        color=0x00ff00  # Green
+                    )
+                    await game.channel.send(embed=embed)
                     logging.debug(f"Game created: {game.game_id}")
                     try:
                         await self.pubsub.subscribe(game.topic())
@@ -268,7 +274,35 @@ class BlackjackCog(commands.Cog):
             for game in self.games:
                 if game.topic() == topic:
                     logging.debug("Got game message")
-                    await game.channel.send(data["text"])
+                    text = data["text"]
+
+                    # Use embeds for special messages
+                    if "🏆 strikes gold" in text or "wins" in text.lower():
+                        # Win message - use green/gold
+                        embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
+                        await game.channel.send(embed=embed)
+                    elif "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
+                        # Bust/loss message - use red
+                        embed = nextcord.Embed(description=text, color=0xff0000)  # Red
+                        await game.channel.send(embed=embed)
+                    elif "✨ ~*~ The dust settles" in text:
+                        # End of hand - use blue
+                        embed = nextcord.Embed(
+                            title=text,
+                            color=0x4169e1  # Royal blue
+                        )
+                        await game.channel.send(embed=embed)
+                    elif "🃏 The dealer shuffles" in text:
+                        # New hand - use purple
+                        embed = nextcord.Embed(description=text, color=0x9370db)  # Medium purple
+                        await game.channel.send(embed=embed)
+                    elif "💰 Ante up" in text:
+                        # Betting phase - use orange
+                        embed = nextcord.Embed(description=text, color=0xff8c00)  # Dark orange
+                        await game.channel.send(embed=embed)
+                    else:
+                        # Regular message - plain text
+                        await game.channel.send(text)
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
 

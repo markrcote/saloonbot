@@ -2,7 +2,8 @@ import random
 
 
 class CardGameError(Exception):
-    pass
+    def user_message(self):
+        return "Something went wrong."
 
 
 class Card:

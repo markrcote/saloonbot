@@ -35,6 +35,9 @@ class NotPlayerTurnError(CardGameError):
     def __str__(self):
         return f"It is not {self.player}'s turn"
 
+    def user_message(self):
+        return "It's not your turn."
+
 
 class InvalidActionError(CardGameError):
     def __init__(self, action, state):
@@ -43,6 +46,9 @@ class InvalidActionError(CardGameError):
 
     def __str__(self):
         return f"Action '{self.action}' is not valid in state '{self.state.value}'"
+
+    def user_message(self):
+        return f"You can't use '{self.action}' right now."
 
 
 class InsufficientFundsError(CardGameError):
@@ -54,12 +60,18 @@ class InsufficientFundsError(CardGameError):
     def __str__(self):
         return f"{self.player} has insufficient funds (${self.balance:.2f}) for bet of ${self.bet_amount:.2f}"
 
+    def user_message(self):
+        return f"You don't have enough funds for that bet. Your balance is ${self.balance:.2f}."
+
 
 class InvalidBetError(CardGameError):
     def __init__(self, message):
         self.message = message
 
     def __str__(self):
+        return self.message
+
+    def user_message(self):
         return self.message
 
 

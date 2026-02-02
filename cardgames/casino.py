@@ -6,6 +6,7 @@ import uuid
 import redis
 
 from .blackjack import Blackjack
+from .card_game import CardGameError
 
 
 class Casino:
@@ -73,7 +74,11 @@ class Casino:
                                 )
                 elif game_id in self.games.keys():
                     logging.debug(f"Got game message: {data}")
-                    self.games[game_id].action(data)
+                    try:
+                        self.games[game_id].action(data)
+                    except CardGameError as e:
+                        logging.warning(f"Game error: {e}")
+                        self.game_output(game_id, e.user_message())
                 else:
                     logging.debug(f"Got unknown message: {data}")
 

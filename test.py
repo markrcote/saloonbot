@@ -6,6 +6,7 @@ from cardgames.blackjack import (
     Action, Blackjack, HandState, InvalidActionError, InvalidBetError
 )
 from cardgames.card_game import Card, CardGame, CardGameError
+from cardgames.casino import Casino
 from cardgames.player import Player
 
 from wwnames.wwnames import WildWestNames
@@ -496,6 +497,50 @@ class TestBlackjackPayouts(unittest.TestCase):
         refund_calls = [call for call in mock_db.update_wallet.call_args_list
                         if call[0][1] > 0]  # Positive amount = refund
         self.assertEqual(len(refund_calls), 0)
+
+
+class TestCasinoErrorHandling(unittest.TestCase):
+    def setUp(self):
+        self.mock_redis = MagicMock()
+        self.casino = Casino(redis_host="localhost", redis_port=6379)
+        self.casino.redis = self.mock_redis
+
+    def test_invalid_action_user_message(self):
+        """Test that InvalidActionError has a user-friendly message."""
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+
+        data = {
+            'event_type': 'player_action',
+            'game_id': game_id,
+            'player': 'TestPlayer',
+            'action': 'hit'
+        }
+
+        with self.assertRaises(InvalidActionError) as context:
+            game.action(data)
+
+        self.assertEqual(context.exception.user_message(), "You can't use 'hit' right now.")
+
+    def test_unrecognized_action_user_message(self):
+        """Test user-friendly message for unrecognized actions."""
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+
+        game.join(Player("TestPlayer"))
+        game.tick()  # WAITING -> BETTING
+
+        data = {
+            'event_type': 'player_action',
+            'game_id': game_id,
+            'player': 'TestPlayer',
+            'action': '11'
+        }
+
+        with self.assertRaises(InvalidActionError) as context:
+            game.action(data)
+
+        self.assertEqual(context.exception.user_message(), "You can't use '11' right now.")
 
 
 if __name__ == "__main__":

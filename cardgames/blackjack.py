@@ -101,9 +101,7 @@ class Blackjack(CardGame):
     def __init__(self, game_id, casino):
         """ Initialize a new Blackjack game.
         :param game_id: Unique identifier for the game.
-        :param casino: The casino managing this game.
-
-        If casino is None, this game will not output to a casino.
+        :param casino: The casino managing this game (required).
         """
         super().__init__()
         self.game_id = game_id
@@ -126,16 +124,12 @@ class Blackjack(CardGame):
         self.time_betting_started = None
 
     def output(self, output):
-        if self.casino:
-            self.casino.game_output(self.game_id, output)
+        self.casino.game_output(self.game_id, output)
 
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
-        if self.casino and self.casino.db:
-            balance = self.casino.db.get_user_wallet(player.name) or 0
-            self.output(f"{player} {result} Wallet: ${balance:.2f}")
-        else:
-            self.output(f"{player} {result}")
+        balance = self.casino.db.get_user_wallet(player.name) or 0
+        self.output(f"{player} {result} Wallet: ${balance:.2f}")
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -159,12 +153,10 @@ class Blackjack(CardGame):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
 
-        # Add user to database if casino has a database connection
-        if self.casino and self.casino.db:
-            try:
-                self.casino.db.add_user(player.name)
-            except mysql.connector.Error as e:
-                logging.error(f"Failed to add user to database: {e}")
+        try:
+            self.casino.db.add_user(player.name)
+        except mysql.connector.Error as e:
+            logging.error(f"Failed to add user to database: {e}")
 
         self.output(f"Player {player} will join the next game.")
         self.players_waiting.append(player)
@@ -213,12 +205,11 @@ class Blackjack(CardGame):
         self.output(f"You have {self.TIME_FOR_BETTING} seconds.")
 
         # Output all players' wallets before betting
-        if self.casino and self.casino.db:
-            wallet_lines = []
-            for p in self.players:
-                balance = self.casino.db.get_user_wallet(p.name) or 0
-                wallet_lines.append(f"{p}: ${balance:.2f}")
-            self.output("Wallets: " + ", ".join(wallet_lines))
+        wallet_lines = []
+        for p in self.players:
+            balance = self.casino.db.get_user_wallet(p.name) or 0
+            wallet_lines.append(f"{p}: ${balance:.2f}")
+        self.output("Wallets: " + ", ".join(wallet_lines))
 
     def bet(self, player, amount):
         """Place a bet for a player."""
@@ -239,24 +230,20 @@ class Blackjack(CardGame):
             raise InvalidBetError(f"Maximum bet is ${self.MAX_BET}")
 
         # Check wallet balance
-        if self.casino and self.casino.db:
-            wallet = self.casino.db.get_user_wallet(player.name)
-            if wallet is None or wallet < amount:
-                balance = wallet if wallet else 0
-                raise InsufficientFundsError(player, balance, amount)
+        wallet = self.casino.db.get_user_wallet(player.name)
+        if wallet is None or wallet < amount:
+            balance = wallet if wallet else 0
+            raise InsufficientFundsError(player, balance, amount)
 
-            # Deduct bet from wallet immediately (escrow)
-            self.casino.db.update_wallet(player.name, -amount)
+        # Deduct bet from wallet immediately (escrow)
+        self.casino.db.update_wallet(player.name, -amount)
 
         self.bets[player.name] = amount
         self._update_time_last_event()
 
         # Output bet and updated wallet
-        if self.casino and self.casino.db:
-            new_balance = self.casino.db.get_user_wallet(player.name) or 0
-            self.output(f"{player} bets ${amount:.2f}. Wallet: ${new_balance:.2f}")
-        else:
-            self.output(f"{player} bets ${amount:.2f}")
+        new_balance = self.casino.db.get_user_wallet(player.name) or 0
+        self.output(f"{player} bets ${amount:.2f}. Wallet: ${new_balance:.2f}")
 
     def new_hand(self):
         self.players.extend(self.players_waiting)
@@ -316,13 +303,11 @@ class Blackjack(CardGame):
                    self.get_score(player) > self.get_score(self.dealer):
                     winnings = bet_amount * 2  # Return bet + win equal amount
                     wins.append(player)
-                    if self.casino and self.casino.db:
-                        self.casino.db.update_wallet(player.name, winnings)
+                    self.casino.db.update_wallet(player.name, winnings)
                     self._output_player_result(player, f"wins!!! Payout: ${winnings:.2f}")
                 elif self.get_score(player) == self.get_score(self.dealer):
                     ties.append(player)
-                    if self.casino and self.casino.db:
-                        self.casino.db.update_wallet(player.name, bet_amount)
+                    self.casino.db.update_wallet(player.name, bet_amount)
                     self._output_player_result(player, f"ties with dealer. Bet returned: ${bet_amount:.2f}")
                 else:
                     losses.append(player)

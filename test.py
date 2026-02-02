@@ -122,7 +122,10 @@ class TestCardGame(unittest.TestCase):
 
 class TestBlackjack(unittest.TestCase):
     def setUp(self):
-        self.game = Blackjack(game_id="test_game", casino=None)
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.db.get_user_wallet.return_value = 1000.0
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
 
     def test_new_hand(self):
         # Set up a mock deck to ensure that the dealer never has 21.
@@ -201,7 +204,10 @@ class TestBlackjack(unittest.TestCase):
 
 class TestBlackjackStateMachine(unittest.TestCase):
     def setUp(self):
-        self.game = Blackjack(game_id="test_game", casino=None)
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.db.get_user_wallet.return_value = 1000.0
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
 
     def test_initial_state_is_waiting(self):
         self.assertEqual(self.game.state, HandState.WAITING)
@@ -301,26 +307,13 @@ class TestDatabaseIntegration(unittest.TestCase):
         # Verify player was added to waiting list
         self.assertIn(player, game.players_waiting)
 
-    def test_join_game_without_database(self):
-        # Create a casino without a database
-        mock_casino = MagicMock()
-        mock_casino.db = None
-        mock_casino.game_output = MagicMock()
-
-        # Create a blackjack game
-        game = Blackjack(game_id="test_game", casino=mock_casino)
-
-        # Join a player (should not raise an exception)
-        player = Player("TestPlayer")
-        game.join(player)
-
-        # Verify player was added to waiting list
-        self.assertIn(player, game.players_waiting)
-
 
 class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
-        self.game = Blackjack(game_id="test_game", casino=None)
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.db.get_user_wallet.return_value = 1000.0
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
         # Set up a mock deck
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9), Card("H", 10)]
@@ -502,8 +495,11 @@ class TestBlackjackPayouts(unittest.TestCase):
 class TestCasinoErrorHandling(unittest.TestCase):
     def setUp(self):
         self.mock_redis = MagicMock()
+        self.mock_db = MagicMock()
+        self.mock_db.get_user_wallet.return_value = 1000.0
         self.casino = Casino(redis_host="localhost", redis_port=6379)
         self.casino.redis = self.mock_redis
+        self.casino.db = self.mock_db
 
     def test_invalid_action_user_message(self):
         """Test that InvalidActionError has a user-friendly message."""

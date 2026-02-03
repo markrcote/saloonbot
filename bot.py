@@ -135,7 +135,71 @@ class BlackjackCog(commands.Cog):
             self.subscribe_task = asyncio.create_task(self.try_subscribe())
         if not self.listen.is_running():
             self.listen.start()
+
+        # Request list of active games for recovery
+        await self._request_list_games()
+
         logging.info("Blackjack cog initialized.")
+
+    async def _request_list_games(self):
+        """Request list of active games from server for recovery."""
+        request_id = str(uuid.uuid4())
+        self._list_games_request_id = request_id
+        message = {
+            'event_type': 'casino_action',
+            'action': 'list_games',
+            'request_id': request_id
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+            logging.info("Requested list of active games for recovery")
+        except redis.exceptions.ConnectionError as e:
+            logging.error(f"Failed to request list of games: {e}")
+
+    async def _handle_list_games_response(self, games_info):
+        """Handle list_games response and restore game wrappers."""
+        restored_count = 0
+        for game_info in games_info:
+            game_id = game_info.get('game_id')
+            guild_id = game_info.get('guild_id')
+            channel_id = game_info.get('channel_id')
+
+            if not guild_id or not channel_id:
+                logging.warning(f"Game {game_id} has no channel info, skipping")
+                continue
+
+            # Check if we already have this game
+            existing = self.find_game(guild_id, channel_id)
+            if existing:
+                logging.debug(f"Game {game_id} already tracked, skipping")
+                continue
+
+            # Try to get the channel
+            channel = self.bot.get_channel(channel_id)
+            if not channel:
+                logging.warning(f"Could not find channel {channel_id} for game {game_id}")
+                continue
+
+            # Create game wrapper
+            game = BlackjackGame(guild_id, channel_id, channel, GameState.ACTIVE)
+            game.game_id = game_id
+            self.games.append(game)
+
+            # Subscribe to game topic
+            try:
+                await self.pubsub.subscribe(game.topic())
+                restored_count += 1
+                logging.info(f"Restored game {game_id} in channel {channel_id}")
+
+                # Announce reconnection
+                await channel.send("🔄 Bot reconnected. Game in progress.")
+            except Exception as e:
+                logging.error(f"Failed to subscribe to game {game_id} topic: {e}")
+
+        if restored_count > 0:
+            logging.info(f"Restored {restored_count} active games")
+        else:
+            logging.info("No active games to restore")
 
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message):
@@ -174,7 +238,9 @@ class BlackjackCog(commands.Cog):
         message = {
             'event_type': 'casino_action',
             'action': 'new_game',
-            'request_id': game.request_id
+            'request_id': game.request_id,
+            'guild_id': game.guild_id,
+            'channel_id': game.channel_id
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -270,6 +336,12 @@ class BlackjackCog(commands.Cog):
                         await self.pubsub.subscribe(game.topic())
                     except Exception as e:
                         logging.error(f"Failed to subscribe to game topic: {e}")
+
+            elif data.get("event_type") == "list_games":
+                request_id = data.get("request_id")
+                if hasattr(self, '_list_games_request_id') and \
+                   request_id == self._list_games_request_id:
+                    await self._handle_list_games_response(data.get("games", []))
         else:
             for game in self.games:
                 if game.topic() == topic:

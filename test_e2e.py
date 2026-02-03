@@ -387,5 +387,209 @@ class TestBlackjackGame(EndToEndTestCase):
             pubsub.close()
 
 
+class TestServerRestart(EndToEndTestCase):
+    """Test game persistence across server restarts."""
+
+    def setUp(self):
+        """Set up for each test - clean database tables including games."""
+        super().setUp()
+        # Also clean up games and game_channels tables
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM game_channels")
+        cursor.execute("DELETE FROM games")
+        self.db.commit()
+        cursor.close()
+
+    def test_game_persists_across_server_restart(self):
+        """Test that a game with a bet survives server restart."""
+        game_id = self.create_game()
+
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            # Join and place bet
+            self.join_player(game_id, 'PersistPlayer')
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+            self.place_bet(game_id, 'PersistPlayer', 20)
+
+            # Wait for hand to start and player turn
+            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+
+            # Give server time to save state after tick
+            time.sleep(0.5)
+
+            # Verify game is in database
+            cursor = self.db.cursor()
+            cursor.execute("SELECT game_id, state FROM games WHERE game_id = %s", (game_id,))
+            result = cursor.fetchone()
+            cursor.close()
+            self.assertIsNotNone(result, "Game should be saved in database")
+            self.assertEqual(result[0], game_id)
+            self.assertEqual(result[1], 'playing')
+
+            # Verify bet is saved
+            cursor = self.db.cursor()
+            cursor.execute("SELECT bets_json FROM games WHERE game_id = %s", (game_id,))
+            result = cursor.fetchone()
+            cursor.close()
+            bets = json.loads(result[0])
+            self.assertIn('PersistPlayer', bets)
+            self.assertEqual(bets['PersistPlayer'], 20)
+
+        finally:
+            pubsub.close()
+
+        # Restart server
+        self._stop_server()
+        time.sleep(1)
+        self._start_server()
+
+        # Reconnect pubsub after restart
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            # Send a player action to verify game is restored
+            self.player_action(game_id, 'PersistPlayer', 'stand')
+
+            # Collect messages - should get stand acknowledgment and dealer turn
+            messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+
+            # Verify game continued after restart
+            stand_msg = any('stands pat' in m for m in messages)
+            self.assertTrue(stand_msg, f"Game should continue after restart. Got: {messages}")
+
+            # Verify hand resolved
+            resolved = any('dust settles' in m for m in messages)
+            self.assertTrue(resolved, "Hand should resolve after player stands")
+        finally:
+            pubsub.close()
+
+    def test_bet_preserved_after_restart(self):
+        """Test that player bets are preserved after server restart."""
+        game_id = self.create_game()
+
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            # Join and place bet
+            self.join_player(game_id, 'BetPlayer')
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+            self.place_bet(game_id, 'BetPlayer', 25)
+
+            # Wait for hand to start
+            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+
+            # Give server time to save state after tick
+            time.sleep(0.5)
+
+            # Check wallet was decremented
+            cursor = self.db.cursor()
+            cursor.execute("SELECT wallet FROM users WHERE username = 'BetPlayer'")
+            after_bet = cursor.fetchone()
+            cursor.close()
+            self.assertIsNotNone(after_bet)
+            # Default wallet is 200, so after betting 25 should be 175
+            self.assertEqual(float(after_bet[0]), 175.0)
+
+            # Verify bet is in DB before restart
+            cursor = self.db.cursor()
+            cursor.execute("SELECT bets_json, state FROM games WHERE game_id = %s", (game_id,))
+            before_restart = cursor.fetchone()
+            cursor.close()
+            self.assertIsNotNone(before_restart, "Game should be in database before restart")
+            bets_before = json.loads(before_restart[0])
+            self.assertEqual(bets_before.get('BetPlayer'), 25,
+                             f"Bet should be saved before restart. State: {before_restart[1]}")
+
+        finally:
+            pubsub.close()
+
+        # Restart server immediately
+        self._stop_server()
+        time.sleep(1)
+        self._start_server()
+
+        # Verify bet is still in database
+        cursor = self.db.cursor()
+        cursor.execute("SELECT bets_json FROM games WHERE game_id = %s", (game_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        self.assertIsNotNone(result, "Game should still exist after restart")
+        bets = json.loads(result[0])
+        self.assertEqual(bets.get('BetPlayer'), 25, "Bet should be preserved")
+
+        # Verify wallet wasn't double-decremented
+        cursor = self.db.cursor()
+        cursor.execute("SELECT wallet FROM users WHERE username = 'BetPlayer'")
+        after_restart = cursor.fetchone()
+        cursor.close()
+        self.assertEqual(float(after_restart[0]), 175.0,
+                         "Wallet should not be decremented again")
+
+    def test_list_games_returns_active_games(self):
+        """Test that list_games returns active games for bot recovery."""
+        # Create a game with channel info
+        pubsub = self.redis.pubsub()
+        try:
+            pubsub.subscribe("casino_update")
+            pubsub.get_message(timeout=1)  # Skip subscribe confirmation
+
+            request_id = f"test-request-{time.time()}"
+            message = {
+                'event_type': 'casino_action',
+                'action': 'new_game',
+                'request_id': request_id,
+                'guild_id': 12345,
+                'channel_id': 67890
+            }
+            self.redis.publish("casino", json.dumps(message))
+
+            # Wait for game creation response
+            game_id = None
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    if response.get('request_id') == request_id:
+                        game_id = response['game_id']
+                        break
+
+            self.assertIsNotNone(game_id, "Failed to create game")
+
+            # Now request list_games
+            list_request_id = f"list-request-{time.time()}"
+            list_message = {
+                'event_type': 'casino_action',
+                'action': 'list_games',
+                'request_id': list_request_id
+            }
+            self.redis.publish("casino", json.dumps(list_message))
+
+            # Wait for list_games response
+            games_response = None
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    if response.get('event_type') == 'list_games' and \
+                       response.get('request_id') == list_request_id:
+                        games_response = response
+                        break
+
+            self.assertIsNotNone(games_response, "Should receive list_games response")
+            self.assertIn('games', games_response)
+
+            # Find our game in the list
+            our_game = None
+            for g in games_response['games']:
+                if g['game_id'] == game_id:
+                    our_game = g
+                    break
+
+            self.assertIsNotNone(our_game, "Our game should be in the list")
+            self.assertEqual(our_game.get('guild_id'), 12345)
+            self.assertEqual(our_game.get('channel_id'), 67890)
+
+        finally:
+            pubsub.close()
+
+
 if __name__ == "__main__":
     unittest.main()

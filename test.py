@@ -3,7 +3,9 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from cardgames.blackjack import (
-    Action, Blackjack, HandState, InvalidActionError, InvalidBetError
+    Action, Blackjack, HandState, InvalidActionError, InvalidBetError,
+    card_to_str, str_to_card, serialize_hand, deserialize_hand,
+    serialize_player, deserialize_player
 )
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.casino import Casino
@@ -537,6 +539,143 @@ class TestCasinoErrorHandling(unittest.TestCase):
             game.action(data)
 
         self.assertEqual(context.exception.user_message(), "You can't use '11' right now.")
+
+
+class TestSerialization(unittest.TestCase):
+    """Tests for game state serialization/deserialization."""
+
+    def test_card_serialization_roundtrip(self):
+        """Test card serialization and deserialization."""
+        cards = [
+            Card("H", 2),   # 2 of Hearts
+            Card("S", 14),  # Ace of Spades
+            Card("D", 10),  # 10 of Diamonds
+            Card("C", 13),  # King of Clubs
+        ]
+        for card in cards:
+            serialized = card_to_str(card)
+            deserialized = str_to_card(serialized)
+            self.assertEqual(card.suit, deserialized.suit)
+            self.assertEqual(card.value, deserialized.value)
+
+    def test_card_serialization_format(self):
+        """Test that cards serialize to expected format."""
+        self.assertEqual(card_to_str(Card("H", 10)), "H10")
+        self.assertEqual(card_to_str(Card("S", 14)), "S14")
+        self.assertEqual(card_to_str(Card("D", 2)), "D2")
+
+    def test_hand_serialization_roundtrip(self):
+        """Test hand serialization and deserialization."""
+        hand = [Card("H", 10), Card("S", 14), Card("D", 5)]
+        serialized = serialize_hand(hand)
+        self.assertEqual(serialized, ["H10", "S14", "D5"])
+        deserialized = deserialize_hand(serialized)
+        for orig, restored in zip(hand, deserialized):
+            self.assertEqual(orig.suit, restored.suit)
+            self.assertEqual(orig.value, restored.value)
+
+    def test_player_serialization_roundtrip(self):
+        """Test player serialization and deserialization."""
+        player = Player("TestPlayer")
+        player.hand = [Card("H", 10), Card("S", 14)]
+        serialized = serialize_player(player)
+        self.assertEqual(serialized['name'], "TestPlayer")
+        self.assertEqual(serialized['hand'], ["H10", "S14"])
+        deserialized = deserialize_player(serialized)
+        self.assertEqual(deserialized.name, "TestPlayer")
+        self.assertEqual(len(deserialized.hand), 2)
+        self.assertEqual(deserialized.hand[0].suit, "H")
+        self.assertEqual(deserialized.hand[0].value, 10)
+
+    def test_game_serialization_roundtrip(self):
+        """Test full game state serialization and deserialization."""
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.db.get_user_wallet.return_value = 1000.0
+
+        game = Blackjack(game_id="test_game", casino=mock_casino)
+        game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                     Card("H", 7), Card("H", 8), Card("H", 9), Card("H", 10)]
+
+        # Set up a game in progress
+        game.join(Player("Player1"))
+        game.tick()  # WAITING -> BETTING
+        game.bet(game.players[0], 20)
+        game.tick()  # BETTING -> PLAYING
+
+        # Serialize
+        game_data = game.to_dict()
+
+        # Verify serialized data
+        self.assertEqual(game_data['game_id'], "test_game")
+        self.assertEqual(game_data['state'], "playing")
+        self.assertEqual(game_data['current_player_idx'], 0)
+        self.assertIn('Player1', game_data['bets'])
+        self.assertEqual(game_data['bets']['Player1'], 20)
+
+        # Deserialize into new game
+        restored_game = Blackjack.from_dict(game_data, mock_casino)
+
+        # Verify restored state
+        self.assertEqual(restored_game.game_id, "test_game")
+        self.assertEqual(restored_game.state, HandState.PLAYING)
+        self.assertEqual(restored_game.current_player_idx, 0)
+        self.assertEqual(len(restored_game.players), 1)
+        self.assertEqual(restored_game.players[0].name, "Player1")
+        self.assertEqual(restored_game.bets['Player1'], 20)
+
+        # Verify hands were restored
+        self.assertEqual(len(restored_game.dealer.hand), 2)
+        self.assertEqual(len(restored_game.players[0].hand), 2)
+
+    def test_timing_adjustment_on_restore(self):
+        """Test that timing fields are adjusted correctly on restore."""
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.db.get_user_wallet.return_value = 1000.0
+
+        game = Blackjack(game_id="test_game", casino=mock_casino)
+        game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+
+        # Start betting
+        game.join(Player("Player1"))
+        game.tick()  # WAITING -> BETTING
+
+        # Serialize with a fake "old" time_last_event
+        game_data = game.to_dict()
+        fake_save_time = time.time() - 5  # Pretend saved 5 seconds ago
+        game_data['time_last_event'] = fake_save_time
+        game_data['time_betting_started'] = fake_save_time - 2  # Betting started 2s before save
+
+        # Restore
+        before_restore = time.time()
+        restored_game = Blackjack.from_dict(game_data, mock_casino)
+        after_restore = time.time()
+
+        # time_last_event should be approximately now
+        self.assertGreaterEqual(restored_game.time_last_event, before_restore)
+        self.assertLessEqual(restored_game.time_last_event, after_restore)
+
+        # time_betting_started should preserve the 2 second difference
+        time_diff = restored_game.time_last_event - restored_game.time_betting_started
+        self.assertAlmostEqual(time_diff, 2.0, places=1)
+
+    def test_empty_game_serialization(self):
+        """Test serialization of a game with no players."""
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+
+        game = Blackjack(game_id="empty_game", casino=mock_casino)
+        game_data = game.to_dict()
+
+        self.assertEqual(game_data['state'], "waiting")
+        self.assertEqual(game_data['players'], [])
+        self.assertEqual(game_data['players_waiting'], [])
+        self.assertEqual(game_data['bets'], {})
+
+        restored = Blackjack.from_dict(game_data, mock_casino)
+        self.assertEqual(restored.state, HandState.WAITING)
+        self.assertEqual(len(restored.players), 0)
 
 
 if __name__ == "__main__":

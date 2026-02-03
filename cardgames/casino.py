@@ -74,6 +74,39 @@ class Casino:
 
         return game_id
 
+    def _handle_list_games(self, request_id):
+        """Handle a list_games request from the bot."""
+        games_info = []
+
+        # Get channel info from database
+        channel_map = {}
+        if self.db is not None:
+            try:
+                channels = self.db.load_game_channels()
+                channel_map = {c['game_id']: c for c in channels}
+            except Exception as e:
+                logging.error(f"Error loading game channels: {e}")
+
+        for game_id, game in self.games.items():
+            game_info = {
+                'game_id': game_id,
+                'state': game.state.value,
+            }
+            if game_id in channel_map:
+                game_info['guild_id'] = channel_map[game_id]['guild_id']
+                game_info['channel_id'] = channel_map[game_id]['channel_id']
+            games_info.append(game_info)
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'list_games',
+                'request_id': request_id,
+                'games': games_info
+            }
+        )
+        logging.info(f"Responded to list_games with {len(games_info)} games")
+
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")
         self.redis.publish(event_type, json.dumps(data))
@@ -125,6 +158,10 @@ class Casino:
                                         'game_id': game_id
                                     }
                                 )
+                        elif data['action'] == 'list_games':
+                            request_id = data.get('request_id')
+                            if request_id:
+                                self._handle_list_games(request_id)
                 elif game_id in self.games.keys():
                     logging.debug(f"Got game message: {data}")
                     try:

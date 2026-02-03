@@ -538,3 +538,59 @@ class Blackjack(CardGame):
         """Handle BETWEEN_HANDS state: wait then transition to WAITING."""
         if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
             self.state = HandState.WAITING
+
+    def to_dict(self):
+        """Serialize game state for persistence."""
+        return {
+            'game_id': self.game_id,
+            'state': self.state.value,
+            'current_player_idx': self.current_player_idx,
+            'time_betting_started': self.time_betting_started,
+            'time_last_hand_ended': self.time_last_hand_ended,
+            'time_last_event': self.time_last_event,
+            'deck': serialize_hand(self.deck),
+            'discards': serialize_hand(self.discards),
+            'dealer_hand': serialize_hand(self.dealer.hand),
+            'players': [serialize_player(p) for p in self.players],
+            'players_waiting': [serialize_player(p) for p in self.players_waiting],
+            'bets': self.bets.copy(),
+        }
+
+    @classmethod
+    def from_dict(cls, data, casino):
+        """Restore game from serialized state."""
+        game = cls(data['game_id'], casino)
+
+        # Restore state
+        game.state = HandState(data['state'])
+        game.current_player_idx = data['current_player_idx']
+
+        # Restore timing fields with adjustment for elapsed time
+        # We use time_last_event as the reference point
+        now = time.time()
+        saved_time_last_event = data['time_last_event']
+        time_offset = now - saved_time_last_event
+
+        game.time_last_event = now
+
+        if data['time_betting_started'] is not None:
+            game.time_betting_started = data['time_betting_started'] + time_offset
+
+        if data['time_last_hand_ended'] is not None:
+            game.time_last_hand_ended = data['time_last_hand_ended'] + time_offset
+
+        # Restore deck and discards
+        game.deck = deserialize_hand(data['deck'])
+        game.discards = deserialize_hand(data['discards'])
+
+        # Restore dealer hand
+        game.dealer.hand = deserialize_hand(data['dealer_hand'])
+
+        # Restore players
+        game.players = [deserialize_player(p) for p in data['players']]
+        game.players_waiting = [deserialize_player(p) for p in data['players_waiting']]
+
+        # Restore bets
+        game.bets = data['bets'].copy()
+
+        return game

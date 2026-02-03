@@ -67,6 +67,36 @@ class Database:
                     ADD COLUMN wallet DECIMAL(10, 2) NOT NULL DEFAULT {DEFAULT_WALLET}
                 """)
                 logging.info("Added wallet column to users table")
+            # Create games table for game state persistence
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS games (
+                    game_id VARCHAR(36) PRIMARY KEY,
+                    state VARCHAR(20) NOT NULL,
+                    current_player_idx INT DEFAULT NULL,
+                    time_betting_started DOUBLE DEFAULT NULL,
+                    time_last_hand_ended DOUBLE DEFAULT NULL,
+                    time_last_event DOUBLE NOT NULL,
+                    deck_json TEXT NOT NULL,
+                    discards_json TEXT NOT NULL,
+                    dealer_hand_json TEXT NOT NULL,
+                    players_json TEXT NOT NULL,
+                    players_waiting_json TEXT NOT NULL,
+                    bets_json TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Create game_channels table for bot recovery
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS game_channels (
+                    game_id VARCHAR(36) PRIMARY KEY,
+                    guild_id BIGINT NOT NULL,
+                    channel_id BIGINT NOT NULL,
+                    FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
+                )
+            """)
+
             self.connection.commit()
             cursor.close()
             logging.info("Database schema initialized")

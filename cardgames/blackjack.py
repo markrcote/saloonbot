@@ -5,8 +5,47 @@ from enum import Enum
 
 import mysql.connector
 
-from .card_game import CardGame, CardGameError
+from .card_game import Card, CardGame, CardGameError
 from .player import Player, registry as player_registry
+
+
+# Serialization helpers for game persistence
+
+def card_to_str(card):
+    """Serialize a card to string format: "{suit}{value}" e.g., "H10", "S14"."""
+    return f"{card.suit}{card.value}"
+
+
+def str_to_card(s):
+    """Deserialize a card from string format."""
+    suit = s[0]
+    value = int(s[1:])
+    return Card(suit, value)
+
+
+def serialize_hand(cards):
+    """Serialize a list of cards to a list of strings."""
+    return [card_to_str(card) for card in cards]
+
+
+def deserialize_hand(data):
+    """Deserialize a list of strings to a list of cards."""
+    return [str_to_card(s) for s in data]
+
+
+def serialize_player(player):
+    """Serialize a player's state for persistence."""
+    return {
+        'name': player.name,
+        'hand': serialize_hand(player.hand)
+    }
+
+
+def deserialize_player(data):
+    """Deserialize a player from persisted state."""
+    player = player_registry.get_player(data['name'], add=True)
+    player.hand = deserialize_hand(data['hand'])
+    return player
 
 
 class HandState(Enum):

@@ -1,4 +1,6 @@
 class Player:
+    is_bot = False
+
     def __init__(self, name):
         self.name = name  # must be unique
         self.hand = []

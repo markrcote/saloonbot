@@ -449,6 +449,15 @@ class Blackjack(CardGame):
             self.state = HandState.WAITING
             return
 
+        # Auto-bet for any bots that haven't bet yet
+        for player in self.players:
+            if player.is_bot and player.name not in self.bets:
+                wallet = self.casino.db.get_user_wallet(player.name) or 0
+                if wallet >= self.MIN_BET:
+                    amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
+                    amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
+                    self.bet(player, amount)
+
         # Check if all players have bet
         all_bet = all(player.name in self.bets for player in self.players)
 
@@ -472,7 +481,7 @@ class Blackjack(CardGame):
             self.new_hand()
 
     def _tick_playing(self):
-        """Handle PLAYING state: check for empty table, remind current player."""
+        """Handle PLAYING state: check for empty table, auto-play bots, remind humans."""
         if not self.players:
             self.output("🌵 Table's empty. Everyone's skedaddled.")
             self.bets = {}
@@ -480,9 +489,23 @@ class Blackjack(CardGame):
             self.current_player_idx = None
             return
 
+        current_player = self.players[self.current_player_idx]
+
+        # Auto-play bot turns
+        if current_player.is_bot:
+            score = self.get_score(current_player)
+            dealer_visible_card = self.dealer.hand[0]
+            action = current_player.decide_action(
+                current_player.hand, dealer_visible_card, score
+            )
+            if action == "hit":
+                self.hit(current_player)
+            else:
+                self.stand(current_player)
+            return
+
         # Remind current player if they're taking too long
         if time.time() > self.time_last_event + self.PERIOD_REMINDER_PLAYER_TURN:
-            current_player = self.players[self.current_player_idx]
             self.output(f"⏱️ Hey {current_player}! We ain't got all day. Hit or stand?")
             self._update_time_last_event()
 

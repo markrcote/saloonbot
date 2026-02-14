@@ -7,6 +7,11 @@ import redis
 
 from .blackjack import Blackjack
 from .card_game import CardGameError
+from .simple_bot import SimpleBlackjackBot
+
+BOT_TYPES = {
+    'simple': SimpleBlackjackBot,
+}
 
 
 class Casino:
@@ -22,6 +27,58 @@ class Casino:
                 break
         self.games[game_id] = Blackjack(game_id, self)
         return game_id
+
+    def add_bot(self, game_id, bot_name, bot_type='simple'):
+        """Add a bot player to a game.
+
+        Args:
+            game_id: The game to add the bot to.
+            bot_name: Name for the bot player.
+            bot_type: Bot strategy type (key in BOT_TYPES).
+
+        Returns:
+            The created BotPlayer instance.
+
+        Raises:
+            CardGameError: If game_id is invalid or bot_type is unknown.
+        """
+        if game_id not in self.games:
+            raise CardGameError(f"Game {game_id} not found")
+
+        bot_class = BOT_TYPES.get(bot_type)
+        if bot_class is None:
+            available = ', '.join(BOT_TYPES.keys())
+            raise CardGameError(f"Unknown bot type '{bot_type}'. Available: {available}")
+
+        bot = bot_class(bot_name)
+        game = self.games[game_id]
+        game.join(bot)
+        return bot
+
+    def remove_bot(self, game_id, bot_name):
+        """Remove a bot player from a game.
+
+        Args:
+            game_id: The game to remove the bot from.
+            bot_name: Name of the bot to remove.
+
+        Raises:
+            CardGameError: If game_id is invalid or bot not found.
+        """
+        if game_id not in self.games:
+            raise CardGameError(f"Game {game_id} not found")
+
+        game = self.games[game_id]
+        bot = None
+        for player in game.players + game.players_waiting:
+            if player.name == bot_name and player.is_bot:
+                bot = player
+                break
+
+        if bot is None:
+            raise CardGameError(f"Bot '{bot_name}' not found in game")
+
+        game.leave(bot)
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")
@@ -75,7 +132,18 @@ class Casino:
                 elif game_id in self.games.keys():
                     logging.debug(f"Got game message: {data}")
                     try:
-                        self.games[game_id].action(data)
+                        if data['event_type'] == 'bot_action':
+                            action = data['action']
+                            if action == 'add_bot':
+                                bot_name = data.get('bot_name', f"Bot-{uuid.uuid4().hex[:6]}")
+                                bot_type = data.get('bot_type', 'simple')
+                                self.add_bot(game_id, bot_name, bot_type)
+                            elif action == 'remove_bot':
+                                bot_name = data.get('bot_name')
+                                if bot_name:
+                                    self.remove_bot(game_id, bot_name)
+                        else:
+                            self.games[game_id].action(data)
                     except CardGameError as e:
                         logging.warning(f"Game error: {e}")
                         self.game_output(game_id, e.user_message())

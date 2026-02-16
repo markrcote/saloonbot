@@ -170,19 +170,19 @@ class Database:
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
                     players_json, players_waiting_json, bets_json
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
                 ON DUPLICATE KEY UPDATE
-                    state = VALUES(state),
-                    current_player_idx = VALUES(current_player_idx),
-                    time_betting_started = VALUES(time_betting_started),
-                    time_last_hand_ended = VALUES(time_last_hand_ended),
-                    time_last_event = VALUES(time_last_event),
-                    deck_json = VALUES(deck_json),
-                    discards_json = VALUES(discards_json),
-                    dealer_hand_json = VALUES(dealer_hand_json),
-                    players_json = VALUES(players_json),
-                    players_waiting_json = VALUES(players_waiting_json),
-                    bets_json = VALUES(bets_json)
+                    state = new.state,
+                    current_player_idx = new.current_player_idx,
+                    time_betting_started = new.time_betting_started,
+                    time_last_hand_ended = new.time_last_hand_ended,
+                    time_last_event = new.time_last_event,
+                    deck_json = new.deck_json,
+                    discards_json = new.discards_json,
+                    dealer_hand_json = new.dealer_hand_json,
+                    players_json = new.players_json,
+                    players_waiting_json = new.players_waiting_json,
+                    bets_json = new.bets_json
             """, (
                 game_id,
                 game_data['state'],

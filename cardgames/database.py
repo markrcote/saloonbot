@@ -287,10 +287,10 @@ class Database:
             cursor = self.connection.cursor()
             cursor.execute("""
                 INSERT INTO game_channels (game_id, guild_id, channel_id)
-                VALUES (%s, %s, %s)
+                VALUES (%s, %s, %s) AS new
                 ON DUPLICATE KEY UPDATE
-                    guild_id = VALUES(guild_id),
-                    channel_id = VALUES(channel_id)
+                    guild_id = new.guild_id,
+                    channel_id = new.channel_id
             """, (game_id, guild_id, channel_id))
             self.connection.commit()
             cursor.close()

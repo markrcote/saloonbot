@@ -4,6 +4,8 @@
 
 Discord bot originally built for randomly generating Old West names and now wandering off into card games.
 
+See [DISCORD_SETUP.md](DISCORD_SETUP.md) for instructions on creating and configuring a Discord bot for this app.
+
 Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/utilities/WesternBrowse.php).
 
 ## Commands

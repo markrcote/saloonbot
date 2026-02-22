@@ -11,10 +11,16 @@ SaloonBot is a Discord bot that generates Old West names and provides a blackjac
 
 ## Commands
 
-### Testing
+### Unit Testing
 ```bash
 python test.py
 ```
+
+### End-to-End Testing
+```bash
+./run-e2e-tests.sh
+```
+Starts Redis and MySQL via `compose.test.yml`, runs the actual server, and tests the complete system integration. Tests live in `test_e2e.py`.
 
 ### Linting
 ```bash
@@ -74,16 +80,35 @@ Discord Users
 
 ### Redis Pub/Sub Topics
 - **"casino"** - Bot publishes game actions, server subscribes
-- **"casino_update"** - Server publishes game creation, bot subscribes
+- **"casino_update"** - Server publishes game creation and list_games responses, bot subscribes
 - **"game_updates_{game_id}"** - Server publishes game state changes
+
+### Casino Protocol (published to "casino")
+
+**Casino actions** (`event_type: "casino_action"`):
+- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery
+- `list_games` - Request list of all active games (used by bot on startup for recovery)
+
+**Player actions** (`event_type: "player_action"`):
+- `join`, `bet` (with `amount`), `hit`, `stand`, `double_down`, `split`
+
+### Casino Update Protocol (published to "casino_update")
+
+- `new_game` response - includes `game_id`, `request_id`, and optional channel info
+- `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
 
 ### Key Modules
 
 **cardgames/**
-- `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS
-- `casino.py` - Redis pub/sub coordinator, manages game instances
+- `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
-- `database.py` - MySQL connection with auto-reconnect
+- `database.py` - MySQL connection with auto-reconnect; manages `users`, `games`, and `game_channels` tables
+
+**Database tables:**
+- `users` - Stores player usernames and wallet balances (default $200)
+- `games` - Persists game state (deck, hands, bets, timers) for server restart recovery
+- `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
 
 **wwnames/**
 - `wwnames.py` - Random name generator using data files in `names/`
@@ -115,3 +140,6 @@ Discord Users
 - Both implement exponential backoff for Redis reconnection
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders
+- **Game persistence**: Casino saves game state to MySQL after each action; restores all active games on startup via `load_all_active_games()`
+- **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
+- `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart

@@ -32,27 +32,27 @@ class CasinoCli:
                 cmd = args[0]
                 if cmd == "quit":
                     self.quit = True
-                elif cmd == "addbot":
-                    bot_name = args[1] if len(args) > 1 else None
-                    bot_type = args[2] if len(args) > 2 else "simple"
+                elif cmd == "addnpc":
+                    npc_name = args[1] if len(args) > 1 else None
+                    npc_type = args[2] if len(args) > 2 else "simple"
                     message = {
-                        "event_type": "bot_action",
+                        "event_type": "npc_action",
                         "game_id": self.game_id,
-                        "action": "add_bot",
-                        "bot_type": bot_type,
+                        "action": "add_npc",
+                        "npc_type": npc_type,
                     }
-                    if bot_name:
-                        message["bot_name"] = bot_name
+                    if npc_name:
+                        message["npc_name"] = npc_name
                     await self.redis.publish("casino", json.dumps(message))
-                elif cmd == "removebot":
+                elif cmd == "removenpc":
                     if len(args) < 2:
-                        logging.error("Usage: removebot <bot_name>")
+                        logging.error("Usage: removenpc <npc_name>")
                         continue
                     message = {
-                        "event_type": "bot_action",
+                        "event_type": "npc_action",
                         "game_id": self.game_id,
-                        "action": "remove_bot",
-                        "bot_name": args[1],
+                        "action": "remove_npc",
+                        "npc_name": args[1],
                     }
                     await self.redis.publish("casino", json.dumps(message))
                 else:

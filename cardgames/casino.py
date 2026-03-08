@@ -7,10 +7,10 @@ import redis
 
 from .blackjack import Blackjack
 from .card_game import CardGameError
-from .simple_bot import SimpleBlackjackBot
+from .simple_npc import SimpleBlackjackNPC
 
-BOT_TYPES = {
-    'simple': SimpleBlackjackBot,
+NPC_TYPES = {
+    'simple': SimpleBlackjackNPC,
 }
 
 
@@ -112,57 +112,57 @@ class Casino:
         )
         logging.info(f"Responded to list_games with {len(games_info)} games")
 
-    def add_bot(self, game_id, bot_name, bot_type='simple'):
-        """Add a bot player to a game.
+    def add_npc(self, game_id, npc_name, npc_type='simple'):
+        """Add an NPC player to a game.
 
         Args:
-            game_id: The game to add the bot to.
-            bot_name: Name for the bot player.
-            bot_type: Bot strategy type (key in BOT_TYPES).
+            game_id: The game to add the NPC to.
+            npc_name: Name for the NPC player.
+            npc_type: NPC strategy type (key in NPC_TYPES).
 
         Returns:
-            The created BotPlayer instance.
+            The created NPCPlayer instance.
 
         Raises:
-            CardGameError: If game_id is invalid or bot_type is unknown.
+            CardGameError: If game_id is invalid or npc_type is unknown.
         """
         if game_id not in self.games:
             raise CardGameError(f"Game {game_id} not found")
 
-        bot_class = BOT_TYPES.get(bot_type)
-        if bot_class is None:
-            available = ', '.join(BOT_TYPES.keys())
-            raise CardGameError(f"Unknown bot type '{bot_type}'. Available: {available}")
+        npc_class = NPC_TYPES.get(npc_type)
+        if npc_class is None:
+            available = ', '.join(NPC_TYPES.keys())
+            raise CardGameError(f"Unknown NPC type '{npc_type}'. Available: {available}")
 
-        bot = bot_class(bot_name)
+        npc = npc_class(npc_name)
         game = self.games[game_id]
-        game.join(bot)
-        return bot
+        game.join(npc)
+        return npc
 
-    def remove_bot(self, game_id, bot_name):
-        """Remove a bot player from a game.
+    def remove_npc(self, game_id, npc_name):
+        """Remove an NPC player from a game.
 
         Args:
-            game_id: The game to remove the bot from.
-            bot_name: Name of the bot to remove.
+            game_id: The game to remove the NPC from.
+            npc_name: Name of the NPC to remove.
 
         Raises:
-            CardGameError: If game_id is invalid or bot not found.
+            CardGameError: If game_id is invalid or NPC not found.
         """
         if game_id not in self.games:
             raise CardGameError(f"Game {game_id} not found")
 
         game = self.games[game_id]
-        bot = None
+        npc = None
         for player in game.players + game.players_waiting:
-            if player.name == bot_name and player.is_bot:
-                bot = player
+            if player.name == npc_name and player.is_npc:
+                npc = player
                 break
 
-        if bot is None:
-            raise CardGameError(f"Bot '{bot_name}' not found in game")
+        if npc is None:
+            raise CardGameError(f"NPC '{npc_name}' not found in game")
 
-        game.leave(bot)
+        game.leave(npc)
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")
@@ -222,16 +222,16 @@ class Casino:
                 elif game_id in self.games.keys():
                     logging.debug(f"Got game message: {data}")
                     try:
-                        if data['event_type'] == 'bot_action':
+                        if data['event_type'] == 'npc_action':
                             action = data['action']
-                            if action == 'add_bot':
-                                bot_name = data.get('bot_name', f"Bot-{uuid.uuid4().hex[:6]}")
-                                bot_type = data.get('bot_type', 'simple')
-                                self.add_bot(game_id, bot_name, bot_type)
-                            elif action == 'remove_bot':
-                                bot_name = data.get('bot_name')
-                                if bot_name:
-                                    self.remove_bot(game_id, bot_name)
+                            if action == 'add_npc':
+                                npc_name = data.get('npc_name', f"NPC-{uuid.uuid4().hex[:6]}")
+                                npc_type = data.get('npc_type', 'simple')
+                                self.add_npc(game_id, npc_name, npc_type)
+                            elif action == 'remove_npc':
+                                npc_name = data.get('npc_name')
+                                if npc_name:
+                                    self.remove_npc(game_id, npc_name)
                         else:
                             self.games[game_id].action(data)
                         # Save game after player action

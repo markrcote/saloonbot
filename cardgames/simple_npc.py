@@ -1,14 +1,14 @@
-from .bot_player import BotPlayer
+from .npc_player import NPCPlayer
 
 
-class SimpleBlackjackBot(BotPlayer):
-    """A bot that plays basic blackjack strategy.
+class SimpleBlackjackNPC(NPCPlayer):
+    """An NPC that plays basic blackjack strategy.
 
     Strategy:
     - Always bets the minimum amount.
     - Hits on 16 or below, stands on 17 or above.
     - Takes the dealer's visible card into account: if the dealer shows
-      a weak card (2-6), the bot stands on 12+ to let the dealer bust.
+      a weak card (2-6), the NPC stands on 12+ to let the dealer bust.
     """
 
     def decide_bet(self, min_bet, max_bet, wallet):

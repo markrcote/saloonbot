@@ -3,14 +3,14 @@ from abc import ABC, abstractmethod
 from .player import Player
 
 
-class BotPlayer(Player, ABC):
-    """Abstract base class for bot players with automated game strategies.
+class NPCPlayer(Player, ABC):
+    """Abstract base class for NPC players with automated game strategies.
 
     Subclass this and implement decide_bet() and decide_action() to create
-    a bot with a specific blackjack strategy.
+    an NPC with a specific blackjack strategy.
     """
 
-    is_bot = True
+    is_npc = True
 
     @abstractmethod
     def decide_bet(self, min_bet, max_bet, wallet):
@@ -31,7 +31,7 @@ class BotPlayer(Player, ABC):
         """Decide whether to hit or stand.
 
         Args:
-            hand: List of Card objects in the bot's hand.
+            hand: List of Card objects in the NPC's hand.
             dealer_visible_card: The dealer's face-up Card.
             score: Current hand score.
 

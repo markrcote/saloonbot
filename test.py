@@ -7,11 +7,11 @@ from cardgames.blackjack import (
     card_to_str, str_to_card, serialize_hand, deserialize_hand,
     serialize_player, deserialize_player
 )
-from cardgames.bot_player import BotPlayer
+from cardgames.npc_player import NPCPlayer
 from cardgames.card_game import Card, CardGame, CardGameError
-from cardgames.casino import BOT_TYPES, Casino
+from cardgames.casino import NPC_TYPES, Casino
 from cardgames.player import Player
-from cardgames.simple_bot import SimpleBlackjackBot
+from cardgames.simple_npc import SimpleBlackjackNPC
 
 from wwnames.wwnames import WildWestNames
 
@@ -680,174 +680,174 @@ class TestSerialization(unittest.TestCase):
         self.assertEqual(len(restored.players), 0)
 
 
-class TestBotPlayer(unittest.TestCase):
-    def test_bot_player_is_abstract(self):
-        """BotPlayer cannot be instantiated directly."""
+class TestNPCPlayer(unittest.TestCase):
+    def test_npc_player_is_abstract(self):
+        """NPCPlayer cannot be instantiated directly."""
         with self.assertRaises(TypeError):
-            BotPlayer("AbstractBot")
+            NPCPlayer("AbstractNPC")
 
-    def test_player_is_not_bot(self):
-        """Regular Player should not be a bot."""
+    def test_player_is_not_npc(self):
+        """Regular Player should not be an NPC."""
         player = Player("Human")
-        self.assertFalse(player.is_bot)
+        self.assertFalse(player.is_npc)
 
-    def test_simple_bot_is_bot(self):
-        """SimpleBlackjackBot should be identified as a bot."""
-        bot = SimpleBlackjackBot("TestBot")
-        self.assertTrue(bot.is_bot)
+    def test_simple_npc_is_npc(self):
+        """SimpleBlackjackNPC should be identified as an NPC."""
+        npc = SimpleBlackjackNPC("TestNPC")
+        self.assertTrue(npc.is_npc)
 
-    def test_simple_bot_is_player(self):
-        """SimpleBlackjackBot should be a Player instance."""
-        bot = SimpleBlackjackBot("TestBot")
-        self.assertIsInstance(bot, Player)
+    def test_simple_npc_is_player(self):
+        """SimpleBlackjackNPC should be a Player instance."""
+        npc = SimpleBlackjackNPC("TestNPC")
+        self.assertIsInstance(npc, Player)
 
 
-class TestSimpleBlackjackBot(unittest.TestCase):
+class TestSimpleBlackjackNPC(unittest.TestCase):
     def setUp(self):
-        self.bot = SimpleBlackjackBot("TestBot")
+        self.npc = SimpleBlackjackNPC("TestNPC")
 
     def test_bet_returns_minimum(self):
-        self.assertEqual(self.bot.decide_bet(5, 100, 200), 5)
+        self.assertEqual(self.npc.decide_bet(5, 100, 200), 5)
 
     def test_hit_on_low_score_strong_dealer(self):
-        """Bot should hit when score is below 17 against strong dealer card."""
+        """NPC should hit when score is below 17 against strong dealer card."""
         card = Card("H", 10)
-        self.assertEqual(self.bot.decide_action([], card, 15), "hit")
+        self.assertEqual(self.npc.decide_action([], card, 15), "hit")
 
     def test_stand_on_17_strong_dealer(self):
-        """Bot should stand on 17 against strong dealer card."""
+        """NPC should stand on 17 against strong dealer card."""
         card = Card("H", 10)
-        self.assertEqual(self.bot.decide_action([], card, 17), "stand")
+        self.assertEqual(self.npc.decide_action([], card, 17), "stand")
 
     def test_stand_on_12_weak_dealer(self):
-        """Bot should stand on 12+ against weak dealer card (2-6)."""
+        """NPC should stand on 12+ against weak dealer card (2-6)."""
         card = Card("H", 5)
-        self.assertEqual(self.bot.decide_action([], card, 12), "stand")
+        self.assertEqual(self.npc.decide_action([], card, 12), "stand")
 
     def test_hit_on_11_weak_dealer(self):
-        """Bot should hit on 11 against weak dealer card."""
+        """NPC should hit on 11 against weak dealer card."""
         card = Card("H", 5)
-        self.assertEqual(self.bot.decide_action([], card, 11), "hit")
+        self.assertEqual(self.npc.decide_action([], card, 11), "hit")
 
     def test_hit_on_low_score_moderate_dealer(self):
-        """Bot should hit below 17 against moderate dealer card (7-9)."""
+        """NPC should hit below 17 against moderate dealer card (7-9)."""
         card = Card("H", 8)
-        self.assertEqual(self.bot.decide_action([], card, 16), "hit")
+        self.assertEqual(self.npc.decide_action([], card, 16), "hit")
 
     def test_stand_on_17_moderate_dealer(self):
-        """Bot should stand on 17 against moderate dealer card."""
+        """NPC should stand on 17 against moderate dealer card."""
         card = Card("H", 8)
-        self.assertEqual(self.bot.decide_action([], card, 17), "stand")
+        self.assertEqual(self.npc.decide_action([], card, 17), "stand")
 
     def test_hit_against_dealer_ace(self):
-        """Bot should hit below 17 against dealer ace (strong card)."""
+        """NPC should hit below 17 against dealer ace (strong card)."""
         card = Card("H", 14)
-        self.assertEqual(self.bot.decide_action([], card, 16), "hit")
+        self.assertEqual(self.npc.decide_action([], card, 16), "hit")
 
 
-class TestBotBlackjackIntegration(unittest.TestCase):
+class TestNPCBlackjackIntegration(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
         mock_casino.db.get_user_wallet.return_value = 1000.0
         self.game = Blackjack(game_id="test_game", casino=mock_casino)
 
-    def test_bot_auto_bets_during_tick(self):
-        """Bot should automatically place a bet during the betting phase."""
+    def test_npc_auto_bets_during_tick(self):
+        """NPC should automatically place a bet during the betting phase."""
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8)]
-        bot = SimpleBlackjackBot("AutoBetBot")
-        self.game.join(bot)
+        npc = SimpleBlackjackNPC("AutoBetNPC")
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
         self.assertEqual(self.game.state, HandState.BETTING)
-        self.game.tick()  # BETTING: bot auto-bets, all bets in -> deals
-        self.assertIn("AutoBetBot", self.game.bets)
-        self.assertEqual(self.game.bets["AutoBetBot"], self.game.MIN_BET)
+        self.game.tick()  # BETTING: NPC auto-bets, all bets in -> deals
+        self.assertIn("AutoBetNPC", self.game.bets)
+        self.assertEqual(self.game.bets["AutoBetNPC"], self.game.MIN_BET)
 
-    def test_bot_auto_bets_then_deals(self):
-        """After bot auto-bets, the same tick should deal cards."""
+    def test_npc_auto_bets_then_deals(self):
+        """After NPC auto-bets, the same tick should deal cards."""
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8)]
-        bot = SimpleBlackjackBot("DealBot")
-        self.game.join(bot)
+        npc = SimpleBlackjackNPC("DealNPC")
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
-        self.game.tick()  # BETTING: bot auto-bets -> PLAYING
+        self.game.tick()  # BETTING: NPC auto-bets -> PLAYING
         self.assertEqual(self.game.state, HandState.PLAYING)
 
-    def test_bot_auto_plays_turn(self):
-        """Bot should automatically play during its turn."""
-        # Stack the deck: dealer gets 10+6=16, bot gets 10+8=18 -> stands
+    def test_npc_auto_plays_turn(self):
+        """NPC should automatically play during its turn."""
+        # Stack the deck: dealer gets 10+6=16, NPC gets 10+8=18 -> stands
         self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 6), Card("H", 10)]
-        bot = SimpleBlackjackBot("PlayBot")
-        self.game.join(bot)
+        npc = SimpleBlackjackNPC("PlayNPC")
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
         self.game.tick()  # BETTING -> PLAYING
         self.assertEqual(self.game.state, HandState.PLAYING)
-        self.game.tick()  # Bot auto-plays (score 18 -> stand)
+        self.game.tick()  # NPC auto-plays (score 18 -> stand)
         self.assertEqual(self.game.state, HandState.DEALER_TURN)
 
-    def test_bot_hits_on_low_score(self):
-        """Bot should hit when score is low."""
-        # Deck: dealer 10+7=17, bot 3+2=5 -> bot hits, gets 10 -> 15, hits again, gets 5 -> 20
+    def test_npc_hits_on_low_score(self):
+        """NPC should hit when score is low."""
+        # Deck: dealer 10+7=17, NPC 3+2=5 -> NPC hits, gets 10 -> 15, hits again, gets 5 -> 20
         self.game.deck = [Card("H", 5), Card("H", 10), Card("H", 2), Card("H", 3),
                           Card("H", 7), Card("H", 10)]
-        bot = SimpleBlackjackBot("HitBot")
-        self.game.join(bot)
+        npc = SimpleBlackjackNPC("HitNPC")
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
         self.game.tick()  # BETTING -> PLAYING
-        # Bot has 5, dealer shows 10 (strong) -> hit
-        self.assertEqual(self.game.get_score(bot), 5)
-        self.game.tick()  # Bot hits -> 15
-        self.assertEqual(self.game.get_score(bot), 15)
+        # NPC has 5, dealer shows 10 (strong) -> hit
+        self.assertEqual(self.game.get_score(npc), 5)
+        self.game.tick()  # NPC hits -> 15
+        self.assertEqual(self.game.get_score(npc), 15)
         self.assertEqual(self.game.state, HandState.PLAYING)
-        self.game.tick()  # Bot hits again -> 20
-        self.assertEqual(self.game.get_score(bot), 20)
+        self.game.tick()  # NPC hits again -> 20
+        self.assertEqual(self.game.get_score(npc), 20)
         self.assertEqual(self.game.state, HandState.PLAYING)
-        self.game.tick()  # Bot stands on 20
+        self.game.tick()  # NPC stands on 20
         self.assertEqual(self.game.state, HandState.DEALER_TURN)
 
-    def test_bot_complete_game(self):
-        """Bot should play a complete game through all state transitions."""
-        # Dealer: 10+7=17, bot: 10+8=18 -> bot stands -> dealer stands -> resolve
+    def test_npc_complete_game(self):
+        """NPC should play a complete game through all state transitions."""
+        # Dealer: 10+7=17, NPC: 10+8=18 -> NPC stands -> dealer stands -> resolve
         self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
-        bot = SimpleBlackjackBot("FullGameBot")
-        self.game.join(bot)
+        npc = SimpleBlackjackNPC("FullGameNPC")
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
         self.game.tick()  # BETTING -> PLAYING
-        self.game.tick()  # Bot stands (18)
+        self.game.tick()  # NPC stands (18)
         self.assertEqual(self.game.state, HandState.DEALER_TURN)
         self.game.tick()  # Dealer plays
         self.assertEqual(self.game.state, HandState.RESOLVING)
         self.game.tick()  # Resolve
         self.assertEqual(self.game.state, HandState.BETWEEN_HANDS)
 
-    def test_bot_and_human_together(self):
-        """Bot and human player should coexist in the same game."""
-        # Dealer: 10+6=16, Human: 10+8=18, Bot: 10+7=17
+    def test_npc_and_human_together(self):
+        """NPC and human player should coexist in the same game."""
+        # Dealer: 10+6=16, Human: 10+8=18, NPC: 10+7=17
         self.game.deck = [Card("H", 7), Card("H", 8), Card("H", 10), Card("H", 10),
                           Card("H", 6), Card("H", 10), Card("H", 10)]
         human = Player("Human")
-        bot = SimpleBlackjackBot("BotFriend")
+        npc = SimpleBlackjackNPC("NPCFriend")
         self.game.join(human)
-        self.game.join(bot)
+        self.game.join(npc)
         self.game.tick()  # WAITING -> BETTING
-        self.assertNotIn("BotFriend", self.game.bets)
+        self.assertNotIn("NPCFriend", self.game.bets)
         self.assertNotIn("Human", self.game.bets)
-        # Human places bet; bot will auto-bet on next tick
+        # Human places bet; NPC will auto-bet on next tick
         self.game.bet(human, 10)
-        self.game.tick()  # BETTING: bot auto-bets, all bets in -> PLAYING
-        self.assertIn("BotFriend", self.game.bets)
+        self.game.tick()  # BETTING: NPC auto-bets, all bets in -> PLAYING
+        self.assertIn("NPCFriend", self.game.bets)
         self.assertEqual(self.game.state, HandState.PLAYING)
         # Human is first, should be their turn
         self.assertEqual(self.game.players[self.game.current_player_idx], human)
         self.game.stand(human)
-        # Now it's bot's turn - bot auto-plays on tick
-        self.assertEqual(self.game.players[self.game.current_player_idx], bot)
-        self.game.tick()  # Bot auto-stands (17, dealer shows 10=strong, 17 >= 17)
+        # Now it's NPC's turn - NPC auto-plays on tick
+        self.assertEqual(self.game.players[self.game.current_player_idx], npc)
+        self.game.tick()  # NPC auto-stands (17, dealer shows 10=strong, 17 >= 17)
         self.assertEqual(self.game.state, HandState.DEALER_TURN)
 
 
-class TestCasinoBotManagement(unittest.TestCase):
+class TestCasinoNPCManagement(unittest.TestCase):
     def setUp(self):
         self.mock_redis = MagicMock()
         self.mock_db = MagicMock()
@@ -856,49 +856,49 @@ class TestCasinoBotManagement(unittest.TestCase):
         self.casino.redis = self.mock_redis
         self.casino.db = self.mock_db
 
-    def test_add_bot_to_game(self):
+    def test_add_npc_to_game(self):
         game_id = self.casino.new_game()
-        bot = self.casino.add_bot(game_id, "TestBot", "simple")
-        self.assertTrue(bot.is_bot)
-        self.assertEqual(bot.name, "TestBot")
+        npc = self.casino.add_npc(game_id, "TestNPC", "simple")
+        self.assertTrue(npc.is_npc)
+        self.assertEqual(npc.name, "TestNPC")
         game = self.casino.games[game_id]
-        self.assertIn(bot, game.players_waiting)
+        self.assertIn(npc, game.players_waiting)
 
-    def test_add_bot_unknown_type(self):
+    def test_add_npc_unknown_type(self):
         game_id = self.casino.new_game()
         with self.assertRaises(CardGameError):
-            self.casino.add_bot(game_id, "TestBot", "unknown")
+            self.casino.add_npc(game_id, "TestNPC", "unknown")
 
-    def test_add_bot_invalid_game(self):
+    def test_add_npc_invalid_game(self):
         with self.assertRaises(CardGameError):
-            self.casino.add_bot("nonexistent", "TestBot")
+            self.casino.add_npc("nonexistent", "TestNPC")
 
-    def test_remove_bot_from_waiting(self):
+    def test_remove_npc_from_waiting(self):
         game_id = self.casino.new_game()
-        self.casino.add_bot(game_id, "RemoveBot", "simple")
+        self.casino.add_npc(game_id, "RemoveNPC", "simple")
         game = self.casino.games[game_id]
         self.assertEqual(len(game.players_waiting), 1)
-        self.casino.remove_bot(game_id, "RemoveBot")
+        self.casino.remove_npc(game_id, "RemoveNPC")
         self.assertEqual(len(game.players_waiting), 0)
 
-    def test_remove_bot_not_found(self):
+    def test_remove_npc_not_found(self):
         game_id = self.casino.new_game()
         with self.assertRaises(CardGameError):
-            self.casino.remove_bot(game_id, "Ghost")
+            self.casino.remove_npc(game_id, "Ghost")
 
-    def test_remove_bot_does_not_remove_human(self):
-        """remove_bot should not remove a human player with the same name."""
+    def test_remove_npc_does_not_remove_human(self):
+        """remove_npc should not remove a human player with the same name."""
         game_id = self.casino.new_game()
         game = self.casino.games[game_id]
         human = Player("SameName")
         game.join(human)
         with self.assertRaises(CardGameError):
-            self.casino.remove_bot(game_id, "SameName")
+            self.casino.remove_npc(game_id, "SameName")
         self.assertIn(human, game.players_waiting)
 
-    def test_bot_types_registry(self):
-        self.assertIn('simple', BOT_TYPES)
-        self.assertEqual(BOT_TYPES['simple'], SimpleBlackjackBot)
+    def test_npc_types_registry(self):
+        self.assertIn('simple', NPC_TYPES)
+        self.assertEqual(NPC_TYPES['simple'], SimpleBlackjackNPC)
 
 
 if __name__ == "__main__":

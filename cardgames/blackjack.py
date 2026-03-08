@@ -488,9 +488,9 @@ class Blackjack(CardGame):
             self.state = HandState.WAITING
             return
 
-        # Auto-bet for any bots that haven't bet yet
+        # Auto-bet for any NPCs that haven't bet yet
         for player in self.players:
-            if player.is_bot and player.name not in self.bets:
+            if player.is_npc and player.name not in self.bets:
                 wallet = self.casino.db.get_user_wallet(player.name) or 0
                 if wallet >= self.MIN_BET:
                     amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
@@ -520,7 +520,7 @@ class Blackjack(CardGame):
             self.new_hand()
 
     def _tick_playing(self):
-        """Handle PLAYING state: check for empty table, auto-play bots, remind humans."""
+        """Handle PLAYING state: check for empty table, auto-play NPCs, remind humans."""
         if not self.players:
             self.output("🌵 Table's empty. Everyone's skedaddled.")
             self.bets = {}
@@ -530,8 +530,8 @@ class Blackjack(CardGame):
 
         current_player = self.players[self.current_player_idx]
 
-        # Auto-play bot turns
-        if current_player.is_bot:
+        # Auto-play NPC turns
+        if current_player.is_npc:
             score = self.get_score(current_player)
             dealer_visible_card = self.dealer.hand[0]
             action = current_player.decide_action(

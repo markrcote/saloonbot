@@ -1,5 +1,5 @@
 class Player:
-    is_bot = False
+    is_npc = False
 
     def __init__(self, name):
         self.name = name  # must be unique

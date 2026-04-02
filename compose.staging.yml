@@ -72,7 +72,7 @@ services:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_ROLLING_RESTART=true
       - WATCHTOWER_TIMEOUT=60s
-      - WATCHTOWER_SCHEDULE=0 */5 * * * *
+      - WATCHTOWER_SCHEDULE=0 */2 * * * *
       - TZ=America/Toronto
     labels:
       - com.centurylinklabs.watchtower.enable=false

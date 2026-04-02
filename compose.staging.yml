@@ -1,0 +1,86 @@
+services:
+  saloonbot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+      args:
+        GIT_SHA: ${GIT_SHA}
+    image: ghcr.io/markrcote/saloonbot-server:main
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=saloonbot
+      - MYSQL_PASSWORD=saloonbot_password
+      - MYSQL_DATABASE=saloonbot
+      - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+    depends_on:
+      - redis
+      - mysql
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+  saloonbot-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+      args:
+        GIT_SHA: ${GIT_SHA}
+        SALOONBOT_DEBUG: ${SALOONBOT_DEBUG}
+    image: ghcr.io/markrcote/saloonbot-bot:main
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - DISCORD_GUILDS_FILE=/run/secrets/discord_guilds
+      - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+    secrets:
+      - discord_token
+      - discord_guilds
+    depends_on:
+      - redis
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=saloonbot
+      - MYSQL_USER=saloonbot
+      - MYSQL_PASSWORD=saloonbot_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      - DOCKER_API_VERSION=1.54
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_ROLLING_RESTART=true
+      - WATCHTOWER_TIMEOUT=60s
+      - WATCHTOWER_SCHEDULE=0 */5 * * * *
+      - TZ=America/Toronto
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+volumes:
+  mysql_data:
+secrets:
+  discord_token:
+    file: discord_token.txt
+  discord_guilds:
+    file: discord_guilds.txt

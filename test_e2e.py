@@ -476,9 +476,6 @@ class TestServerRestart(EndToEndTestCase):
             # Wait for hand to start
             self.collect_messages(pubsub, timeout=5, stop_on="you're up")
 
-            # Give server time to save state after tick
-            time.sleep(0.5)
-
             # Check wallet was decremented
             cursor = self.db.cursor()
             cursor.execute("SELECT wallet FROM users WHERE username = 'BetPlayer'")
@@ -488,15 +485,33 @@ class TestServerRestart(EndToEndTestCase):
             # Default wallet is 200, so after betting 25 should be 175
             self.assertEqual(float(after_bet[0]), 175.0)
 
-            # Verify bet is in DB before restart
-            cursor = self.db.cursor()
-            cursor.execute("SELECT bets_json, state FROM games WHERE game_id = %s", (game_id,))
-            before_restart = cursor.fetchone()
-            cursor.close()
+            # Poll until the bet appears in the games table (or timeout after 5s).
+            # The server persists game state asynchronously after processing actions,
+            # so a fixed sleep is unreliable; poll instead.
+            poll_interval = 0.1
+            poll_timeout = 5.0
+            deadline = time.time() + poll_timeout
+            before_restart = None
+            bets_before = {}
+            while time.time() < deadline:
+                cursor = self.db.cursor()
+                cursor.execute("SELECT bets_json, state FROM games WHERE game_id = %s", (game_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                if row is not None:
+                    before_restart = row
+                    bets_before = json.loads(row[0])
+                    if bets_before.get('BetPlayer') == 25:
+                        break
+                time.sleep(poll_interval)
+
             self.assertIsNotNone(before_restart, "Game should be in database before restart")
-            bets_before = json.loads(before_restart[0])
-            self.assertEqual(bets_before.get('BetPlayer'), 25,
-                             f"Bet should be saved before restart. State: {before_restart[1]}")
+            self.assertEqual(
+                bets_before.get('BetPlayer'), 25,
+                f"Bet should be saved before restart within {poll_timeout}s. "
+                f"Last observed state: {before_restart[1] if before_restart else 'N/A'}, "
+                f"bets_json: {before_restart[0] if before_restart else 'N/A'}"
+            )
 
         finally:
             pubsub.close()

@@ -1,8 +1,12 @@
-name: Docker Image CI
+name: Docker Image Publish
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_run:
+    workflows: ["Lint and test"]
+    types:
+      - completed
+    branches:
+      - main
 
 env:
   REGISTRY: ghcr.io

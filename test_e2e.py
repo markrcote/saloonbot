@@ -414,14 +414,23 @@ class TestServerRestart(EndToEndTestCase):
             # Wait for hand to start and player turn
             self.collect_messages(pubsub, timeout=5, stop_on="you're up")
 
-            # Give server time to save state after tick
-            time.sleep(0.5)
+            # Poll until state == 'playing' appears in the DB (or timeout after 5s).
+            # The server persists game state asynchronously after ticks,
+            # so a fixed sleep is unreliable; poll instead.
+            poll_interval = 0.1
+            poll_timeout = 5.0
+            deadline = time.time() + poll_timeout
+            result = None
+            while time.time() < deadline:
+                cursor = self.db.cursor()
+                cursor.execute("SELECT game_id, state FROM games WHERE game_id = %s", (game_id,))
+                row = cursor.fetchone()
+                cursor.close()
+                if row is not None and row[1] == 'playing':
+                    result = row
+                    break
+                time.sleep(poll_interval)
 
-            # Verify game is in database
-            cursor = self.db.cursor()
-            cursor.execute("SELECT game_id, state FROM games WHERE game_id = %s", (game_id,))
-            result = cursor.fetchone()
-            cursor.close()
             self.assertIsNotNone(result, "Game should be saved in database")
             self.assertEqual(result[0], game_id)
             self.assertEqual(result[1], 'playing')

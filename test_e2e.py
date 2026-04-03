@@ -151,7 +151,7 @@ class EndToEndTestCase(unittest.TestCase):
         while time.time() < deadline:
             if cls.server_process.poll() is not None:
                 raise RuntimeError("Server process exited unexpectedly")
-            numsub = cls.redis.pubsub_numsub("casino")
+            numsub = dict(cls.redis.pubsub_numsub("casino"))
             if numsub.get("casino", 0) >= 1:
                 logging.info("Server is ready (subscribed to casino channel)")
                 return

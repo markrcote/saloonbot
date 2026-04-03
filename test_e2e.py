@@ -128,12 +128,7 @@ class EndToEndTestCase(unittest.TestCase):
             stderr=subprocess.DEVNULL
         )
 
-        # Wait for server to be online
-        time.sleep(3)
-
-        # Verify server is running
-        if cls.server_process.poll() is not None:
-            raise RuntimeError("Server process failed to start")
+        cls._wait_for_server_ready()
 
         logging.info("Server process started")
 
@@ -148,6 +143,38 @@ class EndToEndTestCase(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.server_process.kill()
                 cls.server_process.wait()
+
+    @classmethod
+    def _wait_for_server_ready(cls, timeout=15):
+        """Wait until the server has subscribed to the Redis 'casino' channel."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if cls.server_process.poll() is not None:
+                raise RuntimeError("Server process exited unexpectedly")
+            numsub = cls.redis.pubsub_numsub("casino")
+            if numsub.get("casino", 0) >= 1:
+                logging.info("Server is ready (subscribed to casino channel)")
+                return
+            time.sleep(0.1)
+        raise RuntimeError(f"Server did not become ready within {timeout}s")
+
+    def poll_db(self, query, params, predicate=None, timeout=5, interval=0.1):
+        """Poll the database until predicate(row) returns True, returning the row.
+
+        Executes *query* with *params* repeatedly until either a row is returned
+        and the optional *predicate* passes, or *timeout* seconds elapse.
+        Returns the matching row, or None on timeout.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            cursor = self.db.cursor()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            cursor.close()
+            if row is not None and (predicate is None or predicate(row)):
+                return row
+            time.sleep(interval)
+        return None
 
     def setUp(self):
         """Set up for each test."""
@@ -301,14 +328,10 @@ class TestPlayerActions(EndToEndTestCase):
             player_name = 'DatabaseTestPlayer'
             self.join_player(game_id, player_name)
 
-            # Give it time to process
-            time.sleep(2)
-
-            # Check database using class-level connection
-            cursor = self.db.cursor()
-            cursor.execute("SELECT username FROM users WHERE username = %s", (player_name,))
-            result = cursor.fetchone()
-            cursor.close()
+            result = self.poll_db(
+                "SELECT username FROM users WHERE username = %s",
+                (player_name,)
+            )
 
             self.assertIsNotNone(result, "User should be created in database")
             self.assertEqual(result[0], player_name)
@@ -414,23 +437,23 @@ class TestServerRestart(EndToEndTestCase):
             # Wait for hand to start and player turn
             self.collect_messages(pubsub, timeout=5, stop_on="you're up")
 
-            # Give server time to save state after tick
-            time.sleep(0.5)
-
-            # Verify game is in database
-            cursor = self.db.cursor()
-            cursor.execute("SELECT game_id, state FROM games WHERE game_id = %s", (game_id,))
-            result = cursor.fetchone()
-            cursor.close()
+            # Verify game is in database (poll until state is 'playing')
+            result = self.poll_db(
+                "SELECT game_id, state FROM games WHERE game_id = %s",
+                (game_id,),
+                predicate=lambda row: row[1] == 'playing'
+            )
             self.assertIsNotNone(result, "Game should be saved in database")
             self.assertEqual(result[0], game_id)
             self.assertEqual(result[1], 'playing')
 
             # Verify bet is saved
-            cursor = self.db.cursor()
-            cursor.execute("SELECT bets_json FROM games WHERE game_id = %s", (game_id,))
-            result = cursor.fetchone()
-            cursor.close()
+            result = self.poll_db(
+                "SELECT bets_json FROM games WHERE game_id = %s",
+                (game_id,),
+                predicate=lambda row: json.loads(row[0]).get('PersistPlayer') == 20
+            )
+            self.assertIsNotNone(result, "Bet should be saved in database")
             bets = json.loads(result[0])
             self.assertIn('PersistPlayer', bets)
             self.assertEqual(bets['PersistPlayer'], 20)
@@ -440,7 +463,6 @@ class TestServerRestart(EndToEndTestCase):
 
         # Restart server
         self._stop_server()
-        time.sleep(1)
         self._start_server()
 
         # Reconnect pubsub after restart
@@ -477,64 +499,50 @@ class TestServerRestart(EndToEndTestCase):
             self.collect_messages(pubsub, timeout=5, stop_on="you're up")
 
             # Check wallet was decremented
-            cursor = self.db.cursor()
-            cursor.execute("SELECT wallet FROM users WHERE username = 'BetPlayer'")
-            after_bet = cursor.fetchone()
-            cursor.close()
+            after_bet = self.poll_db(
+                "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+                ()
+            )
             self.assertIsNotNone(after_bet)
             # Default wallet is 200, so after betting 25 should be 175
             self.assertEqual(float(after_bet[0]), 175.0)
 
             # Poll until the bet appears in the games table (or timeout after 5s).
-            # The server persists game state asynchronously after processing actions,
-            # so a fixed sleep is unreliable; poll instead.
-            poll_interval = 0.1
-            poll_timeout = 5.0
-            deadline = time.time() + poll_timeout
-            before_restart = None
-            bets_before = {}
-            while time.time() < deadline:
-                cursor = self.db.cursor()
-                cursor.execute("SELECT bets_json, state FROM games WHERE game_id = %s", (game_id,))
-                row = cursor.fetchone()
-                cursor.close()
-                if row is not None:
-                    before_restart = row
-                    bets_before = json.loads(row[0])
-                    if bets_before.get('BetPlayer') == 25:
-                        break
-                time.sleep(poll_interval)
-
-            self.assertIsNotNone(before_restart, "Game should be in database before restart")
+            before_restart = self.poll_db(
+                "SELECT bets_json, state FROM games WHERE game_id = %s",
+                (game_id,),
+                predicate=lambda row: json.loads(row[0]).get('BetPlayer') == 25
+            )
+            self.assertIsNotNone(
+                before_restart,
+                "Bet should be saved in database before restart"
+            )
             self.assertEqual(
-                bets_before.get('BetPlayer'), 25,
-                f"Bet should be saved before restart within {poll_timeout}s. "
-                f"Last observed state: {before_restart[1] if before_restart else 'N/A'}, "
-                f"bets_json: {before_restart[0] if before_restart else 'N/A'}"
+                json.loads(before_restart[0]).get('BetPlayer'), 25,
+                "Bet should be saved before restart"
             )
 
         finally:
             pubsub.close()
 
-        # Restart server immediately
+        # Restart server
         self._stop_server()
-        time.sleep(1)
         self._start_server()
 
         # Verify bet is still in database
-        cursor = self.db.cursor()
-        cursor.execute("SELECT bets_json FROM games WHERE game_id = %s", (game_id,))
-        result = cursor.fetchone()
-        cursor.close()
+        result = self.poll_db(
+            "SELECT bets_json FROM games WHERE game_id = %s",
+            (game_id,)
+        )
         self.assertIsNotNone(result, "Game should still exist after restart")
         bets = json.loads(result[0])
         self.assertEqual(bets.get('BetPlayer'), 25, "Bet should be preserved")
 
         # Verify wallet wasn't double-decremented
-        cursor = self.db.cursor()
-        cursor.execute("SELECT wallet FROM users WHERE username = 'BetPlayer'")
-        after_restart = cursor.fetchone()
-        cursor.close()
+        after_restart = self.poll_db(
+            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            ()
+        )
         self.assertEqual(float(after_restart[0]), 175.0,
                          "Wallet should not be decremented again")
 

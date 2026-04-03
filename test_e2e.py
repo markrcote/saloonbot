@@ -167,6 +167,7 @@ class EndToEndTestCase(unittest.TestCase):
         """
         deadline = time.time() + timeout
         while time.time() < deadline:
+            self.db.commit()  # End current transaction so we get a fresh snapshot
             cursor = self.db.cursor()
             cursor.execute(query, params)
             row = cursor.fetchone()

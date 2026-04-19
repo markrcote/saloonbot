@@ -5,7 +5,7 @@ import uuid
 
 import redis
 
-from .blackjack import Blackjack
+from .blackjack import Blackjack, HandState
 from .card_game import CardGameError
 from .simple_npc import SimpleBlackjackNPC
 
@@ -174,80 +174,99 @@ class Casino:
             {'game_id': game_id, 'text': output}
         )
 
-    def listen(self):
-        pubsub = self.redis.pubsub()
-        backoff = None
-        while True:
+    EMPTY_GAME_TIMEOUT = 600  # seconds before an idle empty game is removed
+
+    def _process_message(self, data):
+        game_id = data.get('game_id')
+
+        if game_id is None:
+            logging.debug(f"Got casino message: {data}")
+            if data['event_type'] == 'casino_action':
+                if data['action'] == 'new_game':
+                    request_id = data.get('request_id')
+                    if request_id:
+                        guild_id = data.get('guild_id')
+                        channel_id = data.get('channel_id')
+                        game_id = self.new_game(guild_id, channel_id)
+                        self.publish_event(
+                            'casino_update',
+                            {
+                                'event_type': 'new_game',
+                                'request_id': request_id,
+                                'game_id': game_id
+                            }
+                        )
+                elif data['action'] == 'list_games':
+                    request_id = data.get('request_id')
+                    if request_id:
+                        self._handle_list_games(request_id)
+        elif game_id in self.games.keys():
+            logging.debug(f"Got game message: {data}")
             try:
-                pubsub.subscribe("casino")
-                break
-            except redis.exceptions.ConnectionError:
-                if backoff is None:
-                    backoff = 1
+                if data['event_type'] == 'npc_action':
+                    action = data['action']
+                    if action == 'add_npc':
+                        npc_name = data.get('npc_name', f"NPC-{uuid.uuid4().hex[:6]}")
+                        npc_type = data.get('npc_type', 'simple')
+                        self.add_npc(game_id, npc_name, npc_type)
+                    elif action == 'remove_npc':
+                        npc_name = data.get('npc_name')
+                        if npc_name:
+                            self.remove_npc(game_id, npc_name)
                 else:
-                    backoff *= 2
-                logging.info(f"Couldn't connect to redis; sleeping for {backoff} seconds...")
-                time.sleep(backoff)
+                    self.games[game_id].action(data)
+                self._save_game(game_id)
+            except CardGameError as e:
+                logging.warning(f"Game error: {e}")
+                self.game_output(game_id, e.user_message())
+        else:
+            logging.debug(f"Got unknown message: {data}")
 
-        logging.info("Casino online.")
+    def _tick_games(self):
+        for game_id, game in list(self.games.items()):
+            state_before = game.state
+            game.tick()
+            state_after = game.state
 
+            if state_before != state_after:
+                self._save_game(game_id)
+
+            # Remove idle empty games
+            if (game.state == HandState.WAITING
+                    and not game.players
+                    and not game.players_waiting
+                    and time.time() - game.time_last_event > self.EMPTY_GAME_TIMEOUT):
+                logging.info(f"Removing idle empty game {game_id}")
+                self._delete_game(game_id)
+                del self.games[game_id]
+
+    def listen(self):
         while True:
-            message = pubsub.get_message(ignore_subscribe_messages=True,
-                                         timeout=2.0)
-            if message:
-                data = json.loads(message['data'])
-                game_id = data.get('game_id')
+            pubsub = self.redis.pubsub()
+            backoff = 1
+            while True:
+                try:
+                    pubsub.subscribe("casino")
+                    break
+                except redis.exceptions.ConnectionError:
+                    logging.info(f"Couldn't connect to redis; sleeping for {backoff} seconds...")
+                    time.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
 
-                if game_id is None:
-                    logging.debug(f"Got casino message: {data}")
-                    if data['event_type'] == 'casino_action':
-                        if data['action'] == 'new_game':
-                            request_id = data.get('request_id')
-                            if request_id:
-                                guild_id = data.get('guild_id')
-                                channel_id = data.get('channel_id')
-                                game_id = self.new_game(guild_id, channel_id)
-                                self.publish_event(
-                                    'casino_update',
-                                    {
-                                        'event_type': 'new_game',
-                                        'request_id': request_id,
-                                        'game_id': game_id
-                                    }
-                                )
-                        elif data['action'] == 'list_games':
-                            request_id = data.get('request_id')
-                            if request_id:
-                                self._handle_list_games(request_id)
-                elif game_id in self.games.keys():
-                    logging.debug(f"Got game message: {data}")
-                    try:
-                        if data['event_type'] == 'npc_action':
-                            action = data['action']
-                            if action == 'add_npc':
-                                npc_name = data.get('npc_name', f"NPC-{uuid.uuid4().hex[:6]}")
-                                npc_type = data.get('npc_type', 'simple')
-                                self.add_npc(game_id, npc_name, npc_type)
-                            elif action == 'remove_npc':
-                                npc_name = data.get('npc_name')
-                                if npc_name:
-                                    self.remove_npc(game_id, npc_name)
-                        else:
-                            self.games[game_id].action(data)
-                        # Save game after player action
-                        self._save_game(game_id)
-                    except CardGameError as e:
-                        logging.warning(f"Game error: {e}")
-                        self.game_output(game_id, e.user_message())
-                else:
-                    logging.debug(f"Got unknown message: {data}")
+            logging.info("Casino online.")
 
-            # Process game ticks and save on state changes
-            for game_id, game in list(self.games.items()):
-                state_before = game.state
-                game.tick()
-                state_after = game.state
+            try:
+                while True:
+                    message = pubsub.get_message(ignore_subscribe_messages=True,
+                                                 timeout=2.0)
+                    if message:
+                        data = json.loads(message['data'])
+                        self._process_message(data)
 
-                # Save if state changed
-                if state_before != state_after:
-                    self._save_game(game_id)
+                    self._tick_games()
+            except redis.exceptions.ConnectionError:
+                logging.warning("Lost Redis connection; reconnecting...")
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass

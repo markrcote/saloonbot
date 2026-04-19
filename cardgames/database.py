@@ -21,13 +21,11 @@ class Database:
     def _connect(self):
         """Create a database connection."""
         try:
-            # Check if connection is valid before attempting to reconnect
             if self.connection is not None:
                 try:
-                    if self.connection.is_connected():
-                        return
+                    self.connection.ping(reconnect=True)
+                    return
                 except Error:
-                    # Connection exists but is invalid, will reconnect below
                     pass
 
             self.connection = mysql.connector.connect(

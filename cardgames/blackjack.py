@@ -208,10 +208,15 @@ class Blackjack(CardGame):
                 return
             raise CardGameError(f"{player} is not at the table")
 
-        # If player had a bet, they forfeit it
+        # If player had a bet, forfeit it unless the hand outcome is already decided
         if player.name in self.bets:
-            forfeited = self.bets[player.name]
-            self.output(f"💨 {player} hightails it outta here! Their ${forfeited:.2f} stays with the house.")
+            bet_amount = self.bets[player.name]
+            if self.state in (HandState.DEALER_TURN, HandState.RESOLVING):
+                # Hand is in progress — return their bet rather than silently losing it
+                self.casino.db.update_wallet(player.name, bet_amount)
+                self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} bet is returned.")
+            else:
+                self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} stays with the house.")
             del self.bets[player.name]
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")

@@ -84,7 +84,8 @@ class CardGame:
         return card in player.hand
 
     def deal(self, player, cards=1):
-        assert len(self.deck) + len(self.discards) >= cards
+        if len(self.deck) + len(self.discards) < cards:
+            raise CardGameError("Not enough cards remaining in deck")
         # Deal cards to player
         for _ in range(cards):
             if not self.deck:

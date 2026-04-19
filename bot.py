@@ -372,6 +372,7 @@ class BlackjackCog(commands.Cog):
                     else:
                         # Regular message - plain text
                         await game.channel.send(text)
+                    break
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
 

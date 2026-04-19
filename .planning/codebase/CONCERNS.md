@@ -28,17 +28,11 @@
 - Impact: Requires a privileged intent. Plain-text command handling is untested (unit tests only cover slash commands). Discord may further restrict or remove the intent in future API versions.
 - Fix approach: Remove prefix command handling and the `message_content` intent; rely solely on slash commands. Add `/hit`, `/stand` slash commands for in-game actions.
 
-**`assert` Used for Deck-Size Invariant:**
-- Issue: `cardgames/card_game.py` line 87 uses `assert len(self.deck) + len(self.discards) >= cards`. Python's `assert` is disabled when the interpreter runs with the `-O` flag.
-- Files: `cardgames/card_game.py`
-- Impact: Silent data corruption (dealing from an empty deck) in optimized production deployments.
-- Fix approach: Replace with an explicit `raise CardGameError(...)`.
+**`assert` Used for Deck-Size Invariant:** ✓ Fixed (2026-04-19)
+- Replaced `assert` with `raise CardGameError(...)` in `cardgames/card_game.py:87`.
 
-**`leave()` Silently Mishandles DEALER_TURN/RESOLVING States:**
-- Issue: `Blackjack.leave()` in `cardgames/blackjack.py` (lines 203–227) adjusts `current_player_idx` only for `HandState.PLAYING`. When a player leaves during `DEALER_TURN` or `RESOLVING`, their `player.name` key is removed from `self.bets` (line 215) but the `bets` dict is used later in `end_hand()` (line 333) to compute payouts. If `player.name` is in `self.bets` and the player has left, the payout is silently skipped.
-- Files: `cardgames/blackjack.py`
-- Impact: Player who leaves mid-hand after the dealer's turn begins loses their bet even if they would have won; their escrow is never returned.
-- Fix approach: When a player leaves during `DEALER_TURN` or `RESOLVING`, queue a deferred payout resolution for that player rather than discarding the bet.
+**`leave()` Silently Mishandles DEALER_TURN/RESOLVING States:** ✓ Fixed (2026-04-19)
+- `leave()` in `cardgames/blackjack.py` now returns the player's bet via `update_wallet` when leaving during `DEALER_TURN` or `RESOLVING`, instead of silently forfeiting it to the house.
 
 ## Security Considerations
 
@@ -76,11 +70,8 @@
 
 ## Fragile Areas
 
-**`process_message()` for-else Indentation Bug:**
-- Files: `bot.py` lines 346–376
-- Why fragile: Python's `for...else` syntax means the `else` clause on line 375 executes after the loop *only if the loop did not `break`*. Since the loop never uses `break`, the `else` block always runs, logging every game-topic message as "unknown" even after it has been processed. The "unknown message" log line fires for all successfully handled game events.
-- Safe modification: The `else:` at line 375 should be dedented to align with `for` to become an `if not found:` pattern, or restructured with a `break` after dispatching.
-- Test coverage: No unit test exercises `process_message` for non-casino_update topics.
+**`process_message()` for-else Indentation Bug:** ✓ Fixed (2026-04-19)
+- Added `break` after dispatching a matched game message and aligned `else:` with `for` in `bot.py:346–377`. "Unknown message" now only logs when no game matched the topic.
 
 **`Casino.listen()` Has No Redis Reconnection After Initial Subscribe:**
 - Files: `cardgames/casino.py` lines 177–253
@@ -109,7 +100,7 @@
 **No Tests for `bot.py` Message Processing:**
 - What's not tested: `process_message()`, `on_message()`, `send_command()`, game recovery via `_handle_list_games_response()`, and all slash command handlers in `BlackjackCog`.
 - Files: `bot.py`
-- Risk: The for-else indentation bug (see Fragile Areas), embed color logic, and Redis reconnection flow could break silently.
+- Risk: Embed color logic and Redis reconnection flow could break silently.
 - Priority: High
 
 **No Tests for Server-Side Redis Reconnection:**
@@ -118,11 +109,11 @@
 - Risk: Server crashes silently under transient network issues.
 - Priority: High
 
-**No Tests for `leave()` During DEALER_TURN / RESOLVING:**
-- What's not tested: Player leaving after dealer starts playing; correct (or missing) bet refund behavior.
+**No Tests for `leave()` During DEALER_TURN / RESOLVING:** ✓ Fixed behaviour (2026-04-19)
+- Bet refund is now implemented; test coverage still missing.
 - Files: `cardgames/blackjack.py`
-- Risk: Bet escrow funds lost without payout.
-- Priority: Medium
+- Risk: Regression in bet-return logic could go undetected.
+- Priority: Low
 
 **No Tests for Game Accumulation / Memory Leak:**
 - What's not tested: Long-running casino with many games created; `_delete_game()` path never exercised.

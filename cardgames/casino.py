@@ -260,7 +260,11 @@ class Casino:
                     message = pubsub.get_message(ignore_subscribe_messages=True,
                                                  timeout=2.0)
                     if message:
-                        data = json.loads(message['data'])
+                        try:
+                            data = json.loads(message['data'])
+                        except json.JSONDecodeError as e:
+                            logging.error(f"Failed to parse Redis message: {e}")
+                            continue
                         self._process_message(data)
 
                     self._tick_games()

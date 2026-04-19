@@ -43,6 +43,7 @@ class Database:
     def _init_database(self):
         """Initialize the database schema."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             # Create users table if it doesn't exist
@@ -98,15 +99,18 @@ class Database:
             """)
 
             self.connection.commit()
-            cursor.close()
             logging.info("Database schema initialized")
         except Error as e:
             logging.error(f"Error initializing database: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def add_user(self, username):
         """Add a new user to the database if they don't exist."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
@@ -114,34 +118,40 @@ class Database:
             """, (username,))
             self.connection.commit()
             rows_affected = cursor.rowcount
-            cursor.close()
             if rows_affected > 0:
                 logging.info(f"Added new user: {username}")
             return rows_affected > 0
         except Error as e:
             logging.error(f"Error adding user {username}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def get_user_wallet(self, username):
         """Get the wallet balance for a user."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
                 SELECT wallet FROM users WHERE username = %s
             """, (username,))
             result = cursor.fetchone()
-            cursor.close()
             if result is None:
                 return None
             return float(result[0])
         except Error as e:
             logging.error(f"Error getting wallet for {username}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def update_wallet(self, username, amount):
         """Update a user's wallet by adding or subtracting an amount."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
@@ -149,17 +159,20 @@ class Database:
             """, (amount, username))
             self.connection.commit()
             rows_affected = cursor.rowcount
-            cursor.close()
             if rows_affected > 0:
                 logging.info(f"Updated wallet for {username} by {amount}")
             return rows_affected > 0
         except Error as e:
             logging.error(f"Error updating wallet for {username}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def save_game(self, game_id, game_data):
         """Save game state to database."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
@@ -196,23 +209,25 @@ class Database:
                 json.dumps(game_data['bets']),
             ))
             self.connection.commit()
-            cursor.close()
             logging.debug(f"Saved game {game_id}")
             return True
         except Error as e:
             logging.error(f"Error saving game {game_id}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def load_game(self, game_id):
         """Load game state from database."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute("""
                 SELECT * FROM games WHERE game_id = %s
             """, (game_id,))
             result = cursor.fetchone()
-            cursor.close()
             if result is None:
                 return None
             return {
@@ -232,15 +247,18 @@ class Database:
         except Error as e:
             logging.error(f"Error loading game {game_id}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def load_all_active_games(self):
         """Load all active games from database."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute("SELECT * FROM games")
             results = cursor.fetchall()
-            cursor.close()
             games = []
             for result in results:
                 games.append({
@@ -261,26 +279,33 @@ class Database:
         except Error as e:
             logging.error(f"Error loading active games: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def delete_game(self, game_id):
         """Delete a game from database."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("DELETE FROM games WHERE game_id = %s", (game_id,))
             self.connection.commit()
             rows_affected = cursor.rowcount
-            cursor.close()
             if rows_affected > 0:
                 logging.info(f"Deleted game {game_id}")
             return rows_affected > 0
         except Error as e:
             logging.error(f"Error deleting game {game_id}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def save_game_channel(self, game_id, guild_id, channel_id):
         """Save game-channel association for bot recovery."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
@@ -291,21 +316,23 @@ class Database:
                     channel_id = new.channel_id
             """, (game_id, guild_id, channel_id))
             self.connection.commit()
-            cursor.close()
             logging.debug(f"Saved game channel: {game_id} -> {guild_id}/{channel_id}")
             return True
         except Error as e:
             logging.error(f"Error saving game channel {game_id}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def load_game_channels(self):
         """Load all game-channel associations."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute("SELECT * FROM game_channels")
             results = cursor.fetchall()
-            cursor.close()
             return [
                 {
                     'game_id': r['game_id'],
@@ -317,10 +344,14 @@ class Database:
         except Error as e:
             logging.error(f"Error loading game channels: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def delete_game_channel(self, game_id):
         """Delete a game-channel association."""
         self._connect()
+        cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute(
@@ -328,13 +359,15 @@ class Database:
             )
             self.connection.commit()
             rows_affected = cursor.rowcount
-            cursor.close()
             if rows_affected > 0:
                 logging.debug(f"Deleted game channel {game_id}")
             return rows_affected > 0
         except Error as e:
             logging.error(f"Error deleting game channel {game_id}: {e}")
             raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def close(self):
         """Close the database connection."""

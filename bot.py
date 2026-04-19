@@ -22,7 +22,8 @@ def read_env_file(env_var):
         return None
     if not os.path.isfile(filename):
         return None
-    return open(filename).read().strip()
+    with open(filename) as f:
+        return f.read().strip()
 
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
@@ -204,6 +205,8 @@ class BlackjackCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message):
         if message.author == self.bot.user:
+            return
+        if not message.guild:
             return
 
         game = self.find_game(message.guild.id, message.channel.id)

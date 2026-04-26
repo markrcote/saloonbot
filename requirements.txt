@@ -1,3 +1,5 @@
+anthropic>=0.40.0
+openai>=1.0.0
 aioconsole==0.8.2
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.5

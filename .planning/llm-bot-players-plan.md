@@ -37,11 +37,9 @@ never blocks. Decisions are eventually consistent across ticks (~2s).
 
 ---
 
-## Milestone 1: LLM Infrastructure + NPC Class
+## Milestone 1a: LLM Client Abstraction
 
-### New files
-
-**`cardgames/llm_client.py`**
+**New file: `cardgames/llm_client.py`**
 - Abstract `LLMClient` with `complete(system: str, user: str, timeout: float) -> str`
 - `ClaudeClient(LLMClient)` using `anthropic` SDK, model `claude-haiku-4-5-20251001` by default
 - `OpenAIClient(LLMClient)` using `openai` SDK, model `gpt-4o-mini` by default
@@ -49,14 +47,41 @@ never blocks. Decisions are eventually consistent across ticks (~2s).
 - Both clients accept model override via env var (`LLM_MODEL`)
 - Both raise a shared `LLMError` on API failure
 
-**`cardgames/personalities.py`**
+**Modified: `requirements.txt`** — add `anthropic` and `openai`
+
+**New env vars (document in CLAUDE.md):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `claude` | `claude` or `openai` |
+| `ANTHROPIC_API_KEY` | — | Required if provider is `claude` |
+| `OPENAI_API_KEY` | — | Required if provider is `openai` |
+| `LLM_MODEL` | provider default | Override LLM model name |
+| `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
+
+### Verification
+- `python test.py` passes
+- Instantiate `ClaudeClient` directly in a Python shell, call `complete()`, confirm response
+
+---
+
+## Milestone 1b: Personality Stubs
+
+**New file: `cardgames/personalities.py`**
 - `Personality` dataclass: `name`, `is_famous`, `system_prompt`, `emoji`, `betting_style`
   (`"conservative"` | `"moderate"` | `"reckless"`)
 - `PersonalityRegistry` with `get_random() -> Personality`, weighted: 1 famous per 20 draws
 - Placeholder with 2 archetypes + 1 historical figure (expanded in M2)
 - `get_personality(name: str) -> Personality` for lookup by name (needed for deserialization)
 
-**`cardgames/llm_npc.py`**
+### Verification
+- `python test.py` passes
+- Call `get_random()` in a Python shell; confirm dataclass fields are populated
+
+---
+
+## Milestone 1c: LLM NPC Class
+
+**New file: `cardgames/llm_npc.py`**
 - `LLMBlackjackNPC(NPCPlayer)`
 - Constructor: `(name, personality: Personality, llm_client: LLMClient)`
 - `last_quip: str | None = None` attribute
@@ -74,9 +99,16 @@ never blocks. Decisions are eventually consistent across ticks (~2s).
   - Timeout: 5 seconds
 - `_llm_decide_bet(min_bet, max_bet, wallet) -> dict`: similar, returns `{"amount": int, "quip": str}`
 
-### Modified files
+### Verification
+- `python test.py` passes
+- Instantiate `LLMBlackjackNPC` with a mock `LLMClient`; confirm `decide_action()` returns `None`
+  on first call, then returns an action string on next call after future resolves
 
-**`cardgames/blackjack.py`**
+---
+
+## Milestone 1d: Blackjack Integration
+
+**Modified: `cardgames/blackjack.py`**
 - `serialize_player(player)`: add `"is_npc"`, `"npc_type"`, `"npc_personality"` fields
   (npc_type/personality are `None` for human players)
 - `deserialize_player(data)`: if `is_npc`, reconstruct the appropriate NPC class
@@ -86,7 +118,16 @@ never blocks. Decisions are eventually consistent across ticks (~2s).
   `self.output(f"🤠 {player.name}: \"{player.last_quip}\"")` then clear it.
 - `_tick_betting()`: same `None`-guard for `decide_bet()` return value
 
-**`cardgames/casino.py`**
+### Verification
+- `python test.py` passes
+- Serialization round-trip: create an `LLMBlackjackNPC`, serialize it, deserialize it,
+  confirm same type and personality name
+
+---
+
+## Milestone 1e: Casino + Server Wiring
+
+**Modified: `cardgames/casino.py`**
 - Import `LLMBlackjackNPC` and `create_llm_client`
 - Add `'llm': LLMBlackjackNPC` to `NPC_TYPES`
 - Casino constructor: call `create_llm_client()` and store as `self.llm_client`
@@ -94,23 +135,13 @@ never blocks. Decisions are eventually consistent across ticks (~2s).
   `num_bots` times, pick a random personality, create `LLMBlackjackNPC`, call
   `game.join(npc)` directly (bypassing Redis)
 
-**`server.py`** — pass `num_bots` from Redis message data to `casino.new_game()`
-
-**`requirements.txt`** — add `anthropic` and `openai`
-
-### New env vars (document in CLAUDE.md)
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LLM_PROVIDER` | `claude` | `claude` or `openai` |
-| `ANTHROPIC_API_KEY` | — | Required if provider is `claude` |
-| `OPENAI_API_KEY` | — | Required if provider is `openai` |
-| `LLM_MODEL` | provider default | Override LLM model name |
-| `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
+**Modified: `server.py`** — pass `num_bots` from Redis message data to `casino.new_game()`
 
 ### Verification
 - `python test.py` passes
-- Start a game locally, send `npc_action add_npc` with `npc_type: "llm"` via `cli.py`
-- Confirm NPC takes real turns, quip appears in output
+- `./run-e2e-tests.sh` passes
+- Start server locally; send a `new_game` message with `num_bots: 1` via `cli.py`
+- Confirm NPC joins, takes turns, quip appears in output
 - Kill and restart server; verify LLM NPC is restored with correct personality
 
 ---

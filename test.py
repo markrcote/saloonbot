@@ -901,5 +901,88 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.assertEqual(NPC_TYPES['simple'], SimpleBlackjackNPC)
 
 
+class TestLLMBlackjackNPC(unittest.TestCase):
+    def _make_npc(self, llm_response):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = llm_response
+        personality = get_personality("The Grizzled Prospector")
+        return LLMBlackjackNPC("TestNPC", personality, mock_llm)
+
+    def test_is_npc_player(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        npc = self._make_npc('{"action": "stand", "quip": "I reckon."}')
+        self.assertIsInstance(npc, NPCPlayer)
+        self.assertTrue(npc.is_npc)
+
+    def test_decide_action_returns_none_on_first_call(self):
+        npc = self._make_npc('{"action": "stand", "quip": "Steady now."}')
+        hand = [Card("H", 10), Card("H", 8)]
+        dealer_card = Card("S", 7)
+        result = npc.decide_action(hand, dealer_card, 18)
+        self.assertIsNone(result)
+
+    def test_decide_action_returns_action_after_future_resolves(self):
+        npc = self._make_npc('{"action": "stand", "quip": "Steady now."}')
+        hand = [Card("H", 10), Card("H", 8)]
+        dealer_card = Card("S", 7)
+        npc.decide_action(hand, dealer_card, 18)
+        # Wait for the future to complete
+        npc._pending_action_future.result(timeout=2.0)
+        result = npc.decide_action(hand, dealer_card, 18)
+        self.assertEqual(result, "stand")
+        self.assertEqual(npc.last_quip, "Steady now.")
+
+    def test_decide_action_fallback_on_llm_error(self):
+        from cardgames.llm_client import LLMError
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.side_effect = LLMError("API down")
+        personality = get_personality("The Grizzled Prospector")
+        npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
+        hand = [Card("H", 10), Card("H", 5)]
+        dealer_card = Card("S", 10)
+        npc.decide_action(hand, dealer_card, 15)
+        npc._pending_action_future.result(timeout=2.0)
+        result = npc.decide_action(hand, dealer_card, 15)
+        # Fallback: score 15 vs dealer 10 (strong) -> hit
+        self.assertEqual(result, "hit")
+
+    def test_decide_bet_returns_none_on_first_call(self):
+        npc = self._make_npc('{"amount": 20, "quip": "Bettin big pardner."}')
+        result = npc.decide_bet(5, 100, 200)
+        self.assertIsNone(result)
+
+    def test_decide_bet_returns_amount_after_future_resolves(self):
+        npc = self._make_npc('{"amount": 20, "quip": "Bettin big pardner."}')
+        npc.decide_bet(5, 100, 200)
+        npc._pending_bet_future.result(timeout=2.0)
+        result = npc.decide_bet(5, 100, 200)
+        self.assertEqual(result, 20)
+        self.assertEqual(npc.last_quip, "Bettin big pardner.")
+
+    def test_decide_bet_clamps_to_range(self):
+        npc = self._make_npc('{"amount": 9999, "quip": "All in!"}')
+        npc.decide_bet(5, 100, 200)
+        npc._pending_bet_future.result(timeout=2.0)
+        result = npc.decide_bet(5, 100, 200)
+        self.assertEqual(result, 100)
+
+    def test_decide_bet_fallback_on_bad_json(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = "not valid json at all"
+        personality = get_personality("The Grizzled Prospector")
+        npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
+        npc.decide_bet(5, 100, 200)
+        npc._pending_bet_future.result(timeout=2.0)
+        result = npc.decide_bet(5, 100, 200)
+        # Fallback is min_bet
+        self.assertEqual(result, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

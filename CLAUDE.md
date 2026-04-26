@@ -132,6 +132,15 @@ Discord Users
 | BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
+| LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
+| ANTHROPIC_API_KEY | - | Required when LLM_PROVIDER=claude |
+| OPENAI_API_KEY | - | Required when LLM_PROVIDER=openai |
+| LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
+| LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
+
+## Development Workflow
+
+- After completing each milestone, create a git commit before moving to the next one.
 
 ## Key Patterns
 

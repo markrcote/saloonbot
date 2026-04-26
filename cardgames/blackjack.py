@@ -35,16 +35,54 @@ def deserialize_hand(data):
 
 def serialize_player(player):
     """Serialize a player's state for persistence."""
+    is_npc = getattr(player, 'is_npc', False)
+    npc_type = None
+    npc_personality = None
+    if is_npc:
+        from .llm_npc import LLMBlackjackNPC
+        if isinstance(player, LLMBlackjackNPC):
+            npc_type = 'llm'
+            npc_personality = player.personality.name
+        else:
+            npc_type = 'simple'
     return {
         'name': player.name,
-        'hand': serialize_hand(player.hand)
+        'hand': serialize_hand(player.hand),
+        'is_npc': is_npc,
+        'npc_type': npc_type,
+        'npc_personality': npc_personality,
     }
 
 
-def deserialize_player(data):
+def deserialize_player(data, casino=None):
     """Deserialize a player from persisted state."""
-    player = player_registry.get_player(data['name'], add=True)
-    player.hand = deserialize_hand(data['hand'])
+    name = data['name']
+    hand = deserialize_hand(data['hand'])
+
+    if not data.get('is_npc'):
+        player = player_registry.get_player(name, add=True)
+        player.hand = hand
+        return player
+
+    npc_type = data.get('npc_type', 'simple')
+
+    if npc_type == 'llm':
+        from .llm_npc import LLMBlackjackNPC
+        from .personalities import get_personality
+        llm_client = getattr(casino, 'llm_client', None)
+        personality_name = data.get('npc_personality')
+        if llm_client is not None and personality_name:
+            try:
+                personality = get_personality(personality_name)
+                player = LLMBlackjackNPC(name, personality, llm_client)
+                player.hand = hand
+                return player
+            except Exception:
+                pass
+
+    from .simple_npc import SimpleBlackjackNPC
+    player = SimpleBlackjackNPC(name)
+    player.hand = hand
     return player
 
 
@@ -499,6 +537,12 @@ class Blackjack(CardGame):
                 wallet = self.casino.db.get_user_wallet(player.name) or 0
                 if wallet >= self.MIN_BET:
                     amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
+                    if amount is None:
+                        continue
+                    quip = getattr(player, 'last_quip', None)
+                    if quip:
+                        self.output(f"🤠 {player.name}: \"{quip}\"")
+                        player.last_quip = None
                     amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
                     self.bet(player, amount)
 
@@ -542,6 +586,12 @@ class Blackjack(CardGame):
             action = current_player.decide_action(
                 current_player.hand, dealer_visible_card, score
             )
+            if action is None:
+                return
+            quip = getattr(current_player, 'last_quip', None)
+            if quip:
+                self.output(f"🤠 {current_player.name}: \"{quip}\"")
+                current_player.last_quip = None
             if action == "hit":
                 self.hit(current_player)
             else:
@@ -615,8 +665,8 @@ class Blackjack(CardGame):
         game.dealer.hand = deserialize_hand(data['dealer_hand'])
 
         # Restore players
-        game.players = [deserialize_player(p) for p in data['players']]
-        game.players_waiting = [deserialize_player(p) for p in data['players_waiting']]
+        game.players = [deserialize_player(p, casino) for p in data['players']]
+        game.players_waiting = [deserialize_player(p, casino) for p in data['players_waiting']]
 
         # Restore bets
         game.bets = data['bets'].copy()

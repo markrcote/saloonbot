@@ -23,6 +23,7 @@ class NPCPlayer(Player, ABC):
 
         Returns:
             int: The bet amount, between min_bet and max_bet.
+            None: Decision is still pending (caller should retry next tick).
         """
         pass
 
@@ -37,5 +38,6 @@ class NPCPlayer(Player, ABC):
 
         Returns:
             str: "hit" or "stand".
+            None: Decision is still pending (caller should retry next tick).
         """
         pass

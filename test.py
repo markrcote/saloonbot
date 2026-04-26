@@ -984,5 +984,171 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         self.assertEqual(result, 5)
 
 
+class TestNPCSerialization(unittest.TestCase):
+    def test_serialize_human_player(self):
+        player = Player("Alice")
+        player.hand = [Card("H", 10), Card("S", 5)]
+        data = serialize_player(player)
+        self.assertFalse(data['is_npc'])
+        self.assertIsNone(data['npc_type'])
+        self.assertIsNone(data['npc_personality'])
+
+    def test_serialize_simple_npc(self):
+        npc = SimpleBlackjackNPC("BotBob")
+        npc.hand = [Card("D", 7)]
+        data = serialize_player(npc)
+        self.assertTrue(data['is_npc'])
+        self.assertEqual(data['npc_type'], 'simple')
+        self.assertIsNone(data['npc_personality'])
+
+    def test_serialize_llm_npc(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        personality = get_personality("The Grizzled Prospector")
+        npc = LLMBlackjackNPC("LLMBot", personality, MagicMock())
+        npc.hand = [Card("C", 3)]
+        data = serialize_player(npc)
+        self.assertTrue(data['is_npc'])
+        self.assertEqual(data['npc_type'], 'llm')
+        self.assertEqual(data['npc_personality'], "The Grizzled Prospector")
+
+    def test_deserialize_human_player(self):
+        data = {'name': 'Charlie', 'hand': ['H10', 'S5'], 'is_npc': False,
+                'npc_type': None, 'npc_personality': None}
+        player = deserialize_player(data)
+        self.assertFalse(player.is_npc)
+        self.assertEqual(player.name, 'Charlie')
+        self.assertEqual(len(player.hand), 2)
+
+    def test_deserialize_simple_npc(self):
+        data = {'name': 'BotBob', 'hand': ['D7'], 'is_npc': True,
+                'npc_type': 'simple', 'npc_personality': None}
+        player = deserialize_player(data)
+        self.assertTrue(player.is_npc)
+        self.assertIsInstance(player, SimpleBlackjackNPC)
+        self.assertEqual(player.name, 'BotBob')
+
+    def test_deserialize_llm_npc_with_llm_client(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        mock_casino = MagicMock()
+        mock_casino.llm_client = MagicMock()
+        data = {'name': 'LLMBot', 'hand': ['C3'], 'is_npc': True,
+                'npc_type': 'llm', 'npc_personality': 'The Grizzled Prospector'}
+        player = deserialize_player(data, casino=mock_casino)
+        self.assertIsInstance(player, LLMBlackjackNPC)
+        self.assertEqual(player.personality.name, 'The Grizzled Prospector')
+
+    def test_deserialize_llm_npc_without_llm_client_falls_back(self):
+        mock_casino = MagicMock(spec=[])  # no llm_client attribute
+        data = {'name': 'LLMBot', 'hand': ['C3'], 'is_npc': True,
+                'npc_type': 'llm', 'npc_personality': 'The Grizzled Prospector'}
+        player = deserialize_player(data, casino=mock_casino)
+        self.assertIsInstance(player, SimpleBlackjackNPC)
+
+    def test_llm_npc_serialization_roundtrip(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        personality = get_personality("The Grizzled Prospector")
+        mock_llm = MagicMock()
+        npc = LLMBlackjackNPC("LLMBot", personality, mock_llm)
+        npc.hand = [Card("H", 8), Card("D", 3)]
+
+        data = serialize_player(npc)
+        mock_casino = MagicMock()
+        mock_casino.llm_client = mock_llm
+        restored = deserialize_player(data, casino=mock_casino)
+
+        self.assertIsInstance(restored, LLMBlackjackNPC)
+        self.assertEqual(restored.name, 'LLMBot')
+        self.assertEqual(restored.personality.name, 'The Grizzled Prospector')
+        self.assertEqual(len(restored.hand), 2)
+
+
+class TestLLMNPCBlackjackIntegration(unittest.TestCase):
+    def setUp(self):
+        self.mock_casino = MagicMock()
+        self.mock_casino.db = MagicMock()
+        self.mock_casino.db.get_user_wallet.return_value = 1000.0
+        self.game = Blackjack(game_id="test_game", casino=self.mock_casino)
+
+    def _make_llm_npc(self, llm_response):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = llm_response
+        personality = get_personality("The Grizzled Prospector")
+        return LLMBlackjackNPC("LLMBot", personality, mock_llm)
+
+    def _setup_playing_state(self, npc):
+        """Reach PLAYING state with a synchronous bet mock on npc."""
+        npc.decide_bet = MagicMock(return_value=self.game.MIN_BET)
+        self.game.join(npc)
+        self.game.tick()  # WAITING -> BETTING
+        self.game.tick()  # BETTING -> PLAYING
+        self.assertEqual(self.game.state, HandState.PLAYING)
+
+    def _get_output_messages(self):
+        return [call[0][1] for call in self.mock_casino.game_output.call_args_list]
+
+    def test_tick_playing_skips_when_decide_action_returns_none(self):
+        """When decide_action returns None, playing tick should not advance state."""
+        self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
+        npc = self._make_llm_npc('{"action": "stand", "quip": "I reckon."}')
+        self._setup_playing_state(npc)
+
+        npc.decide_action = MagicMock(return_value=None)
+        self.game.tick()  # action pending — should stay PLAYING
+        self.assertEqual(self.game.state, HandState.PLAYING)
+
+    def test_tick_playing_advances_when_action_resolved(self):
+        """When decide_action returns an action, playing tick should advance state."""
+        self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
+        npc = self._make_llm_npc('{"action": "stand", "quip": "I reckon."}')
+        self._setup_playing_state(npc)
+
+        npc.decide_action = MagicMock(return_value="stand")
+        self.game.tick()  # NPC stands -> DEALER_TURN
+        self.assertEqual(self.game.state, HandState.DEALER_TURN)
+
+    def test_tick_playing_outputs_quip(self):
+        """Quip should be output when last_quip is set after decide_action resolves."""
+        self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
+        npc = self._make_llm_npc('{"action": "stand", "quip": "I reckon."}')
+        self._setup_playing_state(npc)
+
+        npc.last_quip = "Steady as she goes."
+        npc.decide_action = MagicMock(return_value="stand")
+        self.game.tick()
+
+        self.assertTrue(any('Steady as she goes.' in m for m in self._get_output_messages()))
+        self.assertIsNone(npc.last_quip)
+
+    def test_tick_betting_skips_npc_when_decide_bet_returns_none(self):
+        """When decide_bet returns None, NPC should not be bet this tick."""
+        self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
+        npc = self._make_llm_npc('{"amount": 10, "quip": "I am in."}')
+        self.game.join(npc)
+        self.game.tick()  # WAITING -> BETTING
+
+        npc.decide_bet = MagicMock(return_value=None)
+        self.game.tick()  # NPC pending — no bet placed yet
+        self.assertNotIn('LLMBot', self.game.bets)
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_tick_betting_outputs_quip_on_bet(self):
+        """Quip should be output when NPC bets and last_quip is set."""
+        self.game.deck = [Card("H", 8), Card("H", 10), Card("H", 7), Card("H", 10)]
+        npc = self._make_llm_npc('{"amount": 10, "quip": "All in, pardner."}')
+        self.game.join(npc)
+        self.game.tick()  # WAITING -> BETTING
+
+        npc.last_quip = "All in, pardner."
+        npc.decide_bet = MagicMock(return_value=10)
+        self.game.tick()
+
+        self.assertTrue(any('All in, pardner.' in m for m in self._get_output_messages()))
+        self.assertIsNone(npc.last_quip)
+
+
 if __name__ == "__main__":
     unittest.main()

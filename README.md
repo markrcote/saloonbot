@@ -16,12 +16,58 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ### Cards
 
-* `/newgame` starts a new game of blackjack.  Commands (hit, stand, etc.) are read
+* `/newgame` starts a new game of blackjack. Commands (hit, stand, etc.) are read
   from messages.
 
 ### Metadata
 
 * `/version`: Outputs the current git sha.
+
+## LLM Bot Players
+
+SaloonBot supports AI-powered bot players with Wild West personalities. Bots use an LLM to make real gameplay decisions (hit/stand/bet) and deliver in-character quips during the game.
+
+### Personalities
+
+Bots are drawn from a pool of archetypes (The Grizzled Prospector, The Drunk Cowboy) and occasional historical figures (Doc Holliday), each with a distinct voice and betting temperament.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `claude` | LLM provider: `claude` or `openai` |
+| `ANTHROPIC_API_KEY` | — | Required when `LLM_PROVIDER=claude` |
+| `OPENAI_API_KEY` | — | Required when `LLM_PROVIDER=openai` |
+| `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
+| `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
+
+If no API key is configured, the server starts normally but LLM bots are disabled.
+
+## CLI
+
+A standalone CLI client (`cli.py`) lets you play and test the game locally without Discord.
+
+```bash
+export REDIS_HOST=localhost REDIS_PORT=6379
+export ANTHROPIC_API_KEY=<key>   # optional, enables LLM bots
+python cli.py
+```
+
+At startup you'll be prompted for your name and how many LLM bot players to add (0–4). The CLI auto-joins the game and drops you into the command prompt.
+
+Available commands:
+
+| Command | Description |
+|---------|-------------|
+| `join` | Sit down at the table (done automatically at startup) |
+| `bet <amount>` | Place a bet during the betting phase |
+| `hit` | Draw another card |
+| `stand` | Hold your current hand |
+| `leave` | Leave the game |
+| `addnpc <name> [simple\|llm]` | Add a bot player |
+| `removenpc <name>` | Remove a bot player |
+| `help` | Show command list |
+| `quit` | Exit |
 
 ## Development
 

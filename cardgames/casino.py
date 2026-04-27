@@ -7,10 +7,14 @@ import redis
 
 from .blackjack import Blackjack, HandState
 from .card_game import CardGameError
+from .llm_client import create_llm_client
+from .llm_npc import LLMBlackjackNPC
+from .personalities import get_random as get_random_personality
 from .simple_npc import SimpleBlackjackNPC
 
 NPC_TYPES = {
     'simple': SimpleBlackjackNPC,
+    'llm': LLMBlackjackNPC,
 }
 
 
@@ -19,6 +23,12 @@ class Casino:
         self.games = {}
         self.redis = redis.Redis(host=redis_host, port=redis_port)
         self.db = db
+        self._pending_bots = {}  # game_id -> num_bots to add on first human join
+        try:
+            self.llm_client = create_llm_client()
+        except Exception as e:
+            logging.warning(f"Could not initialize LLM client: {e}. LLM bot players disabled.")
+            self.llm_client = None
         self._load_games_from_db()
 
     def _load_games_from_db(self):
@@ -62,12 +72,19 @@ class Casino:
         except Exception as e:
             logging.error(f"Error deleting game {game_id}: {e}")
 
-    def new_game(self, guild_id=None, channel_id=None):
+    def new_game(self, guild_id=None, channel_id=None, num_bots=0):
         while True:
             game_id = str(uuid.uuid4())
             if game_id not in self.games.keys():
                 break
         self.games[game_id] = Blackjack(game_id, self)
+
+        # Defer bot creation until first human joins to avoid race-starting the game
+        if num_bots > 0:
+            if self.llm_client is not None:
+                self._pending_bots[game_id] = num_bots
+            else:
+                logging.warning("num_bots requested but LLM client is not available.")
 
         # Save game and channel info to database
         self._save_game(game_id)
@@ -78,6 +95,29 @@ class Casino:
                 logging.error(f"Error saving game channel {game_id}: {e}")
 
         return game_id
+
+    def _add_pending_bots(self, game_id):
+        """Add any pending bots to the game when the first human player joins."""
+        num_bots = self._pending_bots.pop(game_id, 0)
+        if num_bots <= 0 or self.llm_client is None:
+            return
+
+        game = self.games.get(game_id)
+        if game is None:
+            return
+
+        used_names = {p.name for p in game.players + game.players_waiting}
+        for _ in range(num_bots):
+            personality = get_random_personality()
+            name = personality.name
+            if name in used_names:
+                i = 2
+                while f"{name} #{i}" in used_names:
+                    i += 1
+                name = f"{name} #{i}"
+            used_names.add(name)
+            npc = LLMBlackjackNPC(name, personality, self.llm_client)
+            game.join(npc)
 
     def _handle_list_games(self, request_id):
         """Handle a list_games request from the bot."""
@@ -129,12 +169,17 @@ class Casino:
         if game_id not in self.games:
             raise CardGameError(f"Game {game_id} not found")
 
-        npc_class = NPC_TYPES.get(npc_type)
-        if npc_class is None:
+        if npc_type not in NPC_TYPES:
             available = ', '.join(NPC_TYPES.keys())
             raise CardGameError(f"Unknown NPC type '{npc_type}'. Available: {available}")
 
-        npc = npc_class(npc_name)
+        if npc_type == 'llm':
+            if self.llm_client is None:
+                raise CardGameError("LLM client is not available (check API key configuration)")
+            personality = get_random_personality()
+            npc = LLMBlackjackNPC(npc_name, personality, self.llm_client)
+        else:
+            npc = NPC_TYPES[npc_type](npc_name)
         game = self.games[game_id]
         game.join(npc)
         return npc
@@ -187,7 +232,8 @@ class Casino:
                     if request_id:
                         guild_id = data.get('guild_id')
                         channel_id = data.get('channel_id')
-                        game_id = self.new_game(guild_id, channel_id)
+                        num_bots = int(data.get('num_bots', 0))
+                        game_id = self.new_game(guild_id, channel_id, num_bots=num_bots)
                         self.publish_event(
                             'casino_update',
                             {
@@ -203,6 +249,8 @@ class Casino:
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:
+                if data['event_type'] == 'player_action' and data.get('action') == 'join':
+                    self._add_pending_bots(game_id)
                 if data['event_type'] == 'npc_action':
                     action = data['action']
                     if action == 'add_npc':

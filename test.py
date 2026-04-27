@@ -913,6 +913,7 @@ class TestLLMBlackjackNPC(unittest.TestCase):
     def test_is_npc_player(self):
         from cardgames.llm_npc import LLMBlackjackNPC
         npc = self._make_npc('{"action": "stand", "quip": "I reckon."}')
+        self.assertIsInstance(npc, LLMBlackjackNPC)
         self.assertIsInstance(npc, NPCPlayer)
         self.assertTrue(npc.is_npc)
 

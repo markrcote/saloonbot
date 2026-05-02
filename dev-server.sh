@@ -16,14 +16,10 @@ docker compose -f compose.dev-server-local.yml up -d
 echo "Waiting for services..."
 sleep 2
 
-echo "Starting server locally..."
+echo "Starting server locally (SQLite)..."
 export REDIS_HOST=localhost
 export REDIS_PORT=6379
-export MYSQL_HOST=localhost
-export MYSQL_PORT=3306
-export MYSQL_USER=saloonbot
-export MYSQL_PASSWORD=saloonbot_password
-export MYSQL_DATABASE=saloonbot
+export USE_SQLITE=1
 export SALOONBOT_DEBUG=1
 
 python server.py

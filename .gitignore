@@ -131,3 +131,4 @@ dmypy.json
 # Saloonbot
 discord_token.txt
 discord_guilds.txt
+saloonbot.db

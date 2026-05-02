@@ -3,6 +3,7 @@ import os
 
 from cardgames.casino import Casino
 from cardgames.database import Database
+from cardgames.sqlite_database import SqliteDatabase
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
 if DEBUG_LOGGING:
@@ -12,6 +13,9 @@ else:
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", 6379)
+
+USE_SQLITE = os.getenv("USE_SQLITE")
+SQLITE_PATH = os.getenv("SQLITE_PATH", "saloonbot.db")
 
 MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
 MYSQL_PORT = os.getenv("MYSQL_PORT", 3306)
@@ -26,7 +30,10 @@ logging.basicConfig(
 
 
 def main():
-    db = Database(MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE)
+    if USE_SQLITE:
+        db = SqliteDatabase(SQLITE_PATH)
+    else:
+        db = Database(MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE)
     casino = Casino(REDIS_HOST, REDIS_PORT, db)
     casino.listen()
 

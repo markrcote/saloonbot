@@ -104,6 +104,7 @@ Discord Users
 - `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `database.py` - MySQL connection with auto-reconnect; manages `users`, `games`, and `game_channels` tables
+- `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`
 
 **Database tables:**
 - `users` - Stores player usernames and wallet balances (default $200)
@@ -119,6 +120,8 @@ Discord Users
 |----------|---------|-------------|
 | REDIS_HOST | localhost | Redis server host |
 | REDIS_PORT | 6379 | Redis server port |
+| USE_SQLITE | - | Set to use SQLite instead of MySQL (local dev) |
+| SQLITE_PATH | saloonbot.db | Path to SQLite database file |
 | MYSQL_HOST | localhost | MySQL server host |
 | MYSQL_PORT | 3306 | MySQL server port |
 | MYSQL_USER | saloonbot | MySQL username |

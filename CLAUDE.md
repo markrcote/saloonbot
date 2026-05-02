@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 SaloonBot is a Discord bot that generates Old West names and provides a blackjack card game. It consists of two main components that communicate via Redis pub/sub:
 - **bot.py** - Discord bot client using nextcord
 - **server.py** - Backend game server handling game logic
-- MySQL database stores user information
+- MySQL database stores user information (SQLite supported for local development)
 
 ## Commands
 
@@ -30,7 +30,7 @@ Configuration: max-line-length = 120 (see .flake8)
 
 ### Development Options
 
-**Run both components locally (Redis/MySQL in Docker):**
+**Run both components locally (Redis only in Docker, SQLite for DB):**
 ```bash
 ./dev-redis.sh
 # Then in separate terminals:
@@ -38,9 +38,7 @@ export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
 export DISCORD_TOKEN="..." DISCORD_GUILDS="..."
 python bot.py
 
-export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
-export MYSQL_HOST=localhost MYSQL_PORT=3306
-export MYSQL_USER=saloonbot MYSQL_PASSWORD=saloonbot_password MYSQL_DATABASE=saloonbot
+export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1
 python server.py
 ```
 
@@ -74,7 +72,7 @@ Discord Users
 +----+----+
      |
 +----v----+
-|  MySQL  |  User persistence
+|   DB    |  User persistence (MySQL in prod, SQLite locally)
 +---------+
 ```
 
@@ -152,6 +150,6 @@ Discord Users
 - Both implement exponential backoff for Redis reconnection
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders
-- **Game persistence**: Casino saves game state to MySQL after each action; restores all active games on startup via `load_all_active_games()`
+- **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart

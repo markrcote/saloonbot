@@ -7,9 +7,7 @@
 ./dev-redis.sh
 
 # Terminal B – server
-export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
-export MYSQL_HOST=localhost MYSQL_PORT=3306
-export MYSQL_USER=saloonbot MYSQL_PASSWORD=saloonbot_password MYSQL_DATABASE=saloonbot
+export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1
 export ANTHROPIC_API_KEY=<your-key>
 source venv/bin/activate && python server.py
 

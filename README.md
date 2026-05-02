@@ -70,15 +70,26 @@ Available commands:
 
 ## Development
 
-SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis. The server also connects to a MySQL database to store user information.
+SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis. The server persists state to a database — MySQL in production, SQLite locally.
+
+### SQLite for local development
+
+The server supports SQLite as a drop-in replacement for MySQL, controlled by the `USE_SQLITE` environment variable. All three dev scripts enable this automatically, so no MySQL container is needed for local development.
+
+To use SQLite manually:
+```bash
+export USE_SQLITE=1          # enables SQLite
+export SQLITE_PATH=saloonbot.db  # optional; this is the default
+python server.py
+```
 
 ### Development Scenarios
 
 There are three development compose files, each designed for a different workflow:
 
-1. **`compose.dev-bot-local.yml`** - Runs server + redis + mysql in Docker, allowing you to run `bot.py` locally
-2. **`compose.dev-server-local.yml`** - Runs bot + redis + mysql in Docker, allowing you to run `server.py` locally
-3. **`compose.dev-redis-only.yml`** - Runs redis + mysql in Docker, allowing you to run both components locally
+1. **`compose.dev-bot-local.yml`** - Runs server + redis in Docker, allowing you to run `bot.py` locally
+2. **`compose.dev-server-local.yml`** - Runs bot + redis in Docker, allowing you to run `server.py` locally
+3. **`compose.dev-redis-only.yml`** - Runs redis only in Docker, allowing you to run both components locally
 
 ### Using Helper Scripts
 
@@ -88,26 +99,19 @@ For convenience, helper scripts are provided for each scenario:
 ```bash
 ./dev-bot.sh
 ```
-This starts the server and redis containers, then runs the bot locally. Requires `DISCORD_TOKEN` and `DISCORD_GUILDS` environment variables.
+This starts the server and redis containers (server uses SQLite), then runs the bot locally. Requires `DISCORD_TOKEN` and `DISCORD_GUILDS` environment variables.
 
 #### Run server locally (bot in Docker)
 ```bash
 ./dev-server.sh
 ```
-This starts the bot, redis, and mysql containers, then runs the server locally. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
+This starts the bot and redis containers, then runs the server locally with SQLite. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
 
-The server will connect to MySQL using these default values:
-- Host: `localhost`
-- Port: `3306`
-- User: `saloonbot`
-- Password: `saloonbot_password`
-- Database: `saloonbot`
-
-#### Run both components locally (redis and mysql only in Docker)
+#### Run both components locally (redis only in Docker)
 ```bash
 ./dev-redis.sh
 ```
-This starts redis and mysql in Docker. You can then run `bot.py` and `server.py` separately in different terminals:
+This starts redis in Docker. You can then run `bot.py` and `server.py` separately in different terminals:
 ```bash
 # Terminal 1
 export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
@@ -115,10 +119,7 @@ export DISCORD_TOKEN="your-token" DISCORD_GUILDS="your-guild-ids"
 python bot.py
 
 # Terminal 2
-export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
-export MYSQL_HOST=localhost MYSQL_PORT=3306
-export MYSQL_USER=saloonbot MYSQL_PASSWORD=saloonbot_password
-export MYSQL_DATABASE=saloonbot
+export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1
 python server.py
 ```
 

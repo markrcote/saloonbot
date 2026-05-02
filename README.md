@@ -49,7 +49,6 @@ A standalone CLI client (`cli.py`) lets you play and test the game locally witho
 
 ```bash
 export REDIS_HOST=localhost REDIS_PORT=6379
-export ANTHROPIC_API_KEY=<key>   # optional, enables LLM bots
 python cli.py
 ```
 

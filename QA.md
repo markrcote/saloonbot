@@ -15,7 +15,6 @@ source venv/bin/activate && python server.py
 
 # Terminal C – CLI (used for all tests below)
 export REDIS_HOST=localhost REDIS_PORT=6379
-export ANTHROPIC_API_KEY=<your-key>
 source venv/bin/activate
 ```
 

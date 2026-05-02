@@ -945,8 +945,9 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
         hand = [Card("H", 10), Card("H", 5)]
         dealer_card = Card("S", 10)
-        npc.decide_action(hand, dealer_card, 15)
-        npc._pending_action_future.result(timeout=2.0)
+        with self.assertLogs('cardgames.llm_npc', level='WARNING'):
+            npc.decide_action(hand, dealer_card, 15)
+            npc._pending_action_future.result(timeout=2.0)
         result = npc.decide_action(hand, dealer_card, 15)
         # Fallback: score 15 vs dealer 10 (strong) -> hit
         self.assertEqual(result, "hit")
@@ -978,8 +979,9 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         mock_llm.complete.return_value = "not valid json at all"
         personality = get_personality("The Grizzled Prospector")
         npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
-        npc.decide_bet(5, 100, 200)
-        npc._pending_bet_future.result(timeout=2.0)
+        with self.assertLogs('cardgames.llm_npc', level='WARNING'):
+            npc.decide_bet(5, 100, 200)
+            npc._pending_bet_future.result(timeout=2.0)
         result = npc.decide_bet(5, 100, 200)
         # Fallback is min_bet
         self.assertEqual(result, 5)

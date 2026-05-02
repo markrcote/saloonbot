@@ -443,6 +443,8 @@ class Blackjack(CardGame):
             # All players have played, transition to dealer's turn
             self.state = HandState.DEALER_TURN
             self.current_player_idx = None
+        elif not self.players[self.current_player_idx].is_npc:
+            self.output(f"👉 {self.players[self.current_player_idx]}, you're up, partner. Hit or stand?")
 
     def get_score(self, player):
         sorted_hand = sorted(player.hand, key=lambda card: card.value)

@@ -46,7 +46,19 @@ def _log_config():
     else:
         logging.info(f"  Database: MySQL {MYSQL_USER}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}")
         logging.info(f"  MYSQL_PASSWORD: {'set' if MYSQL_PASSWORD else 'not set'}")
-    llm_provider = os.getenv("LLM_PROVIDER", "claude")
+    explicit_provider = os.getenv("LLM_PROVIDER", "").lower()
+    if explicit_provider:
+        llm_provider = explicit_provider
+    else:
+        from cardgames.llm_client import _read_key
+        has_anthropic = bool(_read_key("ANTHROPIC_API_KEY"))
+        has_openai = bool(_read_key("OPENAI_API_KEY"))
+        if has_anthropic and not has_openai:
+            llm_provider = "claude (auto-detected)"
+        elif has_openai and not has_anthropic:
+            llm_provider = "openai (auto-detected)"
+        else:
+            llm_provider = "claude (default)"
     llm_model = os.getenv("LLM_MODEL") or f"(default for {llm_provider})"
     logging.info(f"  LLM_PROVIDER: {llm_provider}")
     logging.info(f"  LLM_MODEL: {llm_model}")

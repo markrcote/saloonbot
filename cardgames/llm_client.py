@@ -67,10 +67,20 @@ class OpenAIClient(LLMClient):
 
 
 def create_llm_client() -> LLMClient:
-    provider = os.environ.get("LLM_PROVIDER", "claude").lower()
-    if provider == "claude":
+    explicit = os.environ.get("LLM_PROVIDER", "").lower()
+    if explicit == "claude":
         return ClaudeClient()
-    elif provider == "openai":
+    elif explicit == "openai":
+        return OpenAIClient()
+    elif explicit:
+        raise LLMError(f"Unknown LLM_PROVIDER: {explicit!r}. Expected 'claude' or 'openai'.")
+
+    has_anthropic = bool(_read_key("ANTHROPIC_API_KEY"))
+    has_openai = bool(_read_key("OPENAI_API_KEY"))
+    if has_anthropic and not has_openai:
+        return ClaudeClient()
+    elif has_openai and not has_anthropic:
         return OpenAIClient()
     else:
-        raise LLMError(f"Unknown LLM_PROVIDER: {provider!r}. Expected 'claude' or 'openai'.")
+        # Both set or neither set — default to Claude
+        return ClaudeClient()

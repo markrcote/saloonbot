@@ -175,6 +175,22 @@ class TestBlackjack(unittest.TestCase):
         self.game.hit(self.game.players[0])
         self.assertEqual(self.game.get_score(self.game.players[0]), 22)
 
+    def test_hit_21_auto_advances(self):
+        # deck.pop() deals last element first
+        # deal order: dealer[0], dealer[1], player[0], player[1], then hit card
+        # deck = [hit, player1, player0, dealer1, dealer0]
+        # dealer gets 6+5=11 (not 21, so hand proceeds normally)
+        # player gets 10+K=20, then hits Ace → 20+1=21 (Ace forced to 1 since 20+11>21)
+        player = Player("Player 1")
+        self.game.join(player)
+        self.game.deck = [Card("H", 14), Card("H", 13), Card("H", 10), Card("H", 5), Card("H", 6)]
+        self.game.new_hand()
+        self.assertEqual(self.game.get_score(player), 20)
+        self.game.hit(player)
+        self.assertEqual(self.game.get_score(player), 21)
+        # Hitting 21 must auto-advance — dealer's turn since there are no other players
+        self.assertEqual(self.game.state, HandState.DEALER_TURN)
+
     def test_dealer_turn(self):
         self.assertFalse(self.game.is_dealer_turn())
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),

@@ -409,14 +409,14 @@ class Blackjack(CardGame):
         self.output(f"🃏 {player} draws... {player.hand[-1]}")
         self.output(f"🎴 {player}'s showing {player.hand_str()}")
 
-        if self.get_score(player) <= 21:
-            return
-
-        if self.get_score(player) == 21:
+        score = self.get_score(player)
+        if score == 21:
             self.output(f"🎯 {player} hits 21!")
-        else:
+            self.next_turn()
+        elif score > 21:
             self.output(f"💥 {player} busts! Too greedy, partner.")
-        self.next_turn()
+            self.next_turn()
+        # else: score < 21, player can hit again
 
     def stand(self, player):
         self._check_playing_state()

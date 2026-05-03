@@ -16,7 +16,7 @@ class SimpleBlackjackNPC(NPCPlayer):
 
     def decide_action(self, hand, dealer_visible_card, score):
         dealer_value = dealer_visible_card.value
-        if dealer_value >= 10 or dealer_value == 14:
+        if dealer_value >= 10:
             # Dealer shows 10/J/Q/K/A — strong card, play more aggressively
             if score < 17:
                 return "hit"

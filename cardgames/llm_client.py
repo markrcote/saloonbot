@@ -6,6 +6,18 @@ class LLMError(Exception):
     pass
 
 
+def _read_key(env_var):
+    """Return value of env_var, falling back to reading the file named by env_var_FILE."""
+    value = os.environ.get(env_var)
+    if value:
+        return value
+    file_path = os.environ.get(f"{env_var}_FILE")
+    if file_path and os.path.isfile(file_path):
+        with open(file_path) as f:
+            return f.read().strip() or None
+    return None
+
+
 class LLMClient(ABC):
     @abstractmethod
     def complete(self, system: str, user: str, timeout: float) -> str:
@@ -16,7 +28,7 @@ class ClaudeClient(LLMClient):
     def __init__(self):
         import anthropic
         self._model = os.environ.get("LLM_MODEL", "claude-haiku-4-5")
-        self._client = anthropic.Anthropic()
+        self._client = anthropic.Anthropic(api_key=_read_key("ANTHROPIC_API_KEY"))
 
     def complete(self, system: str, user: str, timeout: float) -> str:
         import anthropic
@@ -36,7 +48,7 @@ class OpenAIClient(LLMClient):
     def __init__(self):
         import openai
         self._model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-        self._client = openai.OpenAI()
+        self._client = openai.OpenAI(api_key=_read_key("OPENAI_API_KEY"))
 
     def complete(self, system: str, user: str, timeout: float) -> str:
         try:

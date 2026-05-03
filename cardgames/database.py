@@ -6,10 +6,44 @@ from mysql.connector import Error
 
 DEFAULT_WALLET = 200.0
 
+# Each entry is a list of SQL statements for that migration.
+# Append new entries to add future schema changes — never edit existing ones.
+MIGRATIONS = [
+    [   # Migration 1: baseline schema
+        f"""CREATE TABLE IF NOT EXISTS users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            wallet DECIMAL(10, 2) NOT NULL DEFAULT {DEFAULT_WALLET},
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS games (
+            game_id VARCHAR(36) PRIMARY KEY,
+            state VARCHAR(20) NOT NULL,
+            current_player_idx INT DEFAULT NULL,
+            time_betting_started DOUBLE DEFAULT NULL,
+            time_last_hand_ended DOUBLE DEFAULT NULL,
+            time_last_event DOUBLE NOT NULL,
+            deck_json TEXT NOT NULL,
+            discards_json TEXT NOT NULL,
+            dealer_hand_json TEXT NOT NULL,
+            players_json TEXT NOT NULL,
+            players_waiting_json TEXT NOT NULL,
+            bets_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS game_channels (
+            game_id VARCHAR(36) PRIMARY KEY,
+            guild_id BIGINT NOT NULL,
+            channel_id BIGINT NOT NULL,
+            FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
+        )""",
+    ],
+]
+
 
 class Database:
     def __init__(self, host, port, user, password, database):
-        """Initialize database connection parameters."""
         self.host = host
         self.port = port
         self.user = user
@@ -19,7 +53,6 @@ class Database:
         self._init_database()
 
     def _connect(self):
-        """Create a database connection."""
         try:
             if self.connection is not None:
                 try:
@@ -41,65 +74,33 @@ class Database:
             raise
 
     def _init_database(self):
-        """Initialize the database schema."""
         self._connect()
         cursor = None
         try:
             cursor = self.connection.cursor()
-            # Create users table if it doesn't exist
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    username VARCHAR(255) UNIQUE NOT NULL,
-                    wallet DECIMAL(10, 2) NOT NULL DEFAULT {DEFAULT_WALLET},
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            # Add wallet column if it doesn't exist (for existing databases)
             cursor.execute("""
-                SELECT COUNT(*) FROM information_schema.columns
-                WHERE table_schema = %s
-                AND table_name = 'users'
-                AND column_name = 'wallet'
-            """, (self.database,))
+                CREATE TABLE IF NOT EXISTS schema_version (version INT NOT NULL)
+            """)
+            cursor.execute("SELECT COUNT(*) FROM schema_version")
             if cursor.fetchone()[0] == 0:
-                cursor.execute(f"""
-                    ALTER TABLE users
-                    ADD COLUMN wallet DECIMAL(10, 2) NOT NULL DEFAULT {DEFAULT_WALLET}
-                """)
-                logging.info("Added wallet column to users table")
-            # Create games table for game state persistence
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS games (
-                    game_id VARCHAR(36) PRIMARY KEY,
-                    state VARCHAR(20) NOT NULL,
-                    current_player_idx INT DEFAULT NULL,
-                    time_betting_started DOUBLE DEFAULT NULL,
-                    time_last_hand_ended DOUBLE DEFAULT NULL,
-                    time_last_event DOUBLE NOT NULL,
-                    deck_json TEXT NOT NULL,
-                    discards_json TEXT NOT NULL,
-                    dealer_hand_json TEXT NOT NULL,
-                    players_json TEXT NOT NULL,
-                    players_waiting_json TEXT NOT NULL,
-                    bets_json TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-            """)
-
-            # Create game_channels table for bot recovery
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS game_channels (
-                    game_id VARCHAR(36) PRIMARY KEY,
-                    guild_id BIGINT NOT NULL,
-                    channel_id BIGINT NOT NULL,
-                    FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )
-            """)
-
+                cursor.execute("INSERT INTO schema_version (version) VALUES (0)")
             self.connection.commit()
-            logging.info("Database schema initialized")
+
+            cursor.execute("SELECT version FROM schema_version")
+            current = cursor.fetchone()[0]
+
+            for i, statements in enumerate(MIGRATIONS, start=1):
+                if i <= current:
+                    continue
+                logging.info(f"Applying database migration {i}")
+                for sql in statements:
+                    cursor.execute(sql)
+                cursor.execute("UPDATE schema_version SET version = %s", (i,))
+                self.connection.commit()
+                logging.info(f"Migration {i} applied")
+                current = i
+
+            logging.info(f"Database schema at version {current}")
         except Error as e:
             logging.error(f"Error initializing database: {e}")
             raise

@@ -4,6 +4,41 @@ import sqlite3
 
 DEFAULT_WALLET = 200.0
 
+# Each entry is a list of SQL statements for that migration.
+# Append new entries to add future schema changes — never edit existing ones.
+MIGRATIONS = [
+    [   # Migration 1: baseline schema
+        f"""CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            wallet REAL NOT NULL DEFAULT {DEFAULT_WALLET},
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS games (
+            game_id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            current_player_idx INTEGER DEFAULT NULL,
+            time_betting_started REAL DEFAULT NULL,
+            time_last_hand_ended REAL DEFAULT NULL,
+            time_last_event REAL NOT NULL,
+            deck_json TEXT NOT NULL,
+            discards_json TEXT NOT NULL,
+            dealer_hand_json TEXT NOT NULL,
+            players_json TEXT NOT NULL,
+            players_waiting_json TEXT NOT NULL,
+            bets_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS game_channels (
+            game_id TEXT PRIMARY KEY,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
+        )""",
+    ],
+]
+
 
 class SqliteDatabase:
     def __init__(self, db_path):
@@ -21,48 +56,28 @@ class SqliteDatabase:
     def _init_database(self):
         self._connect()
         try:
-            self.connection.execute(f"""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    wallet REAL NOT NULL DEFAULT {DEFAULT_WALLET},
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            cols = {row[1] for row in self.connection.execute("PRAGMA table_info(users)")}
-            if 'wallet' not in cols:
-                self.connection.execute(
-                    f"ALTER TABLE users ADD COLUMN wallet REAL NOT NULL DEFAULT {DEFAULT_WALLET}"
-                )
-                logging.info("Added wallet column to users table")
             self.connection.execute("""
-                CREATE TABLE IF NOT EXISTS games (
-                    game_id TEXT PRIMARY KEY,
-                    state TEXT NOT NULL,
-                    current_player_idx INTEGER DEFAULT NULL,
-                    time_betting_started REAL DEFAULT NULL,
-                    time_last_hand_ended REAL DEFAULT NULL,
-                    time_last_event REAL NOT NULL,
-                    deck_json TEXT NOT NULL,
-                    discards_json TEXT NOT NULL,
-                    dealer_hand_json TEXT NOT NULL,
-                    players_json TEXT NOT NULL,
-                    players_waiting_json TEXT NOT NULL,
-                    bets_json TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)
             """)
-            self.connection.execute("""
-                CREATE TABLE IF NOT EXISTS game_channels (
-                    game_id TEXT PRIMARY KEY,
-                    guild_id INTEGER NOT NULL,
-                    channel_id INTEGER NOT NULL,
-                    FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
-                )
-            """)
+            count = self.connection.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
+            if count == 0:
+                self.connection.execute("INSERT INTO schema_version (version) VALUES (0)")
             self.connection.commit()
-            logging.info("SQLite database schema initialized")
+
+            current = self.connection.execute("SELECT version FROM schema_version").fetchone()[0]
+
+            for i, statements in enumerate(MIGRATIONS, start=1):
+                if i <= current:
+                    continue
+                logging.info(f"Applying database migration {i}")
+                for sql in statements:
+                    self.connection.execute(sql)
+                self.connection.execute("UPDATE schema_version SET version = ?", (i,))
+                self.connection.commit()
+                logging.info(f"Migration {i} applied")
+                current = i
+
+            logging.info(f"Database schema at version {current}")
         except sqlite3.Error as e:
             logging.error(f"Error initializing SQLite database: {e}")
             raise

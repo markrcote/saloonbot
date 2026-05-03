@@ -84,7 +84,7 @@ Discord Users
 ### Casino Protocol (published to "casino")
 
 **Casino actions** (`event_type: "casino_action"`):
-- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn LLM bot players
+- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 
 **Player actions** (`event_type: "player_action"`):
@@ -99,7 +99,7 @@ Discord Users
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery; spawns LLM NPCs via `num_bots` param
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy)
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
@@ -138,8 +138,8 @@ Discord Users
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
 | LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
-| ANTHROPIC_API_KEY | - | Required when LLM_PROVIDER=claude (or use ANTHROPIC_API_KEY_FILE) |
-| OPENAI_API_KEY | - | Required when LLM_PROVIDER=openai (or use OPENAI_API_KEY_FILE) |
+| ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy (or use ANTHROPIC_API_KEY_FILE) |
+| OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy (or use OPENAI_API_KEY_FILE) |
 | LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
 | LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
 

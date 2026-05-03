@@ -16,7 +16,7 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ### Cards
 
-* `/newgame [num_bots]` starts a new game of blackjack. `num_bots` (0–4, default 0) spawns LLM bot players with Wild West personalities. Commands (hit, stand, etc.) are read from messages.
+* `/newgame [num_bots]` starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Commands (hit, stand, etc.) are read from messages.
 
 ### Metadata
 
@@ -39,12 +39,12 @@ Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `claude` | LLM provider: `claude` or `openai` |
-| `ANTHROPIC_API_KEY` | — | Required when `LLM_PROVIDER=claude` |
-| `OPENAI_API_KEY` | — | Required when `LLM_PROVIDER=openai` |
+| `ANTHROPIC_API_KEY` | — | API key for Claude; supports `ANTHROPIC_API_KEY_FILE` |
+| `OPENAI_API_KEY` | — | API key for OpenAI; supports `OPENAI_API_KEY_FILE` |
 | `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
 | `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
 
-If no API key is configured, the server starts normally but LLM bots are disabled.
+API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The `_FILE` variants (e.g. `ANTHROPIC_API_KEY_FILE`) work the same way as `DISCORD_TOKEN_FILE` — set the variable to a path and the key is read from that file.
 
 ## CLI
 

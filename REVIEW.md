@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, GL-1, GL-2, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-5
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-5, TG-1
 
-**Open:** DI-2, DI-4, GL-3, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-4, CQ-6, CQ-7, CQ-8, TG-1, TG-2
+**Open:** DI-2, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-4, CQ-6, CQ-7, CQ-8, TG-2
 
 ---
 
@@ -49,7 +49,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
       bet_amount = 0
   ```
 
-#### [DI-4] MEDIUM: Bet forfeiture on `leave` during `PLAYING` state silently loses money (complexity: trivial)
+#### [DI-4] ~~MEDIUM~~ **[FIXED]**: Bet forfeiture on `leave` during `PLAYING` state silently loses money (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:249-258`
 - **Problem:** When a player leaves during `PLAYING` state (not `DEALER_TURN`/`RESOLVING`), their bet is forfeited. However, the state check on line 252 is `if self.state in (HandState.DEALER_TURN, HandState.RESOLVING)`. This means a player who leaves *after* standing (their turn is done, but state is still `PLAYING` while other players go) loses their bet even though they completed their action.
 - **Impact:** Players who stand and then immediately leave before the dealer's turn lose their bet unfairly.
@@ -95,7 +95,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
   # else: score < 21, player can continue hitting
   ```
 
-#### [GL-3] MEDIUM: Dealer blackjack handling in `new_hand` does not deal to players first (complexity: moderate)
+#### [GL-3] ~~MEDIUM~~ **[FIXED]**: Dealer blackjack handling in `new_hand` does not deal to players first (complexity: moderate)
 - **Location:** `cardgames/blackjack.py:347-352`
 - **Problem:** When the dealer has 21 after the initial deal, `state` is set to `RESOLVING` and the method returns before dealing cards to players. Players have no cards in their hands when `end_hand` is called (called by `_tick_resolving`). `end_hand` iterates `self.players` and calls `self.get_score(player)` on empty hands (score = 0), which will always be less than 21 — every player "loses" to the dealer's blackjack, which is mathematically correct but the output messages will show `0` as their score and `self.bets.get(player.name, 0)` returns 0 because bets haven't been placed yet (they're placed in `bet()` before `new_hand()` — actually bets ARE placed, but the player has no hand for the output message). This produces confusing output but is not a financial error.
 - **Impact:** Confusing game output; players see they lost with "0" as their score. Also `self.bets` will be populated (bets were placed before `new_hand` is called), so the financial resolution is actually correct.
@@ -277,7 +277,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Testing Gaps
 
-#### [TG-1] MEDIUM: No test for the `leave` during `PLAYING` state index correction logic (complexity: trivial)
+#### [TG-1] ~~MEDIUM~~ **[FIXED]**: No test for the `leave` during `PLAYING` state index correction logic (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:264-270`
 - **Problem:** The `leave()` index correction path is completely untested. Given the identified bug above (leaving player before current index causes off-by-one), this test gap allowed the bug to go undetected.
 - **Impact:** Silent game logic errors in multi-player games when a player leaves mid-hand.

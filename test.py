@@ -515,6 +515,57 @@ class TestBlackjackPayouts(unittest.TestCase):
                         if call[0][1] > 0]  # Positive amount = refund
         self.assertEqual(len(refund_calls), 0)
 
+    def _make_three_player_playing_game(self):
+        """Return a game with 3 players mid-hand (Alice=0, Bob=1, Carol=2), current=Bob."""
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        alice, bob, carol = Player("Alice"), Player("Bob"), Player("Carol")
+        for p in (alice, bob, carol):
+            game.join(p)
+        game.tick()  # WAITING -> BETTING
+        game.bet(alice, 10)
+        game.bet(bob, 10)
+        game.bet(carol, 10)
+        game.new_hand()  # BETTING -> PLAYING, current_player_idx = 0
+        game.current_player_idx = 1  # simulate it being Bob's turn
+        return game, alice, bob, carol
+
+    def test_leave_before_current_adjusts_idx(self):
+        """Player before current index leaves — idx must shift down by 1."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        game.leave(alice)  # removes idx 0; current was 1 (Bob), should become 0
+        self.assertEqual(game.current_player_idx, 0)
+        self.assertEqual(game.players[game.current_player_idx].name, "Bob")
+
+    def test_leave_at_current_advances_turn(self):
+        """Current player leaves — turn should advance to next player."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        game.leave(bob)  # removes idx 1 (current); Carol slides to idx 1
+        self.assertEqual(game.current_player_idx, 1)
+        self.assertEqual(game.players[game.current_player_idx].name, "Carol")
+
+    def test_leave_after_current_no_change(self):
+        """Player after current index leaves — idx unchanged."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        game.leave(carol)  # removes idx 2; current=1 (Bob), no change
+        self.assertEqual(game.current_player_idx, 1)
+        self.assertEqual(game.players[game.current_player_idx].name, "Bob")
+
+    def test_leave_last_player_transitions_to_dealer_turn(self):
+        """Last remaining player leaves during PLAYING — should move to DEALER_TURN."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        game.leave(alice)
+        game.leave(bob)
+        game.leave(carol)
+        self.assertEqual(game.state, HandState.DEALER_TURN)
+        self.assertIsNone(game.current_player_idx)
+
 
 class TestCasinoErrorHandling(unittest.TestCase):
     def setUp(self):

@@ -259,15 +259,16 @@ class Blackjack(CardGame):
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
+        leaving_idx = self.players.index(player)
         self.players.remove(player)
 
         # Handle current player leaving during PLAYING state
         if self.state == HandState.PLAYING and self.current_player_idx is not None:
+            if leaving_idx < self.current_player_idx:
+                self.current_player_idx -= 1
             if self.current_player_idx >= len(self.players):
-                self.current_player_idx = len(self.players) - 1
-                if self.current_player_idx < 0:
-                    self.state = HandState.DEALER_TURN
-                    self.current_player_idx = None
+                self.state = HandState.DEALER_TURN
+                self.current_player_idx = None
 
     def start_betting(self):
         """Transition from WAITING to BETTING state."""

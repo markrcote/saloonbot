@@ -66,6 +66,14 @@ if not VERSION:
         pass
 
 
+logging.info("=== Bot Configuration ===")
+logging.info(f"  Redis: {REDIS_HOST}:{REDIS_PORT}")
+logging.info(f"  DISCORD_TOKEN: {'set' if DISCORD_TOKEN else 'not set'}")
+logging.info(f"  DISCORD_GUILDS: {GUILD_IDS_STR or '(all guilds)'}")
+logging.info(f"  Debug logging: {'enabled' if DEBUG_LOGGING else 'disabled'}")
+logging.info(f"  Version: {VERSION or 'unknown'}")
+logging.info("=========================")
+
 intents = nextcord.Intents.default()
 intents.message_content = True  # Enable message content
 

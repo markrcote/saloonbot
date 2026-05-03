@@ -459,6 +459,8 @@ class BlackjackCog(commands.Cog):
             await self.redis.publish("casino", json.dumps(message))
         except Exception as e:
             logging.error(f"Redis publish error: {e}")
+            if game.channel:
+                await game.channel.send("❌ Command failed — could not reach game server. Please try again.")
 
     async def try_subscribe(self):
         backoff = 2

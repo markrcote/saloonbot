@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-5, TG-1
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-4, CQ-5, TG-1
 
-**Open:** DI-2, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-4, CQ-6, CQ-7, CQ-8, TG-2
+**Open:** DI-2, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-6, CQ-7, CQ-8, TG-2
 
 ---
 
@@ -238,7 +238,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Restored games that are in `BETTING` with an expired timer will tick immediately on load and may attempt Redis publishes before the subscribe loop is running.
 - **Fix:** Defer `_load_games_from_db()` to after the first successful Redis connection in `listen()`.
 
-#### [CQ-4] LOW: `BlackjackCog.__init__` creates Redis connection eagerly; if Redis is unavailable at startup, the cog fails silently (complexity: trivial)
+#### [CQ-4] ~~LOW~~ **[FIXED]**: `BlackjackCog.__init__` creates Redis connection eagerly; if Redis is unavailable at startup, the cog fails silently (complexity: trivial)
 - **Location:** `bot.py:122`
 - **Problem:** `self.redis = redis.asyncio.Redis(host=REDIS_HOST, port=REDIS_PORT)` creates the client object (no actual connection yet), but the first `await self.redis.publish(...)` will fail if Redis is down. The error is caught in individual methods, but `try_subscribe` has exponential backoff for the `pubsub` connection — the `self.redis` publish path (used for sending commands to the server) has no similar reconnection logic. Any failed publish just logs an error and the player command is silently dropped.
 - **Impact:** If Redis is briefly unavailable, player commands (hit, stand, bet) are silently lost with no user feedback indicating the command failed.

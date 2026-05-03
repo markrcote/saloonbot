@@ -220,6 +220,9 @@ class BlackjackCog(commands.Cog):
         if command == "bet" and len(parts) > 1:
             try:
                 amount = int(parts[1])
+                if amount <= 0:
+                    await message.channel.send("⚠️ Bet amount must be positive.")
+                    return
                 await self.send_command(message.author.name, game, command, amount=amount)
             except ValueError:
                 await message.channel.send("⚠️ Invalid bet amount. Usage: bet <amount>")

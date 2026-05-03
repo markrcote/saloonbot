@@ -318,7 +318,9 @@ class Blackjack(CardGame):
             raise InsufficientFundsError(player, balance, amount)
 
         # Deduct bet from wallet immediately (escrow)
-        self.casino.db.update_wallet(player.name, -amount)
+        if not self.casino.db.update_wallet(player.name, -amount):
+            balance = self.casino.db.get_user_wallet(player.name) or 0
+            raise InsufficientFundsError(player, balance, amount)
 
         self.bets[player.name] = amount
         self._update_time_last_event()

@@ -149,14 +149,23 @@ class Database:
                 cursor.close()
 
     def update_wallet(self, username, amount):
-        """Update a user's wallet by adding or subtracting an amount."""
+        """Update a user's wallet by adding or subtracting an amount.
+
+        Returns True on success, False if the update would make the wallet negative.
+        """
         self._connect()
         cursor = None
         try:
             cursor = self.connection.cursor()
-            cursor.execute("""
-                UPDATE users SET wallet = wallet + %s WHERE username = %s
-            """, (amount, username))
+            if amount < 0:
+                cursor.execute("""
+                    UPDATE users SET wallet = wallet + %s
+                    WHERE username = %s AND wallet + %s >= 0
+                """, (amount, username, amount))
+            else:
+                cursor.execute("""
+                    UPDATE users SET wallet = wallet + %s WHERE username = %s
+                """, (amount, username))
             self.connection.commit()
             rows_affected = cursor.rowcount
             if rows_affected > 0:

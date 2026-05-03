@@ -96,11 +96,18 @@ class SqliteDatabase:
             raise
 
     def update_wallet(self, username, amount):
+        """Update a user's wallet. Returns True on success, False if update would go negative."""
         self._connect()
         try:
-            cursor = self.connection.execute(
-                "UPDATE users SET wallet = wallet + ? WHERE username = ?", (amount, username)
-            )
+            if amount < 0:
+                cursor = self.connection.execute(
+                    "UPDATE users SET wallet = wallet + ? WHERE username = ? AND wallet + ? >= 0",
+                    (amount, username, amount)
+                )
+            else:
+                cursor = self.connection.execute(
+                    "UPDATE users SET wallet = wallet + ? WHERE username = ?", (amount, username)
+                )
             self.connection.commit()
             if cursor.rowcount > 0:
                 logging.info(f"Updated wallet for {username} by {amount}")

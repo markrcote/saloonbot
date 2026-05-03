@@ -24,12 +24,19 @@ class Casino:
         self.redis = redis.Redis(host=redis_host, port=redis_port)
         self.db = db
         self._pending_bots = {}  # game_id -> num_bots to add on first human join
-        try:
-            self.llm_client = create_llm_client()
-        except Exception as e:
-            logging.warning(f"Could not initialize LLM client: {e}. LLM bot players disabled.")
-            self.llm_client = None
+        self._llm_client = None
+        self._llm_client_tried = False
         self._load_games_from_db()
+
+    @property
+    def llm_client(self):
+        if not self._llm_client_tried:
+            self._llm_client_tried = True
+            try:
+                self._llm_client = create_llm_client()
+            except Exception as e:
+                logging.info(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
+        return self._llm_client
 
     def _load_games_from_db(self):
         """Load all active games from database on startup."""
@@ -79,12 +86,8 @@ class Casino:
                 break
         self.games[game_id] = Blackjack(game_id, self)
 
-        # Defer bot creation until first human joins to avoid race-starting the game
         if num_bots > 0:
-            if self.llm_client is not None:
-                self._pending_bots[game_id] = num_bots
-            else:
-                logging.warning("num_bots requested but LLM client is not available.")
+            self._pending_bots[game_id] = num_bots
 
         # Save game and channel info to database
         self._save_game(game_id)
@@ -99,13 +102,14 @@ class Casino:
     def _add_pending_bots(self, game_id):
         """Add any pending bots to the game when the first human player joins."""
         num_bots = self._pending_bots.pop(game_id, 0)
-        if num_bots <= 0 or self.llm_client is None:
+        if num_bots <= 0:
             return
 
         game = self.games.get(game_id)
         if game is None:
             return
 
+        llm_client = self.llm_client
         all_players = game.players + game.players_waiting
         used_names = {p.name for p in all_players}
         used_personalities: set[str] = {
@@ -121,7 +125,10 @@ class Casino:
                     i += 1
                 name = f"{name} #{i}"
             used_names.add(name)
-            npc = LLMBlackjackNPC(name, personality, self.llm_client)
+            if llm_client is not None:
+                npc = LLMBlackjackNPC(name, personality, llm_client)
+            else:
+                npc = SimpleBlackjackNPC(name)
             game.join(npc)
 
     def _handle_list_games(self, request_id):
@@ -179,10 +186,13 @@ class Casino:
             raise CardGameError(f"Unknown NPC type '{npc_type}'. Available: {available}")
 
         if npc_type == 'llm':
-            if self.llm_client is None:
-                raise CardGameError("LLM client is not available (check API key configuration)")
-            personality = get_random_personality()
-            npc = LLMBlackjackNPC(npc_name, personality, self.llm_client)
+            llm_client = self.llm_client
+            if llm_client is None:
+                logging.warning("LLM client not available; using simple NPC strategy for %s", npc_name)
+                npc = SimpleBlackjackNPC(npc_name)
+            else:
+                personality = get_random_personality()
+                npc = LLMBlackjackNPC(npc_name, personality, llm_client)
         else:
             npc = NPC_TYPES[npc_type](npc_name)
         game = self.games[game_id]

@@ -15,6 +15,8 @@ _ACTION_VALID = {"hit", "stand"}
 
 class LLMBlackjackNPC(NPCPlayer):
 
+    npc_type = "llm"
+
     def __init__(self, name: str, personality: Personality, llm_client: LLMClient):
         super().__init__(name)
         self.personality = personality

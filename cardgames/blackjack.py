@@ -31,18 +31,24 @@ def deserialize_hand(data):
     return [str_to_card(s) for s in data]
 
 
+def _player_label(player):
+    """Return display name with NPC type indicator if applicable."""
+    npc_type = getattr(player, 'npc_type', None)
+    if npc_type == 'llm':
+        return f"{player.name} (AI)"
+    if npc_type == 'simple':
+        return f"{player.name} (bot)"
+    return player.name
+
+
 def serialize_player(player):
     """Serialize a player's state for persistence."""
     is_npc = getattr(player, 'is_npc', False)
-    npc_type = None
+    npc_type = getattr(player, 'npc_type', None) if is_npc else None
     npc_personality = None
-    if is_npc:
-        from .llm_npc import LLMBlackjackNPC
-        if isinstance(player, LLMBlackjackNPC):
-            npc_type = 'llm'
-            npc_personality = player.personality.name
-        else:
-            npc_type = 'simple'
+    if is_npc and npc_type == 'llm':
+        personality = getattr(player, 'personality', None)
+        npc_personality = personality.name if personality else None
     return {
         'name': player.name,
         'hand': serialize_hand(player.hand),
@@ -233,7 +239,7 @@ class Blackjack(CardGame):
         except Exception as e:
             logging.error(f"Failed to add user to database: {e}")
 
-        self.output(f"🪑 {player} pulls up a chair. They'll join the next hand.")
+        self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
         self.players_waiting.append(player)
 
     def leave(self, player):
@@ -336,7 +342,7 @@ class Blackjack(CardGame):
             raise CardGameError("No players")
 
         self.output("🃏 The dealer shuffles and deals...")
-        self.output(f"🎲 At the table: {', '.join([str(x) for x in self.players])}")
+        self.output(f"🎲 At the table: {', '.join([_player_label(x) for x in self.players])}")
 
         for player in self.players:
             self.discard_all(player)

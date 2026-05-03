@@ -11,6 +11,7 @@ class NPCPlayer(Player, ABC):
     """
 
     is_npc = True
+    npc_type = "simple"
 
     @abstractmethod
     def decide_bet(self, min_bet, max_bet, wallet):

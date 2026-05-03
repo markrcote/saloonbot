@@ -12,7 +12,7 @@ else:
     LOG_LEVEL = logging.INFO
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = os.getenv("REDIS_PORT", 6379)
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 USE_SQLITE = os.getenv("USE_SQLITE")
 SQLITE_PATH = os.getenv("SQLITE_PATH", "saloonbot.db")

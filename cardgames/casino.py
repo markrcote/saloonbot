@@ -287,6 +287,10 @@ class Casino:
                 logging.info(f"Removing idle empty game {game_id}")
                 self._delete_game(game_id)
                 del self.games[game_id]
+                self.publish_event(
+                    f"game_updates_{game_id}",
+                    {'game_id': game_id, 'event_type': 'game_over'}
+                )
 
     def listen(self):
         while True:

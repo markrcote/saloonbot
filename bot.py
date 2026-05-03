@@ -349,6 +349,17 @@ class BlackjackCog(commands.Cog):
             for game in self.games:
                 if game.topic() == topic:
                     logging.debug("Got game message")
+
+                    if data.get('event_type') == 'game_over':
+                        game.state = GameState.FINISHED
+                        self.games.remove(game)
+                        try:
+                            await self.pubsub.unsubscribe(game.topic())
+                        except Exception as e:
+                            logging.error(f"Failed to unsubscribe from game topic: {e}")
+                        logging.info(f"Game {game.game_id} ended, removed from tracking")
+                        break
+
                     text = data["text"]
 
                     # Use embeds for special messages
@@ -408,7 +419,8 @@ class BlackjackCog(commands.Cog):
 
     def find_game(self, guild_id, channel_id):
         for game in self.games:
-            if game.guild_id == guild_id and game.channel_id == channel_id:
+            if (game.guild_id == guild_id and game.channel_id == channel_id
+                    and game.state != GameState.FINISHED):
                 return game
         return None
 

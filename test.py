@@ -1,3 +1,4 @@
+import json
 import time
 import unittest
 from unittest.mock import MagicMock, patch
@@ -557,6 +558,32 @@ class TestCasinoErrorHandling(unittest.TestCase):
             game.action(data)
 
         self.assertEqual(context.exception.user_message(), "You can't use '11' right now.")
+
+    def test_idle_game_removed_and_game_over_event_published(self):
+        """Idle empty games should be deleted and a game_over event published to the bot."""
+        game_id = self.casino.new_game()
+
+        # Fast-forward time past the idle timeout
+        game = self.casino.games[game_id]
+        game.time_last_event = 0
+
+        self.casino._tick_games()
+
+        # Game should be gone from casino
+        self.assertNotIn(game_id, self.casino.games)
+
+        # A game_over event must have been published on the game's topic
+        calls = self.mock_redis.publish.call_args_list
+        game_over_call = None
+        for call in calls:
+            channel, payload = call.args
+            if channel == f"game_updates_{game_id}":
+                msg = json.loads(payload)
+                if msg.get('event_type') == 'game_over':
+                    game_over_call = msg
+                    break
+        self.assertIsNotNone(game_over_call, "game_over event was not published")
+        self.assertEqual(game_over_call['game_id'], game_id)
 
 
 class TestSerialization(unittest.TestCase):

@@ -615,5 +615,80 @@ class TestServerRestart(EndToEndTestCase):
             pubsub.close()
 
 
+class TestStopGame(EndToEndTestCase):
+    """Test admin stop_game action."""
+
+    def test_stop_game_ends_game(self):
+        """Test that stop_game removes the game and emits game_over."""
+        game_id = self.create_game()
+
+        game_pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'casino_action',
+                'action': 'stop_game',
+                'game_id': game_id,
+            }))
+
+            # Collect raw events (game_over has no 'text', so bypass collect_messages)
+            deadline = time.time() + 5
+            game_over_received = False
+            while time.time() < deadline:
+                msg = game_pubsub.get_message(timeout=0.5)
+                if msg and msg['type'] == 'message':
+                    data = json.loads(msg['data'])
+                    if data.get('event_type') == 'game_over':
+                        game_over_received = True
+                        break
+
+            self.assertTrue(game_over_received, "Should receive game_over event after stop_game")
+        finally:
+            game_pubsub.close()
+
+    def test_stop_game_removes_from_database(self):
+        """Test that stop_game deletes the game record from the database."""
+        # Create a game with a player so it gets persisted
+        game_id = self.create_game()
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'StopPlayer')
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+        finally:
+            pubsub.close()
+
+        # Verify game is in database
+        result = self.poll_db(
+            "SELECT game_id FROM games WHERE game_id = %s",
+            (game_id,)
+        )
+        self.assertIsNotNone(result, "Game should exist before stop")
+
+        # Stop the game
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'casino_action',
+            'action': 'stop_game',
+            'game_id': game_id,
+        }))
+
+        # Verify game is removed from database
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            self.db.commit()
+            cursor = self.db.cursor()
+            cursor.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
+            row = cursor.fetchone()
+            cursor.close()
+            if row is None:
+                break
+            time.sleep(0.1)
+
+        self.db.commit()
+        cursor = self.db.cursor()
+        cursor.execute("SELECT game_id FROM games WHERE game_id = %s", (game_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        self.assertIsNone(row, "Game should be removed from database after stop")
+
+
 if __name__ == "__main__":
     unittest.main()

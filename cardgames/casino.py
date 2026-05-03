@@ -254,6 +254,15 @@ class Casino:
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:
+                if data['event_type'] == 'casino_action' and data.get('action') == 'stop_game':
+                    logging.info(f"Stopping game {game_id} by admin request")
+                    self._delete_game(game_id)
+                    del self.games[game_id]
+                    self.publish_event(
+                        f"game_updates_{game_id}",
+                        {'game_id': game_id, 'event_type': 'game_over'}
+                    )
+                    return
                 if data['event_type'] == 'player_action' and data.get('action') == 'join':
                     self._add_pending_bots(game_id)
                 if data['event_type'] == 'npc_action':

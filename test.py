@@ -533,8 +533,9 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.bet(bob, 10)
         game.bet(carol, 10)
         # Control the deck: dealer gets 5+6=11, players get safe hands; no blackjack possible
-        game.deck = [Card("H", 2)] * 4 + [Card("H", 5), Card("H", 6), Card("H", 7), Card("H", 8),
-                                           Card("H", 3), Card("H", 4), Card("H", 5), Card("H", 6)]
+        safe = [Card("H", 5), Card("H", 6), Card("H", 7), Card("H", 8),
+                Card("H", 3), Card("H", 4), Card("H", 5), Card("H", 6)]
+        game.deck = [Card("H", 2)] * 4 + safe
         game.new_hand()  # BETTING -> PLAYING, current_player_idx = 0
         self.assertEqual(game.state, HandState.PLAYING, "dealer should not have blackjack")
         game.current_player_idx = 1  # simulate it being Bob's turn

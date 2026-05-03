@@ -230,7 +230,18 @@ class BlackjackCog(commands.Cog):
             await self.send_command(message.author.name, game, command)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
-    async def new_game(self, interaction: nextcord.Interaction):
+    async def new_game(
+        self,
+        interaction: nextcord.Interaction,
+        num_bots: int = nextcord.SlashOption(
+            name="num_bots",
+            description="How many bot players to add (0–4)",
+            required=False,
+            default=0,
+            min_value=0,
+            max_value=4,
+        ),
+    ):
         """Start a game if none in progress in this guild and channel."""
         game = self.find_game_by_interaction(interaction)
         if game:
@@ -246,7 +257,8 @@ class BlackjackCog(commands.Cog):
             'action': 'new_game',
             'request_id': game.request_id,
             'guild_id': game.guild_id,
-            'channel_id': game.channel_id
+            'channel_id': game.channel_id,
+            'num_bots': num_bots,
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -366,7 +378,11 @@ class BlackjackCog(commands.Cog):
                     text = data["text"]
 
                     # Use embeds for special messages
-                    if "🏆 strikes gold" in text:
+                    if text.startswith("🤠") and ': "' in text:
+                        # NPC quip - warm sepia color
+                        embed = nextcord.Embed(description=text, color=0xc8a96e)  # Sepia
+                        await game.channel.send(embed=embed)
+                    elif "🏆 strikes gold" in text:
                         # Win message - use green/gold
                         embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
                         await game.channel.send(embed=embed)

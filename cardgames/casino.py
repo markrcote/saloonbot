@@ -106,9 +106,14 @@ class Casino:
         if game is None:
             return
 
-        used_names = {p.name for p in game.players + game.players_waiting}
+        all_players = game.players + game.players_waiting
+        used_names = {p.name for p in all_players}
+        used_personalities: set[str] = {
+            p.personality.name for p in all_players if isinstance(p, LLMBlackjackNPC)
+        }
         for _ in range(num_bots):
-            personality = get_random_personality()
+            personality = get_random_personality(exclude_names=used_personalities)
+            used_personalities.add(personality.name)
             name = personality.name
             if name in used_names:
                 i = 2

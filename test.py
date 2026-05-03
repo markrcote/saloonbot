@@ -532,7 +532,11 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.bet(alice, 10)
         game.bet(bob, 10)
         game.bet(carol, 10)
+        # Control the deck: dealer gets 5+6=11, players get safe hands; no blackjack possible
+        game.deck = [Card("H", 2)] * 4 + [Card("H", 5), Card("H", 6), Card("H", 7), Card("H", 8),
+                                           Card("H", 3), Card("H", 4), Card("H", 5), Card("H", 6)]
         game.new_hand()  # BETTING -> PLAYING, current_player_idx = 0
+        self.assertEqual(game.state, HandState.PLAYING, "dealer should not have blackjack")
         game.current_player_idx = 1  # simulate it being Bob's turn
         return game, alice, bob, carol
 
@@ -775,6 +779,53 @@ class TestSerialization(unittest.TestCase):
         restored = Blackjack.from_dict(game_data, mock_casino)
         self.assertEqual(restored.state, HandState.WAITING)
         self.assertEqual(len(restored.players), 0)
+
+
+class TestPersonalities(unittest.TestCase):
+    def test_full_archetype_count(self):
+        from cardgames.personalities import _ARCHETYPES, _FAMOUS
+        self.assertEqual(len(_ARCHETYPES), 15)
+        self.assertEqual(len(_FAMOUS), 4)
+
+    def test_get_all_names_returns_all(self):
+        from cardgames.personalities import get_all_names, _ALL
+        names = get_all_names()
+        self.assertEqual(len(names), len(_ALL))
+        self.assertIn("Doc Holliday", names)
+        self.assertIn("The Grizzled Prospector", names)
+
+    def test_get_random_excludes_names(self):
+        from cardgames.personalities import get_random, get_all_names
+        all_names = set(get_all_names())
+        exclude = all_names - {"The Drunk Cowboy"}
+        for _ in range(20):
+            p = get_random(exclude_names=exclude)
+            self.assertEqual(p.name, "The Drunk Cowboy")
+
+    def test_get_random_falls_back_when_all_excluded(self):
+        from cardgames.personalities import get_random, get_all_names
+        all_names = set(get_all_names())
+        p = get_random(exclude_names=all_names)
+        self.assertIn(p.name, all_names)
+
+    def test_famous_rate(self):
+        from cardgames.personalities import get_random
+        draws = [get_random() for _ in range(5000)]
+        famous_count = sum(1 for p in draws if p.is_famous)
+        famous_rate = famous_count / len(draws)
+        # Expected ~1.32% (4 famous at weight 1 vs 15 archetypes at weight 20)
+        self.assertGreater(famous_rate, 0.005)
+        self.assertLess(famous_rate, 0.05)
+
+    def test_all_personalities_have_json_instruction(self):
+        from cardgames.personalities import _ALL
+        for p in _ALL:
+            self.assertIn("Respond ONLY with valid JSON", p.system_prompt, p.name)
+
+    def test_no_duplicate_names(self):
+        from cardgames.personalities import _ALL
+        names = [p.name for p in _ALL]
+        self.assertEqual(len(names), len(set(names)))
 
 
 class TestNPCPlayer(unittest.TestCase):

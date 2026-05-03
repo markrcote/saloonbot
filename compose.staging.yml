@@ -16,6 +16,8 @@ services:
       - MYSQL_PASSWORD=saloonbot_password
       - MYSQL_DATABASE=saloonbot
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+    volumes:
+      - /etc/saloonbot/secrets:/run/secrets:ro
     depends_on:
       - redis
       - mysql
@@ -35,7 +37,7 @@ services:
       - REDIS_PORT=6379
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
     volumes:
-      - /run/secrets:/run/secrets:ro
+      - /etc/saloonbot/secrets:/run/secrets:ro
     depends_on:
       - redis
     labels:

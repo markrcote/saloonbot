@@ -129,8 +129,8 @@ Discord Users
 | MYSQL_USER | saloonbot | MySQL username |
 | MYSQL_PASSWORD | (empty) | MySQL password |
 | MYSQL_DATABASE | saloonbot | MySQL database name |
-| DISCORD_TOKEN | - | Bot token (or use DISCORD_TOKEN_FILE) |
-| DISCORD_GUILDS | - | Comma-separated guild IDs (or use DISCORD_GUILDS_FILE) |
+| DISCORD_TOKEN | - | Bot token; see secret resolution below |
+| DISCORD_GUILDS | - | Comma-separated guild IDs; see secret resolution below |
 | SALOONBOT_DEBUG | - | Set to enable debug logging |
 | BLACKJACK_MIN_BET | 5 | Minimum bet amount in dollars |
 | BLACKJACK_MAX_BET | 100 | Maximum bet amount in dollars |
@@ -138,10 +138,20 @@ Discord Users
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
 | LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
-| ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy (or use ANTHROPIC_API_KEY_FILE) |
-| OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy (or use OPENAI_API_KEY_FILE) |
+| ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy; see secret resolution below |
+| OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy; see secret resolution below |
 | LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
 | LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
+
+### Secret resolution
+
+For `DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`, the value is resolved in priority order:
+1. Direct env var (e.g. `DISCORD_TOKEN=...`)
+2. Path given by `<VAR>_FILE` env var (e.g. `DISCORD_TOKEN_FILE=/custom/path`)
+3. Default file at `/run/secrets/<lowercase_var>` (e.g. `/run/secrets/discord_token`)
+4. Unset — may be a fatal error depending on the variable
+
+This means Docker secrets work automatically when mounted at `/run/secrets/` without any `_FILE` env var needed.
 
 ## Development Workflow
 

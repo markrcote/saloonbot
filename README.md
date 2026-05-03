@@ -44,7 +44,9 @@ Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with 
 | `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
 | `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
 
-API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The `_FILE` variants (e.g. `ANTHROPIC_API_KEY_FILE`) work the same way as `DISCORD_TOKEN_FILE` — set the variable to a path and the key is read from that file.
+API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions.
+
+All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) resolve in priority order: direct env var → `<VAR>_FILE` path → `/run/secrets/<lowercase_var>` → unset. Docker secrets mounted at `/run/secrets/` are picked up automatically with no extra configuration.
 
 ## CLI
 

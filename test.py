@@ -215,6 +215,7 @@ class TestBlackjack(unittest.TestCase):
 
         self.game.join(Player("Player 1"))
         self.game.new_hand()
+        self.game.bets["Player 1"] = self.game.MIN_BET
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.game.stand(self.game.players[0])
         self.game.tick()
@@ -261,6 +262,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
                           Card("H", 7), Card("H", 8), Card("H", 9)]
         self.game.join(Player("Player 1"))
         self.game.new_hand()
+        self.game.bets["Player 1"] = self.game.MIN_BET
         self.game.stand(self.game.players[0])
         self.game.dealer_turn()
         self.assertEqual(self.game.state, HandState.RESOLVING)
@@ -273,6 +275,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
                           Card("H", 7), Card("H", 8), Card("H", 9)]
         self.game.join(Player("Player 1"))
         self.game.new_hand()
+        self.game.bets["Player 1"] = self.game.MIN_BET
         self.game.stand(self.game.players[0])
         self.game.dealer_turn()
         self.game.tick()  # RESOLVING -> BETWEEN_HANDS

@@ -16,8 +16,7 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ### Cards
 
-* `/newgame` starts a new game of blackjack. Commands (hit, stand, etc.) are read
-  from messages.
+* `/newgame [num_bots]` starts a new game of blackjack. `num_bots` (0–4, default 0) spawns LLM bot players with Wild West personalities. Commands (hit, stand, etc.) are read from messages.
 
 ### Metadata
 
@@ -29,7 +28,11 @@ SaloonBot supports AI-powered bot players with Wild West personalities. Bots use
 
 ### Personalities
 
-Bots are drawn from a pool of archetypes (The Grizzled Prospector, The Drunk Cowboy) and occasional historical figures (Doc Holliday), each with a distinct voice and betting temperament.
+Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with a distinct voice and betting temperament. Bot quips appear in sepia-colored embeds to distinguish them from regular game messages.
+
+**Archetypes:** The Grizzled Prospector, The Drunk Cowboy, The Snake Oil Salesman, The Prim Schoolmarm, The Bounty Hunter, The Frontier Preacher, The Railroad Baron, The Half-Broke Drifter, The Card Sharp, The Saloon Singer, The Greenhorn Deputy, The Apache Tracker, The Patent Medicine Widow, The Retired Outlaw, The Railroad Cook
+
+**Historical figures:** Doc Holliday, Calamity Jane, Jesse James, Wild Bill Hickok
 
 ### Configuration
 

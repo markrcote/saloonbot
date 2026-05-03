@@ -84,7 +84,7 @@ Discord Users
 ### Casino Protocol (published to "casino")
 
 **Casino actions** (`event_type: "casino_action"`):
-- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery
+- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn LLM bot players
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 
 **Player actions** (`event_type: "player_action"`):
@@ -99,8 +99,12 @@ Discord Users
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery; spawns LLM NPCs via `num_bots` param
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
+- `player.py` - Base player class
+- `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
+- `llm_client.py` - LLM provider abstraction (Claude / OpenAI); falls back to basic strategy on timeout
+- `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
 - `database.py` - MySQL connection with auto-reconnect; manages `users`, `games`, and `game_channels` tables
 - `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`
 

@@ -105,10 +105,11 @@ Discord Users
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
 - `llm_client.py` - LLM provider abstraction (Claude / OpenAI); falls back to basic strategy on timeout
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
-- `database.py` - MySQL connection with auto-reconnect; manages `users`, `games`, and `game_channels` tables
-- `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`
+- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list
+- `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
 
 **Database tables:**
+- `schema_version` - Single-row table tracking the last applied migration index
 - `users` - Stores player usernames and wallet balances (default $200)
 - `games` - Persists game state (deck, hands, bets, timers) for server restart recovery
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
@@ -164,6 +165,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - Both implement exponential backoff for Redis reconnection
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders
+- **Schema migrations**: `_init_database()` runs on startup and applies any pending migrations from the `MIGRATIONS` list in order, each committed atomically; `schema_version` tracks the last applied index. To add a schema change, append a new entry to `MIGRATIONS` — never edit existing entries. Migrations run automatically on server restart, so no manual SQL is needed for staging/production deployments.
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart

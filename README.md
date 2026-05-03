@@ -153,6 +153,8 @@ docker compose up -d
 
 This runs all components (bot, server, and redis) in Docker containers.
 
+Schema migrations run automatically on server startup — deploy new code and restart; no manual SQL needed.
+
 ## Tests
 
 ### Unit Tests

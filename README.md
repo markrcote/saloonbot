@@ -145,7 +145,7 @@ docker compose -f compose.dev-bot-local.yml down
 
 ### Production/Staging Deployment
 
-For production and staging deployments, continue to use the standard `compose.yml` file:
+For production and staging deployments, use the standard `compose.yml` file:
 
 ```bash
 docker compose up -d
@@ -154,6 +154,27 @@ docker compose up -d
 This runs all components (bot, server, and redis) in Docker containers.
 
 Schema migrations run automatically on server startup — deploy new code and restart; no manual SQL needed.
+
+#### Secrets setup (one-time per host)
+
+Secrets are sourced from `/etc/saloonbot/secrets/` on the host, which persists across reboots (unlike `/run/secrets`, which is a tmpfs and is wiped on restart). Run this once on each host:
+
+```bash
+mkdir -p /etc/saloonbot/secrets
+chmod 700 /etc/saloonbot/secrets
+
+# Required
+echo -n "your-discord-token"     > /etc/saloonbot/secrets/discord_token
+echo -n "guild_id1,guild_id2"    > /etc/saloonbot/secrets/discord_guilds
+
+# Optional — LLM bot players. Create empty files if unused.
+echo -n "your-anthropic-key"     > /etc/saloonbot/secrets/anthropic_api_key
+echo -n ""                       > /etc/saloonbot/secrets/openai_api_key
+
+chmod 600 /etc/saloonbot/secrets/*
+```
+
+All four secret files must exist (Docker Compose requires them even if empty). Docker mounts them into each container at `/run/secrets/<name>`, where SaloonBot picks them up automatically.
 
 ## Tests
 

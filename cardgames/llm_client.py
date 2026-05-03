@@ -7,12 +7,12 @@ class LLMError(Exception):
 
 
 def _read_key(env_var):
-    """Return value of env_var, falling back to reading the file named by env_var_FILE."""
+    """Direct env var → _FILE path → default /run/secrets/ path → None."""
     value = os.environ.get(env_var)
     if value:
         return value
-    file_path = os.environ.get(f"{env_var}_FILE")
-    if file_path and os.path.isfile(file_path):
+    file_path = os.environ.get(f"{env_var}_FILE") or f"/run/secrets/{env_var.lower()}"
+    if os.path.isfile(file_path):
         with open(file_path) as f:
             return f.read().strip() or None
     return None

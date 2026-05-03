@@ -33,8 +33,6 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
-      - DISCORD_GUILDS_FILE=/run/secrets/discord_guilds
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
     secrets:
       - discord_token

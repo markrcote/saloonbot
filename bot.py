@@ -16,14 +16,15 @@ from nextcord.ext import commands, tasks
 from wwnames.wwnames import WildWestNames
 
 
-def read_env_file(env_var):
-    filename = os.getenv(env_var)
-    if not filename:
-        return None
-    if not os.path.isfile(filename):
-        return None
-    with open(filename) as f:
-        return f.read().strip()
+def read_env(env_var):
+    value = os.environ.get(env_var)
+    if value:
+        return value
+    file_path = os.environ.get(f"{env_var}_FILE") or f"/run/secrets/{env_var.lower()}"
+    if os.path.isfile(file_path):
+        with open(file_path) as f:
+            return f.read().strip() or None
+    return None
 
 
 DEBUG_LOGGING = os.getenv("SALOONBOT_DEBUG")
@@ -40,8 +41,8 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN") or read_env_file("DISCORD_TOKEN_FILE")
-GUILD_IDS_STR = os.getenv("DISCORD_GUILDS") or read_env_file("DISCORD_GUILDS_FILE")
+DISCORD_TOKEN = read_env("DISCORD_TOKEN")
+GUILD_IDS_STR = read_env("DISCORD_GUILDS")
 
 if not DISCORD_TOKEN:
     logging.error("No Discord token provided.")

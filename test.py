@@ -748,8 +748,9 @@ class TestSerialization(unittest.TestCase):
         # Serialize with a fake "old" time_last_event
         game_data = game.to_dict()
         fake_save_time = time.time() - 5  # Pretend saved 5 seconds ago
+        betting_started = fake_save_time - 2  # Betting started 2s before save = 7s ago total
         game_data['time_last_event'] = fake_save_time
-        game_data['time_betting_started'] = fake_save_time - 2  # Betting started 2s before save
+        game_data['time_betting_started'] = betting_started
 
         # Restore
         before_restore = time.time()
@@ -760,9 +761,11 @@ class TestSerialization(unittest.TestCase):
         self.assertGreaterEqual(restored_game.time_last_event, before_restore)
         self.assertLessEqual(restored_game.time_last_event, after_restore)
 
-        # time_betting_started should preserve the 2 second difference
-        time_diff = restored_game.time_last_event - restored_game.time_betting_started
-        self.assertAlmostEqual(time_diff, 2.0, places=1)
+        # time_betting_started must keep its original absolute timestamp so the timer
+        # continues from where it left off (7s elapsed total, not reset to 2s)
+        self.assertAlmostEqual(restored_game.time_betting_started, betting_started, places=1)
+        elapsed = time.time() - restored_game.time_betting_started
+        self.assertAlmostEqual(elapsed, 7.0, places=0)
 
     def test_empty_game_serialization(self):
         """Test serialization of a game with no players."""

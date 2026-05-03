@@ -4,7 +4,7 @@ import time
 from enum import Enum
 
 from .card_game import Card, CardGame, CardGameError
-from .player import Player, registry as player_registry
+from .player import Player
 
 
 # Serialization helpers for game persistence
@@ -58,7 +58,7 @@ def deserialize_player(data, casino=None):
     hand = deserialize_hand(data['hand'])
 
     if not data.get('is_npc'):
-        player = player_registry.get_player(name, add=True)
+        player = Player(name)
         player.hand = hand
         return player
 
@@ -490,11 +490,20 @@ class Blackjack(CardGame):
 
     def action(self, data):
         if data['event_type'] == 'player_action':
-            player = player_registry.get_player(data['player'], add=True)
+            player_name = data['player']
             action = data['action']
 
             # Validate action is allowed in current state
             self._validate_action(action)
+
+            if action == Action.JOIN:
+                # Create a fresh Player scoped to this game; join() guards against duplicates
+                player = Player(player_name)
+            else:
+                all_players = self.players + self.players_waiting
+                player = next((p for p in all_players if p.name == player_name), None)
+                if player is None:
+                    raise CardGameError(f"Player {player_name} not found in this game")
 
             if action == Action.JOIN:
                 self.join(player)
@@ -649,19 +658,15 @@ class Blackjack(CardGame):
         game.state = HandState(data['state'])
         game.current_player_idx = data['current_player_idx']
 
-        # Restore timing fields with adjustment for elapsed time
-        # We use time_last_event as the reference point
-        now = time.time()
-        saved_time_last_event = data['time_last_event']
-        time_offset = now - saved_time_last_event
-
-        game.time_last_event = now
+        # Restore timing fields — keep original absolute timestamps so timers
+        # continue from where they left off, not reset on restore.
+        game.time_last_event = time.time()
 
         if data['time_betting_started'] is not None:
-            game.time_betting_started = data['time_betting_started'] + time_offset
+            game.time_betting_started = data['time_betting_started']
 
         if data['time_last_hand_ended'] is not None:
-            game.time_last_hand_ended = data['time_last_hand_ended'] + time_offset
+            game.time_last_hand_ended = data['time_last_hand_ended']
 
         # Restore deck and discards
         game.deck = deserialize_hand(data['deck'])

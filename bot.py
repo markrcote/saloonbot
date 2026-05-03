@@ -124,6 +124,7 @@ class BlackjackCog(commands.Cog):
         self.games = []
         self.subscribed = asyncio.Event()
         self.subscribe_task = None
+        self._list_games_request_id = None
 
     def cog_unload(self):
         self.listen.stop()
@@ -215,6 +216,8 @@ class BlackjackCog(commands.Cog):
 
         parts = message.content.split()
         command = parts[0]
+        if len(command) > 20:
+            return
 
         # Handle bet command with amount
         if command == "bet" and len(parts) > 1:
@@ -427,6 +430,9 @@ class BlackjackCog(commands.Cog):
         while True:
             try:
                 await self.pubsub.subscribe("casino_update")
+                for game in self.games:
+                    if game.game_id:
+                        await self.pubsub.subscribe(game.topic())
                 self.subscribed.set()
                 logging.info("Subscribed to casino_update.")
                 return

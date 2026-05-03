@@ -1,5 +1,8 @@
 # Plan: LLM-Powered Bot Players with Wild West Personalities
 
+> **Status: COMPLETE** (as of 2026-05-03) — All milestones M1a–M3 implemented and committed.
+
+
 ## Context
 
 SaloonBot's blackjack game currently supports human players and a rule-based SimpleBlackjackNPC.

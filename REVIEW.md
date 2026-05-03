@@ -1,5 +1,13 @@
 # Codebase Review
 
+## Status (as of 2026-05-03)
+
+**Fixed:** DI-1, DI-3, GL-1, GL-2, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-5
+
+**Open:** DI-2, DI-4, GL-3, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-4, CQ-6, CQ-7, CQ-8, TG-1, TG-2
+
+---
+
 ## Summary
 
 SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub/sub architecture and good test coverage. The code is readable and the state machine design for the game is sound. However, there are several notable defects ranging from data integrity risks in financial operations to logic bugs in game flow, security gaps in input handling, and a scattered set of code quality issues. Most critical issues cluster around wallet/bet management (money is real to players), game state correctness under edge cases, and missing input validation on the Discord command path.
@@ -10,7 +18,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Data Integrity / Financial Logic
 
-#### [DI-1] CRITICAL: Wallet balance can go negative — no floor on `update_wallet` (complexity: trivial)
+#### [DI-1] ~~CRITICAL~~ **[FIXED]**: Wallet balance can go negative — no floor on `update_wallet` (complexity: trivial)
 - **Location:** `cardgames/database.py:157-159`, `cardgames/sqlite_database.py:101-103`
 - **Problem:** `update_wallet` does `wallet + ?` with no constraint preventing the result from going below zero. If two concurrent bet deductions race, or if a bug elsewhere calls `update_wallet(-amount)` with a stale balance, the wallet can go negative. There is also no `CHECK (wallet >= 0)` constraint in either the MySQL or SQLite schema definitions.
 - **Impact:** Players can end up with a negative balance, which is never recoverable with the current payout logic (only positive amounts are ever added back). Negative wallets corrupt the displayed balance and break the `InsufficientFundsError` guard which relies on a correct database value.
@@ -29,7 +37,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
   UPDATE users SET wallet = wallet - ? WHERE username = ? AND wallet >= ?
   ```
 
-#### [DI-3] HIGH: `end_hand` skips payout when player's bet is missing from `self.bets` (complexity: trivial)
+#### [DI-3] ~~HIGH~~ **[FIXED]**: `end_hand` skips payout when player's bet is missing from `self.bets` (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:376`
 - **Problem:** `bet_amount = self.bets.get(player.name, 0)` silently defaults to 0 if a player somehow has no bet entry. If this happens (e.g., deserialization bug, or the player joined mid-hand after `new_hand` was called), the winning player receives `0 * 2 = 0` payout.
 - **Impact:** Players can win a hand and receive nothing.
@@ -51,7 +59,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Game Logic Bugs
 
-#### [GL-1] HIGH: `leave()` during `PLAYING` state can produce incorrect `current_player_idx` (complexity: moderate)
+#### [GL-1] ~~HIGH~~ **[FIXED]**: `leave()` during `PLAYING` state can produce incorrect `current_player_idx` (complexity: moderate)
 - **Location:** `cardgames/blackjack.py:264-270`
 - **Problem:** When a player leaves during `PLAYING` state, the code adjusts `current_player_idx` only if `current_player_idx >= len(self.players)`. It does not handle the case where the *leaving player is the current player* (i.e., `self.players[current_player_idx] == player` before removal). After `self.players.remove(player)`, if the leaving player was at index `i < current_player_idx`, `current_player_idx` now points to the wrong player (off by one).
 - **Impact:** The wrong player gets prompted for their turn, or a player is skipped entirely.
@@ -67,7 +75,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
           self.current_player_idx = None
   ```
 
-#### [GL-2] HIGH: `hit()` logic inverted — `get_score(player) <= 21` returns early before checking for bust (complexity: trivial)
+#### [GL-2] ~~HIGH~~ **[FIXED]**: `hit()` logic inverted — `get_score(player) <= 21` returns early before checking for bust (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:412-419`
 - **Problem:** After dealing a card, the code checks `if self.get_score(player) <= 21: return` first — meaning a non-busting hit silently returns with no turn advancement. Only scores > 21 fall through to the `next_turn()` call. But then inside that block, there is a check `if self.get_score(player) == 21` which can never be true (21 <= 21 already returned). The bust message is then output when score > 21 but `next_turn()` is only called at line 419 for *both* the phantom 21 case and the real bust.
   
@@ -109,7 +117,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Security & Input Validation
 
-#### [SV-1] HIGH: No bet amount validation in `bot.py` `on_message` handler (complexity: trivial)
+#### [SV-1] ~~HIGH~~ **[FIXED]**: No bet amount validation in `bot.py` `on_message` handler (complexity: trivial)
 - **Location:** `bot.py:220-225`
 - **Problem:** The `on_message` handler parses `bet <amount>` from plain chat messages. The `amount` is cast with `int(parts[1])`, but there are no bounds checks before sending it to the server. Negative values, zero, or very large integers pass straight through to the server. The server's `bet()` does validate min/max, but the Discord message path bypasses the slash command's parameter type constraints.
 - **Impact:** A user can send `bet -1000000` or `bet 0` via chat, which the server will reject with a user-visible error message, but the validation gap is present and the error path is inelegant.
@@ -120,7 +128,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
       return
   ```
 
-#### [SV-2] MEDIUM: `on_message` processes any message text as a game command with no length or content check (complexity: trivial)
+#### [SV-2] ~~MEDIUM~~ **[FIXED]**: `on_message` processes any message text as a game command with no length or content check (complexity: trivial)
 - **Location:** `bot.py:216-227`
 - **Problem:** Any message in a channel with an active game is split and the first word is sent as a command to the server. The server will reject unknown actions, but there is no maximum length check on `parts[0]`, meaning arbitrarily long strings are published to Redis.
 - **Impact:** Denial-of-service via large Redis messages; verbose error logging in the server for every mistyped chat message.
@@ -132,7 +140,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Low SQL injection risk (parameterized queries are used), but potential display/log injection via crafted usernames.
 - **Fix:** Validate or sanitize usernames before use, or truncate to a reasonable max length (e.g., 32 chars).
 
-#### [SV-4] LOW: `REDIS_PORT` environment variable is read as a string, not cast to int (complexity: trivial)
+#### [SV-4] ~~LOW~~ **[FIXED]**: `REDIS_PORT` environment variable is read as a string, not cast to int (complexity: trivial)
 - **Location:** `bot.py:36`, `server.py:15`
 - **Problem:** `REDIS_PORT = os.getenv("REDIS_PORT", 6379)` — `os.getenv` always returns a string when the variable is set, but the default is an int. When the env var IS set, `redis.asyncio.Redis(host=REDIS_HOST, port=REDIS_PORT)` receives a string for `port`, which the Redis library currently accepts but this is an implicit type mismatch.
 - **Impact:** Could break with future Redis library versions; inconsistent behavior between "env var set" and "env var not set" paths.
@@ -142,19 +150,19 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Protocol / Architecture
 
-#### [PA-1] HIGH: Bot games list is never pruned — `self.games` grows forever (complexity: moderate)
+#### [PA-1] ~~HIGH~~ **[FIXED]**: Bot games list is never pruned — `self.games` grows forever (complexity: moderate)
 - **Location:** `bot.py:124`, `bot.py:186-187`
 - **Problem:** The bot appends to `self.games` in `new_game` and `_handle_list_games_response` but never removes games. Finished games (those in `FINISHED` state or server-deleted games) remain in the bot's list indefinitely. `find_game` will still find a stale finished game and prevent a new game from being created in the same channel.
 - **Impact:** After a game ends, the same channel can never start a new game. The bot effectively becomes non-functional in that channel after the first game.
 - **Fix:** Handle game-over messages from the server (or add a `game_ended` event type) and remove the game from `self.games`. At minimum, transition game state to `FINISHED` and exclude `FINISHED` games from `find_game`.
 
-#### [PA-2] HIGH: `process_message` in `bot.py` handles `casino_update` messages but never handles `game_updates_*` "game over" signals (complexity: moderate)
+#### [PA-2] ~~HIGH~~ **[FIXED]**: `process_message` in `bot.py` handles `casino_update` messages but never handles `game_updates_*` "game over" signals (complexity: moderate)
 - **Location:** `bot.py:348-380`
 - **Problem:** Related to the above — the server has no protocol message for "this game is over, bot should clean up." The bot has a `GameState.FINISHED` enum value but nothing ever sets it. When the server removes an idle game after `EMPTY_GAME_TIMEOUT`, the bot still holds a reference to the game object.
 - **Impact:** Memory accumulation; channel permanently stuck; recovered games after restart may be orphaned in the bot's game list.
 - **Fix:** Add a `game_over` event type to the server's `game_output` at end of game lifecycle, and handle it in the bot's `process_message` to remove the game from `self.games`.
 
-#### [PA-3] MEDIUM: `try_subscribe` only subscribes to `casino_update` but not to game-specific topics — subscriptions lost on reconnect (complexity: moderate)
+#### [PA-3] ~~MEDIUM~~ **[FIXED]**: `try_subscribe` only subscribes to `casino_update` but not to game-specific topics — subscriptions lost on reconnect (complexity: moderate)
 - **Location:** `bot.py:395-407`
 - **Problem:** When Redis connection is lost and `try_subscribe` runs, it only resubscribes to `casino_update`. Any active game-specific topics (`game_updates_{game_id}`) that were subscribed are not resubscribed.
 - **Impact:** After a Redis reconnect, the bot stops receiving game state updates for all active games, even though the games continue running on the server.
@@ -169,7 +177,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Location:** `cardgames/casino.py:291-325`
 - **Problem:** Each reconnect re-subscribes only to `"casino"`. This is correct for the server (it only needs to receive on `"casino"`). No issue here — but worth noting that `_process_message` is the only message handler and it covers all expected message types. The real concern is on the bot side (see above).
 
-#### [PA-5] LOW: `_list_games_request_id` attribute is set dynamically in `_request_list_games` but accessed with `hasattr` guard — if `list_games` response arrives before `_request_list_games` is called (race on reconnect), the response is silently dropped (complexity: trivial)
+#### [PA-5] ~~LOW~~ **[FIXED]**: `_list_games_request_id` attribute is set dynamically in `_request_list_games` but accessed with `hasattr` guard — if `list_games` response arrives before `_request_list_games` is called (race on reconnect), the response is silently dropped (complexity: trivial)
 - **Location:** `bot.py:345-347`
 - **Problem:** `if hasattr(self, '_list_games_request_id') and request_id == self._list_games_request_id` — this guard is needed because the attribute is not initialized in `__init__`. If the server responds faster than the bot processes messages, or if the attribute was cleared, the response is silently dropped.
 - **Impact:** Bot fails to restore games on startup without any log message explaining why.
@@ -179,7 +187,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### State Persistence & Recovery
 
-#### [SP-1] MEDIUM: `from_dict` time offset calculation is wrong — it adjusts `time_betting_started` forward relative to `time_last_event`, but `time_betting_started` is an absolute timestamp (complexity: moderate)
+#### [SP-1] ~~MEDIUM~~ **[FIXED]**: `from_dict` time offset calculation is wrong — it adjusts `time_betting_started` forward relative to `time_last_event`, but `time_betting_started` is an absolute timestamp (complexity: moderate)
 - **Location:** `cardgames/blackjack.py:656-658`
 - **Problem:** 
   ```python
@@ -196,7 +204,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
   # (same for time_last_hand_ended)
   ```
 
-#### [SP-2] MEDIUM: Player registry is a global singleton and is never cleared between game restores (complexity: moderate)
+#### [SP-2] ~~MEDIUM~~ **[FIXED]**: Player registry is a global singleton and is never cleared between game restores (complexity: moderate)
 - **Location:** `cardgames/player.py:48`, `cardgames/blackjack.py:63`
 - **Problem:** `registry = PlayerRegistry()` is a module-level singleton. `deserialize_player` calls `player_registry.get_player(name, add=True)` which adds the player to the global registry. Human players from loaded games will already exist in the registry from the server's previous run (no, actually — the registry is fresh on each server start, so this is a new registry). However, if two different games have a human player with the same username, `get_player(name, add=True)` returns the *same* `Player` object for both games. Changes to `player.hand` in one game corrupt the other game's hand.
 - **Impact:** Two concurrent games with a player named "Alice" will share a single `Player` object. Alice's hand in game 1 will be overwritten when she's dealt cards in game 2.
@@ -212,13 +220,13 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 
 ### Code Quality
 
-#### [CQ-1] MEDIUM: `blackjack.py` imports `mysql.connector` at the top level — creates hard dependency in game logic (complexity: trivial)
+#### [CQ-1] ~~MEDIUM~~ **[FIXED]**: `blackjack.py` imports `mysql.connector` at the top level — creates hard dependency in game logic (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:6`
 - **Problem:** `import mysql.connector` is at the top of `blackjack.py`, but `mysql.connector.Error` is only used in the `join()` method when catching database errors. This creates a hard dependency on the MySQL driver in the game logic layer, breaking the abstraction that `sqlite_database.py` was meant to provide.
 - **Impact:** Running tests or using SQLite requires `mysql.connector` to be installed even though it's never used in that code path.
 - **Fix:** Either catch the generic `Exception` (or a custom DB exception), or move the import inside the `try` block. Better: define a common `DatabaseError` in `database.py` and raise that from both DB implementations.
 
-#### [CQ-2] MEDIUM: `blackjack.py:join()` catches `mysql.connector.Error` specifically but the database layer may throw `sqlite3.Error` (complexity: trivial)
+#### [CQ-2] ~~MEDIUM~~ **[FIXED]**: `blackjack.py:join()` catches `mysql.connector.Error` specifically but the database layer may throw `sqlite3.Error` (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:234-236`
 - **Problem:** The error handler `except mysql.connector.Error as e` will NOT catch SQLite errors when `USE_SQLITE=1`. The `add_user` call in SQLite mode can raise `sqlite3.Error`, which would propagate as an unhandled exception from `join()`.
 - **Impact:** A SQLite database error during player join causes an unhandled exception that crashes the game action handler.
@@ -241,7 +249,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
       await game.channel.send("❌ Command failed — could not reach game server. Please try again.")
   ```
 
-#### [CQ-5] LOW: `SimpleBlackjackNPC.decide_action` has a logic gap for dealer value 7-9 (complexity: trivial)
+#### [CQ-5] ~~LOW~~ **[FIXED]**: `SimpleBlackjackNPC.decide_action` has a logic gap for dealer value 7-9 (complexity: trivial)
 - **Location:** `cardgames/simple_npc.py:19`
 - **Problem:** The condition `if dealer_value >= 10 or dealer_value == 14` checks `>= 10` which already includes `10, 11, 12, 13`. The `dealer_value == 14` (Ace) check is therefore redundant since `14 >= 10` is already true.
 - **Impact:** No functional bug — Ace is correctly handled — but the redundant condition is misleading and suggests misunderstanding of the value encoding.

@@ -132,3 +132,6 @@ dmypy.json
 discord_token.txt
 discord_guilds.txt
 saloonbot.db
+
+# Claude Code
+.claude/

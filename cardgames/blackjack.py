@@ -250,10 +250,16 @@ class Blackjack(CardGame):
                 return
             raise CardGameError(f"{player} is not at the table")
 
+        leaving_idx = self.players.index(player)
+
         # If player had a bet, forfeit it unless the hand outcome is already decided
+        # or the player has already completed their turn in PLAYING state
         if player.name in self.bets:
             bet_amount = self.bets[player.name]
-            if self.state in (HandState.DEALER_TURN, HandState.RESOLVING):
+            already_played = (self.state == HandState.PLAYING and
+                              self.current_player_idx is not None and
+                              leaving_idx < self.current_player_idx)
+            if self.state in (HandState.DEALER_TURN, HandState.RESOLVING) or already_played:
                 # Hand is in progress — return their bet rather than silently losing it
                 self.casino.db.update_wallet(player.name, bet_amount)
                 self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} bet is returned.")
@@ -263,7 +269,6 @@ class Blackjack(CardGame):
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
-        leaving_idx = self.players.index(player)
         self.players.remove(player)
 
         # Handle current player leaving during PLAYING state
@@ -349,18 +354,21 @@ class Blackjack(CardGame):
         self.discard_all(self.dealer)
 
         self.deal(self.dealer, 2)
+
+        # Deal to players before checking dealer blackjack so they always see their hand
+        for player in self.players:
+            self.deal(player, 2)
+
         self.output(f"👀 Dealer's showing {self.dealer.hand[0]}")
 
         if self.get_score(self.dealer) == 21:
+            for player in self.players:
+                self.output(f"🎴 {player} has {player.hand_str()}")
             self.output(
                 f"🎰 Dealer flips {self.dealer.hand[1]}. Blackjack! House wins."
             )
             self.state = HandState.RESOLVING
             return
-
-        # Deal two cards to each player
-        for player in self.players:
-            self.deal(player, 2)
 
         # Transition to playing state before announcing hands
         # This ensures actions can be processed as soon as clients see hands

@@ -133,9 +133,10 @@ class TestBlackjack(unittest.TestCase):
         self.game = Blackjack(game_id="test_game", casino=mock_casino)
 
     def test_new_hand(self):
-        # Set up a mock deck to ensure that the dealer never has 21.
-        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 14),
-                          Card("H", 10)]
+        # Set up a mock deck (8 cards) to ensure dealer never has 21.
+        # Pop order: dealer gets 5+6=11, player1 gets 7+8=15, player2 gets 9+4=13, 2 remain.
+        self.game.deck = [Card("H", 2), Card("H", 3), Card("H", 4), Card("H", 9),
+                          Card("H", 8), Card("H", 7), Card("H", 6), Card("H", 5)]
 
         # Verify that an error is raised when no players are present
         with self.assertRaises(CardGameError):
@@ -148,8 +149,10 @@ class TestBlackjack(unittest.TestCase):
         self.assertEqual(len(self.game.deck), 2)
 
     def test_dealer_has_21(self):
-        self.game.deck = [Card("D", 4), Card("D", 5), Card("H", 3), Card("H", 2),
-                          Card("H", 14), Card("H", 10)]
+        # Hand 1 pop order: dealer gets H10+Ace=21, player gets H2+H3=5.
+        # Hand 2 pop order (from remaining): dealer gets D2+D3=5, player gets D4+D5=9.
+        self.game.deck = [Card("D", 5), Card("D", 4), Card("D", 3), Card("D", 2),
+                          Card("H", 3), Card("H", 2), Card("H", 14), Card("H", 10)]
         self.game.join(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)

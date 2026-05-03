@@ -373,7 +373,10 @@ class Blackjack(CardGame):
         self.output("✨ ~*~ The dust settles... ~*~ ✨")
         self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
         for player in self.players:
-            bet_amount = self.bets.get(player.name, 0)
+            bet_amount = self.bets.get(player.name)
+            if bet_amount is None:
+                logging.error(f"Player {player.name} has no bet at resolution time")
+                bet_amount = 0
 
             if self.get_score(player) > 21:
                 losses.append(player)

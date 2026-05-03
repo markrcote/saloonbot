@@ -3,8 +3,6 @@ import os
 import time
 from enum import Enum
 
-import mysql.connector
-
 from .card_game import Card, CardGame, CardGameError
 from .player import Player, registry as player_registry
 
@@ -232,7 +230,7 @@ class Blackjack(CardGame):
 
         try:
             self.casino.db.add_user(player.name)
-        except mysql.connector.Error as e:
+        except Exception as e:
             logging.error(f"Failed to add user to database: {e}")
 
         self.output(f"🪑 {player} pulls up a chair. They'll join the next hand.")

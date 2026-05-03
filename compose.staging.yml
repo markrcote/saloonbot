@@ -34,9 +34,8 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
-    secrets:
-      - discord_token
-      - discord_guilds
+    volumes:
+      - /run/secrets:/run/secrets:ro
     depends_on:
       - redis
     labels:
@@ -76,8 +75,3 @@ services:
       - com.centurylinklabs.watchtower.enable=false
 volumes:
   mysql_data:
-secrets:
-  discord_token:
-    file: discord_token.txt
-  discord_guilds:
-    file: discord_guilds.txt

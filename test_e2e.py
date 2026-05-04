@@ -690,5 +690,50 @@ class TestStopGame(EndToEndTestCase):
         self.assertIsNone(row, "Game should be removed from database after stop")
 
 
+class TestWalletBalance(EndToEndTestCase):
+    """Test wallet balance correctness after hand resolution."""
+
+    def test_wallet_updated_correctly_after_hand(self):
+        """Wallet is credited on win, restored on push, unchanged on loss (bet already escrowed)."""
+        game_id = self.create_game()
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            player_name = 'WalletPlayer'
+            self.join_player(game_id, player_name)
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+
+            row = self.poll_db("SELECT wallet FROM users WHERE username = %s", (player_name,))
+            self.assertIsNotNone(row)
+            starting = float(row[0])
+
+            bet = 10
+            self.place_bet(game_id, player_name, bet)
+
+            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+            self.player_action(game_id, player_name, 'stand')
+
+            messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+
+            # Determine expected wallet from the outcome message
+            if any('strikes gold' in m for m in messages):
+                expected = starting + bet       # bet*2 credited, net gain = bet
+            elif any('pushes with the dealer' in m for m in messages):
+                expected = starting              # bet returned, net zero
+            else:
+                expected = starting - bet        # loss: bet escrowed, nothing returned
+
+            result = self.poll_db(
+                "SELECT wallet FROM users WHERE username = %s",
+                (player_name,),
+                predicate=lambda row: float(row[0]) == expected
+            )
+            self.assertIsNotNone(
+                result,
+                f"Wallet should be ${expected:.2f} after hand. Messages: {messages}"
+            )
+        finally:
+            pubsub.close()
+
+
 if __name__ == "__main__":
     unittest.main()

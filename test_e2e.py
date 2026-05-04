@@ -236,7 +236,7 @@ class EndToEndTestCase(unittest.TestCase):
             'amount': amount
         }))
 
-    def create_game(self):
+    def create_game(self, num_bots=0):
         """Helper method to create a game and return the game_id."""
         pubsub = self.redis.pubsub()
         try:
@@ -249,6 +249,8 @@ class EndToEndTestCase(unittest.TestCase):
                 'action': 'new_game',
                 'request_id': request_id
             }
+            if num_bots:
+                message['num_bots'] = num_bots
             self.redis.publish("casino", json.dumps(message))
 
             # Wait for game creation response
@@ -770,6 +772,39 @@ class TestMultiplePlayers(EndToEndTestCase):
             self.assertTrue(
                 any('dust settles' in m for m in end),
                 f"Hand should resolve after both players stand. Messages: {end}"
+            )
+        finally:
+            pubsub.close()
+
+
+class TestNPCBots(EndToEndTestCase):
+    """Test games with NPC bot players."""
+
+    def test_npc_bot_plays_without_human_intervention(self):
+        """NPC bot takes its turn automatically so the hand resolves without prompting it."""
+        # NPC is added before the human when the human joins, so NPC goes first
+        game_id = self.create_game(num_bots=1)
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'HumanPlayer')
+
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+            # NPC auto-bets via tick loop; human places their bet
+            self.place_bet(game_id, 'HumanPlayer', 10)
+
+            # Wait until it's the human's turn (NPC plays first and is handled automatically)
+            pre_human = self.collect_messages(pubsub, timeout=10, stop_on="HumanPlayer, you're up")
+            self.assertTrue(
+                any("HumanPlayer, you're up" in m for m in pre_human),
+                f"HumanPlayer should be prompted for their turn. Messages: {pre_human}"
+            )
+
+            self.player_action(game_id, 'HumanPlayer', 'stand')
+
+            end = self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+            self.assertTrue(
+                any('dust settles' in m for m in end),
+                f"Hand should resolve after both NPC and human act. Messages: {end}"
             )
         finally:
             pubsub.close()

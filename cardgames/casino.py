@@ -26,7 +26,6 @@ class Casino:
         self._pending_bots = {}  # game_id -> num_bots to add on first human join
         self._llm_client = None
         self._llm_client_tried = False
-        self._load_games_from_db()
 
     @property
     def llm_client(self):
@@ -317,6 +316,7 @@ class Casino:
                 )
 
     def listen(self):
+        db_loaded = False
         while True:
             pubsub = self.redis.pubsub()
             backoff = 1
@@ -328,6 +328,10 @@ class Casino:
                     logging.info(f"Couldn't connect to redis; sleeping for {backoff} seconds...")
                     time.sleep(backoff)
                     backoff = min(backoff * 2, 60)
+
+            if not db_loaded:
+                db_loaded = True
+                self._load_games_from_db()
 
             logging.info("Casino online.")
 

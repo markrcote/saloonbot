@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-4, CQ-5, TG-1, GL-4, CQ-8
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, TG-1, GL-4, CQ-8
 
-**Open:** DI-2, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-6, CQ-7, TG-2
+**Open:** DI-2, GL-5, SV-3, PA-4, SP-3, CQ-6, CQ-7, TG-2
 
 ---
 
@@ -232,7 +232,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** A SQLite database error during player join causes an unhandled exception that crashes the game action handler.
 - **Fix:** Catch `Exception` generically here (acceptable since we only log and continue), or define a shared DB exception type.
 
-#### [CQ-3] MEDIUM: `Casino.__init__` calls `_load_games_from_db()` synchronously before the Redis connection is tested (complexity: trivial)
+#### [CQ-3] ~~MEDIUM~~ **[FIXED]**: `Casino.__init__` calls `_load_games_from_db()` synchronously before the Redis connection is tested (complexity: trivial)
 - **Location:** `cardgames/casino.py:32-33`
 - **Problem:** `Casino.__init__` calls `_load_games_from_db()` which calls `db.load_all_active_games()`. If the database is unavailable, this raises immediately in `__init__` before `listen()` is even called. The error is caught at line 46-47, which is fine, but restored games call `game.output()` → `casino.game_output()` → `self.publish_event()` which calls `self.redis.publish()` — at this point Redis is not yet connected (no `listen()` call). Any state transition triggered during a game tick during load would try to publish to an unconnected Redis.
 - **Impact:** Restored games that are in `BETTING` with an expired timer will tick immediately on load and may attempt Redis publishes before the subscribe loop is running.

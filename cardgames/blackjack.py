@@ -588,7 +588,7 @@ class Blackjack(CardGame):
                 players_without_bets = [p for p in self.players if p.name not in self.bets]
                 for player in players_without_bets:
                     self.output(f"⏭️ {player} didn't put up any coin. They're sittin' this one out.")
-                    self.players.remove(player)
+                self.players = [p for p in self.players if p.name in self.bets]
 
             if not self.players:
                 self.output("⏸️ Nobody's got skin in the game. Dealer waits...")

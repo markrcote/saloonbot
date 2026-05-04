@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-4, CQ-5, TG-1
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-4, CQ-5, TG-1, GL-4, CQ-8
 
-**Open:** DI-2, GL-4, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-6, CQ-7, CQ-8, TG-2
+**Open:** DI-2, GL-5, SV-3, PA-4, SP-3, CQ-3, CQ-6, CQ-7, TG-2
 
 ---
 
@@ -101,7 +101,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Confusing game output; players see they lost with "0" as their score. Also `self.bets` will be populated (bets were placed before `new_hand` is called), so the financial resolution is actually correct.
 - **Fix:** Deal to players before checking for dealer blackjack, or announce the dealer blackjack with proper player hand display.
 
-#### [GL-4] MEDIUM: `_tick_betting` removes non-betting players with `list.remove()` inside iteration (complexity: trivial)
+#### [GL-4] ~~MEDIUM~~ **[FIXED]**: `_tick_betting` removes non-betting players with `list.remove()` inside iteration (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:561-564`
 - **Problem:** `players_without_bets` is computed as a list comprehension, then `self.players.remove(player)` is called in a loop — this is safe because it iterates `players_without_bets`, not `self.players`. However, `remove()` does a linear scan and removes the *first* occurrence. If two players have identical names (which the player registry doesn't prevent across different sessions), the wrong player could be removed.
 - **Impact:** Low risk in practice, but name collision would remove the wrong player.
@@ -267,7 +267,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** No functional bug currently, but confusing and fragile. A future refactor of either method could accidentally double-add players.
 - **Fix:** Remove the `self.players.extend(self.players_waiting)` / `self.players_waiting = []` from `new_hand()` since `start_betting()` already handles this, or add a comment explaining that `new_hand` may be called from paths other than `_tick_betting`.
 
-#### [CQ-8] LOW: No `__hash__` defined on `Player` despite `__eq__` being overridden (complexity: trivial)
+#### [CQ-8] ~~LOW~~ **[FIXED]**: No `__hash__` defined on `Player` despite `__eq__` being overridden (complexity: trivial)
 - **Location:** `cardgames/player.py:8-9`
 - **Problem:** Python documentation states that if you define `__eq__`, you should also define `__hash__` (or explicitly set `__hash__ = None` to make it unhashable). Without `__hash__`, `Player` objects are unhashable in Python 3. This means `player in set()` or using a player as a dict key fails. Currently, players are compared via list membership (`player in self.players`) which uses `__eq__`, so this doesn't immediately break, but it's a subtle trap.
 - **Impact:** Any future code that puts players in a set or uses them as dict keys will silently get identity-based hashing (Python 3 actually sets `__hash__ = None` when you define `__eq__` without `__hash__`, making the object unhashable and raising `TypeError` on hash attempts).

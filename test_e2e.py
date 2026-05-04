@@ -735,5 +735,45 @@ class TestWalletBalance(EndToEndTestCase):
             pubsub.close()
 
 
+class TestMultiplePlayers(EndToEndTestCase):
+    """Test game flow with two human players."""
+
+    def test_turn_order_follows_join_order(self):
+        """Players take turns in the order they joined, and both hands resolve."""
+        game_id = self.create_game()
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'Alpha')
+            self.join_player(game_id, 'Beta')
+
+            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+            self.place_bet(game_id, 'Alpha', 10)
+            self.place_bet(game_id, 'Beta', 10)
+
+            first_turn = self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+            self.assertTrue(
+                any("Alpha, you're up" in m for m in first_turn),
+                f"Alpha should be prompted first. Messages: {first_turn}"
+            )
+
+            self.player_action(game_id, 'Alpha', 'stand')
+
+            second_turn = self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+            self.assertTrue(
+                any("Beta, you're up" in m for m in second_turn),
+                f"Beta should be prompted after Alpha. Messages: {second_turn}"
+            )
+
+            self.player_action(game_id, 'Beta', 'stand')
+
+            end = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+            self.assertTrue(
+                any('dust settles' in m for m in end),
+                f"Hand should resolve after both players stand. Messages: {end}"
+            )
+        finally:
+            pubsub.close()
+
+
 if __name__ == "__main__":
     unittest.main()

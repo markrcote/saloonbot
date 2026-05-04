@@ -172,7 +172,7 @@ class Blackjack(CardGame):
     # Valid actions for each state
     VALID_ACTIONS = {
         HandState.WAITING: {Action.JOIN, Action.LEAVE},
-        HandState.BETTING: {Action.BET, Action.LEAVE},
+        HandState.BETTING: {Action.BET, Action.JOIN, Action.LEAVE},
         HandState.PLAYING: {Action.HIT, Action.STAND, Action.LEAVE},
         HandState.DEALER_TURN: {Action.LEAVE},
         HandState.RESOLVING: {Action.LEAVE},
@@ -239,8 +239,12 @@ class Blackjack(CardGame):
         except Exception as e:
             logging.error(f"Failed to add user to database: {e}")
 
-        self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
-        self.players_waiting.append(player)
+        if self.state == HandState.BETTING:
+            self.output(f"🪑 {_player_label(player)} pulls up a chair. They're in for this round!")
+            self.players.append(player)
+        else:
+            self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
+            self.players_waiting.append(player)
 
     def leave(self, player):
         if player not in self.players:

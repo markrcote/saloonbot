@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, TG-1, GL-4, CQ-8
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
 
-**Open:** DI-2, GL-5, PA-4, SP-3, CQ-6, CQ-7, TG-2
+**Open:** DI-2, GL-5, PA-4, SP-3, CQ-7
 
 ---
 
@@ -255,7 +255,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** No functional bug — Ace is correctly handled — but the redundant condition is misleading and suggests misunderstanding of the value encoding.
 - **Fix:** `if dealer_value >= 10:` (Ace has value 14, which is >= 10)
 
-#### [CQ-6] LOW: `wwnames.py` reads all name files on every `WildWestNames()` instantiation; in `bot.py` a new instance is created per `/wwname` command (complexity: trivial)
+#### [CQ-6] ~~LOW~~ **[FIXED]**: `wwnames.py` reads all name files on every `WildWestNames()` instantiation; in `bot.py` a new instance is created per `/wwname` command (complexity: trivial)
 - **Location:** `bot.py:92`, `wwnames/wwnames.py:6-9`
 - **Problem:** Every `/wwname` slash command creates a new `WildWestNames()` instance which reads three files from disk. While not a crash risk, it's unnecessary I/O on every command invocation.
 - **Impact:** Slightly slower command response; unnecessary file I/O on every name request.
@@ -283,7 +283,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Silent game logic errors in multi-player games when a player leaves mid-hand.
 - **Fix:** Add unit tests covering: player leaves before current index, player leaves at current index, player leaves after current index, last player leaves.
 
-#### [TG-2] LOW: `TestCasinoErrorHandling.setUp` constructs `Casino(redis_host="localhost", redis_port=6379)` which attempts a real Redis connection and `_load_games_from_db()` call (complexity: trivial)
+#### [TG-2] ~~LOW~~ **[FIXED]**: `TestCasinoErrorHandling.setUp` constructs `Casino(redis_host="localhost", redis_port=6379)` which attempts a real Redis connection and `_load_games_from_db()` call (complexity: trivial)
 - **Location:** `test.py:504`
 - **Problem:** The test calls `Casino(...)` then immediately overrides `casino.redis` and `casino.db`. But `Casino.__init__` calls `_load_games_from_db()` before the constructor returns, which calls `self.db.load_all_active_games()` — at that point `self.db` is `None` (not yet overridden), so `_load_games_from_db` returns early safely. BUT `Casino.__init__` also calls `create_llm_client()` which may fail or make network calls in some environments.
 - **Impact:** Fragile test setup; tests may fail or be slow in CI environments without LLM API keys configured.

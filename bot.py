@@ -15,6 +15,8 @@ from nextcord.ext import commands, tasks
 
 from wwnames.wwnames import WildWestNames
 
+_wwnames = WildWestNames()
+
 
 def sanitize_username(name: str) -> str:
     return name[:32]
@@ -102,8 +104,7 @@ async def version(interaction: nextcord.Interaction):
 @bot.slash_command(description="Generate a name", guild_ids=GUILD_IDS)
 async def wwname(interaction: nextcord.Interaction, gender: str = "",
                  number: int = 1):
-    names = WildWestNames()
-    await interaction.send(f"🤠 {names.random_name(gender, number)}")
+    await interaction.send(f"🤠 {_wwnames.random_name(gender, number)}")
 
 
 class GameState(Enum):

@@ -16,6 +16,9 @@ from cardgames.simple_npc import SimpleBlackjackNPC
 
 from wwnames.wwnames import WildWestNames
 
+# Remove join-delay so tests can tick WAITING→BETTING immediately
+Blackjack.TIME_WAIT_FOR_PLAYERS = 0
+
 
 class TestWildWestNames(unittest.TestCase):
 

@@ -165,6 +165,7 @@ class Blackjack(CardGame):
 
     PERIOD_REMINDER_PLAYER_TURN = int(os.getenv('BLACKJACK_REMINDER_PERIOD', '30'))
     TIME_BETWEEN_HANDS = int(os.getenv('BLACKJACK_TIME_BETWEEN_HANDS', '10'))
+    TIME_WAIT_FOR_PLAYERS = int(os.getenv('BLACKJACK_TIME_WAIT_FOR_PLAYERS', '5'))
     MIN_BET = int(os.getenv('BLACKJACK_MIN_BET', '5'))
     MAX_BET = int(os.getenv('BLACKJACK_MAX_BET', '100'))
     TIME_FOR_BETTING = int(os.getenv('BLACKJACK_TIME_FOR_BETTING', '30'))
@@ -203,6 +204,7 @@ class Blackjack(CardGame):
         # Betting state
         self.bets = {}  # Player -> bet amount
         self.time_betting_started = None
+        self.time_first_player_joined = None
 
     def output(self, output):
         self.casino.game_output(self.game_id, output)
@@ -548,14 +550,24 @@ class Blackjack(CardGame):
 
     def _tick_waiting(self):
         """Handle WAITING state: start betting when players are ready."""
-        if self.players or self.players_waiting:
+        if self.players:
+            # Returning players from BETWEEN_HANDS — start immediately
             self.start_betting()
+        elif self.players_waiting:
+            # Fresh game — start a brief wait on first tick so late joiners can sit down
+            if self.time_first_player_joined is None:
+                self.time_first_player_joined = time.time()
+                if self.TIME_WAIT_FOR_PLAYERS > 0:
+                    self.output(f"🕐 Betting starts in {self.TIME_WAIT_FOR_PLAYERS} seconds — get your chips ready!")
+            if time.time() >= self.time_first_player_joined + self.TIME_WAIT_FOR_PLAYERS:
+                self.start_betting()
 
     def _tick_betting(self):
         """Handle BETTING state: wait for bets or timeout."""
         if not self.players:
             self.output("🌵 The table's gone quiet... everyone's vamoosed.")
             self.state = HandState.WAITING
+            self.time_first_player_joined = None
             return
 
         # Auto-bet for any NPCs that haven't bet yet
@@ -653,6 +665,7 @@ class Blackjack(CardGame):
             'time_betting_started': self.time_betting_started,
             'time_last_hand_ended': self.time_last_hand_ended,
             'time_last_event': self.time_last_event,
+            'time_first_player_joined': self.time_first_player_joined,
             'deck': serialize_hand(self.deck),
             'discards': serialize_hand(self.discards),
             'dealer_hand': serialize_hand(self.dealer.hand),
@@ -679,6 +692,9 @@ class Blackjack(CardGame):
 
         if data['time_last_hand_ended'] is not None:
             game.time_last_hand_ended = data['time_last_hand_ended']
+
+        if data.get('time_first_player_joined') is not None:
+            game.time_first_player_joined = data['time_first_player_joined']
 
         # Restore deck and discards
         game.deck = deserialize_hand(data['deck'])

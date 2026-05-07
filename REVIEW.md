@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
+**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, GL-5, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
 
-**Open:** GL-5, PA-4, CQ-7
+**Open:** PA-4, CQ-7
 
 ---
 
@@ -107,7 +107,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Low risk in practice, but name collision would remove the wrong player.
 - **Fix:** See the player registry issue below. Use index-based removal or ensure name uniqueness.
 
-#### [GL-5] LOW: `_tick_waiting` starts betting immediately without waiting for players to actually be "ready" (complexity: trivial)
+#### [GL-5] ~~LOW~~ **[FIXED]**: `_tick_waiting` starts betting immediately without waiting for players to actually be "ready" (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:524-527`
 - **Problem:** `_tick_waiting` starts the betting phase the instant any player is in `players` or `players_waiting`. There is no minimum wait time or confirmation step, so a player joining immediately triggers the betting phase before other players have a chance to join.
 - **Impact:** Poor UX — the second player who joins right after the first may arrive during the betting phase rather than before it, and if they miss the bet window they're kicked out immediately.

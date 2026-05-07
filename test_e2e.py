@@ -118,7 +118,9 @@ class EndToEndTestCase(unittest.TestCase):
             'MYSQL_DATABASE': 'saloonbot',
             'SALOONBOT_DEBUG': '1',
             'BLACKJACK_TIME_BETWEEN_HANDS': '0',
+            'BLACKJACK_TIME_WAIT_FOR_PLAYERS': '0',
             'BLACKJACK_REMINDER_PERIOD': '1',
+            'LLM_TIMEOUT': '1',
         })
 
         cls.server_process = subprocess.Popen(

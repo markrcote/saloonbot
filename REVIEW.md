@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
+**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
 
-**Open:** DI-2, GL-5, PA-4, SP-3, CQ-7
+**Open:** GL-5, PA-4, SP-3, CQ-7
 
 ---
 
@@ -28,7 +28,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
   ```
   Then check `rowcount == 0` to detect the failure and raise `InsufficientFundsError`.
 
-#### [DI-2] HIGH: Race condition between wallet read and bet deduction (complexity: moderate)
+#### [DI-2] ~~HIGH~~ **[FIXED]**: Race condition between wallet read and bet deduction (complexity: moderate)
 - **Location:** `cardgames/blackjack.py:315-321`
 - **Problem:** `bet()` reads the wallet with `get_user_wallet`, checks the balance, then calls `update_wallet(-amount)` in two separate DB round-trips. In a single-threaded server this is low risk today, but the NPC auto-bet path in `_tick_betting` can call `bet()` for multiple NPCs in the same tick iteration without any transaction boundary. If the DB ever becomes multi-writer (or a future refactor introduces threading), this is a TOCTOU vulnerability.
 - **Impact:** A player could place a bet that exceeds their actual balance if balance checks are interleaved.

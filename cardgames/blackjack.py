@@ -325,13 +325,7 @@ class Blackjack(CardGame):
         if amount > self.MAX_BET:
             raise InvalidBetError(f"Maximum bet is ${self.MAX_BET}")
 
-        # Check wallet balance
-        wallet = self.casino.db.get_user_wallet(player.name)
-        if wallet is None or wallet < amount:
-            balance = wallet if wallet else 0
-            raise InsufficientFundsError(player, balance, amount)
-
-        # Deduct bet from wallet immediately (escrow)
+        # Atomically deduct bet; returns False if wallet has insufficient funds
         if not self.casino.db.update_wallet(player.name, -amount):
             balance = self.casino.db.get_user_wallet(player.name) or 0
             raise InsufficientFundsError(player, balance, amount)

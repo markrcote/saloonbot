@@ -340,9 +340,6 @@ class Blackjack(CardGame):
         self.output(f"💵 {player} throws ${amount:.2f} on the table. 👛 Coin purse: ${new_balance:.2f}")
 
     def new_hand(self):
-        self.players.extend(self.players_waiting)
-        self.players_waiting = []
-
         if not self.players:
             raise CardGameError("No players")
 

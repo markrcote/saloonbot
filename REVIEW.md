@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, GL-5, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
+**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, GL-4, GL-5, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, CQ-7, CQ-8, TG-1, TG-2
 
-**Open:** PA-4, CQ-7
+**Open:** PA-4
 
 ---
 
@@ -261,7 +261,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Slightly slower command response; unnecessary file I/O on every name request.
 - **Fix:** Create a single module-level `WildWestNames` instance, or cache it as a class variable on `BlackjackCog`.
 
-#### [CQ-7] LOW: `game.new_hand()` is called in both `_tick_betting` (after all bets in) and when transitioning from `WAITING` state's `start_betting` — but `start_betting` calls `self.players.extend(self.players_waiting)` AND `new_hand` also calls `self.players.extend(self.players_waiting)` (complexity: trivial)
+#### [CQ-7] ~~LOW~~ **[FIXED]**: `game.new_hand()` is called in both `_tick_betting` (after all bets in) and when transitioning from `WAITING` state's `start_betting` — but `start_betting` calls `self.players.extend(self.players_waiting)` AND `new_hand` also calls `self.players.extend(self.players_waiting)` (complexity: trivial)
 - **Location:** `cardgames/blackjack.py:272-277` vs `cardgames/blackjack.py:331-332`
 - **Problem:** `start_betting()` merges `players_waiting` into `players` at line 275. Then `new_hand()` at line 331 does it again with `self.players.extend(self.players_waiting)` — but `players_waiting` was already emptied in `start_betting()` (line 276), so the second extend is a no-op. However, the intent in `new_hand` to allow mid-hand joins via `players_waiting` is confused by this structure.
 - **Impact:** No functional bug currently, but confusing and fragile. A future refactor of either method could accidentally double-add players.

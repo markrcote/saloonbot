@@ -145,8 +145,8 @@ class TestBlackjack(unittest.TestCase):
         with self.assertRaises(CardGameError):
             self.game.new_hand()
 
-        self.game.join(Player("Player 1"))
-        self.game.join(Player("Player 2"))
+        self.game.players.append(Player("Player 1"))
+        self.game.players.append(Player("Player 2"))
         self.game.new_hand()
         self.assertEqual(len(self.game.players), 2)
         self.assertEqual(len(self.game.deck), 2)
@@ -156,7 +156,7 @@ class TestBlackjack(unittest.TestCase):
         # Hand 2 pop order (from remaining): dealer gets D2+D3=5, player gets D4+D5=9.
         self.game.deck = [Card("D", 5), Card("D", 4), Card("D", 3), Card("D", 2),
                           Card("H", 3), Card("H", 2), Card("H", 14), Card("H", 10)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 21)
         self.assertEqual(self.game.current_player_idx, None)
@@ -168,7 +168,7 @@ class TestBlackjack(unittest.TestCase):
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
 
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(len(self.game.dealer.hand), 2)
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
@@ -189,7 +189,7 @@ class TestBlackjack(unittest.TestCase):
         # dealer gets 6+5=11 (not 21, so hand proceeds normally)
         # player gets 10+K=20, then hits Ace → 20+1=21 (Ace forced to 1 since 20+11>21)
         player = Player("Player 1")
-        self.game.join(player)
+        self.game.players.append(player)
         self.game.deck = [Card("H", 14), Card("H", 13), Card("H", 10), Card("H", 5), Card("H", 6)]
         self.game.new_hand()
         self.assertEqual(self.game.get_score(player), 20)
@@ -202,7 +202,7 @@ class TestBlackjack(unittest.TestCase):
         self.assertFalse(self.game.is_dealer_turn())
         self.game.deck = [Card("H", 13), Card("H", 3), Card("H", 4),
                           Card("H", 5), Card("H", 6), Card("H", 7)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
         self.game.stand(self.game.players[0])
@@ -219,7 +219,7 @@ class TestBlackjack(unittest.TestCase):
         self.game.tick()  # shouldn"t do anything
         self.game.time_last_hand_ended = None
 
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.game.bets["Player 1"] = self.game.MIN_BET
         self.assertEqual(self.game.get_score(self.game.dealer), 13)
@@ -242,13 +242,13 @@ class TestBlackjackStateMachine(unittest.TestCase):
 
     def test_state_transitions_to_playing_on_new_hand(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.state, HandState.PLAYING)
 
     def test_state_transitions_to_dealer_turn_after_all_players_stand(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.game.stand(self.game.players[0])
         self.assertEqual(self.game.state, HandState.DEALER_TURN)
@@ -257,7 +257,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
         # Need enough cards for dealer to potentially hit multiple times
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.game.stand(self.game.players[0])
         self.game.dealer_turn()
@@ -266,7 +266,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
     def test_state_transitions_to_between_hands_after_resolving(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.game.bets["Player 1"] = self.game.MIN_BET
         self.game.stand(self.game.players[0])
@@ -279,7 +279,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
     def test_state_transitions_to_waiting_after_time_between_hands(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.game.bets["Player 1"] = self.game.MIN_BET
         self.game.stand(self.game.players[0])
@@ -302,7 +302,7 @@ class TestBlackjackStateMachine(unittest.TestCase):
 
     def test_invalid_action_join_during_playing(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
-        self.game.join(Player("Player 1"))
+        self.game.players.append(Player("Player 1"))
         self.game.new_hand()
         self.assertEqual(self.game.state, HandState.PLAYING)
         with self.assertRaises(InvalidActionError):

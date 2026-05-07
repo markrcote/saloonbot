@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, TG-1, GL-4, CQ-8
+**Fixed:** DI-1, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, TG-1, GL-4, CQ-8
 
-**Open:** DI-2, GL-5, SV-3, PA-4, SP-3, CQ-6, CQ-7, TG-2
+**Open:** DI-2, GL-5, PA-4, SP-3, CQ-6, CQ-7, TG-2
 
 ---
 
@@ -134,7 +134,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Denial-of-service via large Redis messages; verbose error logging in the server for every mistyped chat message.
 - **Fix:** Check `len(command) <= 20` before processing.
 
-#### [SV-3] MEDIUM: Player name is taken directly from Discord username without sanitization (complexity: trivial)
+#### [SV-3] ~~MEDIUM~~ **[FIXED]**: Player name is taken directly from Discord username without sanitization (complexity: trivial)
 - **Location:** `bot.py:222`, `bot.py:262`, `bot.py:289`
 - **Problem:** `interaction.user.name` and `message.author.name` are passed as the `player` field in Redis messages. Discord usernames can contain characters that could cause issues in database queries or output rendering. While parameterized queries protect the DB, a username like `"); DROP TABLE users; --` would be stored safely but could cause visual confusion in game output messages which use f-strings directly.
 - **Impact:** Low SQL injection risk (parameterized queries are used), but potential display/log injection via crafted usernames.

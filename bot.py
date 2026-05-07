@@ -16,6 +16,10 @@ from nextcord.ext import commands, tasks
 from wwnames.wwnames import WildWestNames
 
 
+def sanitize_username(name: str) -> str:
+    return name[:32]
+
+
 def read_env(env_var):
     value = os.environ.get(env_var)
     if value:
@@ -235,11 +239,11 @@ class BlackjackCog(commands.Cog):
                 if amount <= 0:
                     await message.channel.send("⚠️ Bet amount must be positive.")
                     return
-                await self.send_command(message.author.name, game, command, amount=amount)
+                await self.send_command(sanitize_username(message.author.name), game, command, amount=amount)
             except ValueError:
                 await message.channel.send("⚠️ Invalid bet amount. Usage: bet <amount>")
         else:
-            await self.send_command(message.author.name, game, command)
+            await self.send_command(sanitize_username(message.author.name), game, command)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(
@@ -286,7 +290,7 @@ class BlackjackCog(commands.Cog):
             if game.state != GameState.ACTIVE:
                 await interaction.send("⚠️ Game is not active.")
             else:
-                await self.send_command(interaction.user.name, game, "join")
+                await self.send_command(sanitize_username(interaction.user.name), game, "join")
                 await interaction.send("🎰 Joining game...")
         else:
             await interaction.send("⚠️ No game currently in progress.")
@@ -298,7 +302,7 @@ class BlackjackCog(commands.Cog):
             await interaction.send("⚠️ No game currently in progress.")
             return
 
-        await self.send_command(interaction.user.name, game, "leave")
+        await self.send_command(sanitize_username(interaction.user.name), game, "leave")
         await interaction.send("👋 Leaving game...")
 
     @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS)
@@ -339,7 +343,7 @@ class BlackjackCog(commands.Cog):
             await interaction.send("⚠️ Game is not active.")
             return
 
-        await self.send_command(interaction.user.name, game, "bet", amount=amount)
+        await self.send_command(sanitize_username(interaction.user.name), game, "bet", amount=amount)
         await interaction.send(f"💵 Placing bet of ${amount}...")
 
     @tasks.loop(seconds=3.0)

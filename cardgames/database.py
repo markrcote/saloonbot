@@ -267,7 +267,7 @@ class Database:
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM games")
+            cursor.execute("SELECT * FROM games WHERE state != 'waiting'")
             results = cursor.fetchall()
             games = []
             for result in results:

@@ -192,7 +192,7 @@ class SqliteDatabase:
     def load_all_active_games(self):
         self._connect()
         try:
-            cursor = self.connection.execute("SELECT * FROM games")
+            cursor = self.connection.execute("SELECT * FROM games WHERE state != 'waiting'")
             return [self._row_to_game(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
             logging.error(f"Error loading active games: {e}")

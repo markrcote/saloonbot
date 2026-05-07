@@ -2,9 +2,9 @@
 
 ## Status (as of 2026-05-03)
 
-**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
+**Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, TG-1, TG-2, GL-4, CQ-8
 
-**Open:** GL-5, PA-4, SP-3, CQ-7
+**Open:** GL-5, PA-4, CQ-7
 
 ---
 
@@ -210,7 +210,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
 - **Impact:** Two concurrent games with a player named "Alice" will share a single `Player` object. Alice's hand in game 1 will be overwritten when she's dealt cards in game 2.
 - **Fix:** Scope the player registry per-game rather than globally, or use game-scoped player instances that don't share the global registry.
 
-#### [SP-3] LOW: `load_all_active_games` loads ALL rows from the `games` table with no state filter (complexity: trivial)
+#### [SP-3] ~~LOW~~ **[FIXED]**: `load_all_active_games` loads ALL rows from the `games` table with no state filter (complexity: trivial)
 - **Location:** `cardgames/database.py:260`, `cardgames/sqlite_database.py:173`
 - **Problem:** `SELECT * FROM games` loads every game including those in `BETWEEN_HANDS` or that were never cleaned up. This is mitigated by the casino's idle-game cleanup logic, but there is no DB-level active game filter.
 - **Impact:** On a long-running system with many completed games that weren't cleaned up (e.g., due to crashes), startup may be slow and may attempt to restore games in terminal states.

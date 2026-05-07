@@ -4,7 +4,7 @@
 
 **Fixed:** DI-1, DI-2, DI-3, DI-4, GL-1, GL-2, GL-3, GL-4, GL-5, SV-1, SV-2, SV-3, SV-4, PA-1, PA-2, PA-3, PA-5, SP-1, SP-2, SP-3, CQ-1, CQ-2, CQ-3, CQ-4, CQ-5, CQ-6, CQ-7, CQ-8, TG-1, TG-2
 
-**Open:** PA-4
+**Open:** (none)
 
 ---
 
@@ -173,7 +173,7 @@ SaloonBot is a reasonably well-structured Discord blackjack bot with a clean pub
           await self.pubsub.subscribe(game.topic())
   ```
 
-#### [PA-4] MEDIUM: `casino.listen()` creates a new `pubsub` object on every reconnect but old subscriptions to game topics via `publish_event` are done on `self.redis` directly — this is fine, but the pubsub loop subscription only covers `"casino"` (complexity: trivial)
+#### [PA-4] ~~MEDIUM~~ **[CLOSED — NO FIX NEEDED]**: `casino.listen()` creates a new `pubsub` object on every reconnect but old subscriptions to game topics via `publish_event` are done on `self.redis` directly — this is fine, but the pubsub loop subscription only covers `"casino"` (complexity: trivial)
 - **Location:** `cardgames/casino.py:291-325`
 - **Problem:** Each reconnect re-subscribes only to `"casino"`. This is correct for the server (it only needs to receive on `"casino"`). No issue here — but worth noting that `_process_message` is the only message handler and it covers all expected message types. The real concern is on the bot side (see above).
 

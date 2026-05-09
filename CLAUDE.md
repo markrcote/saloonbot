@@ -158,6 +158,15 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 
 - After completing each milestone, create a git commit before moving to the next one.
 
+## E2E Testing Best Practices
+
+- **`docker compose up --wait` is self-sufficient.** Never add `time.sleep()` after it — healthchecks are the correct signal that services are ready.
+- **Capture server logs.** Run the server subprocess with `stdout`/`stderr` redirected to a temp file (`subprocess.Popen(..., stdout=log_fh, stderr=subprocess.STDOUT)`). Set `PYTHONUNBUFFERED=1` in the server env so output is not buffered. On test failure, read and print the last 50 lines — this is the primary debugging tool when an E2E test breaks.
+- **Clean all stateful tables in every test's setUp**, not just some. The base setUp must `DELETE FROM game_channels`, `DELETE FROM games`, and `DELETE FROM users` (plus `redis.flushall()`). Individual test classes must not need to add extra cleanup — if they do, the base is incomplete.
+- **Add per-test timeouts.** Use `pytest-timeout` (configured in `pytest.ini` with `timeout = 60`) to prevent hung tests from blocking CI indefinitely.
+- **Use pytest as the test runner.** `pytest` discovers and runs `unittest.TestCase` subclasses natively — no rewrite needed — while adding better output, `pytest-timeout`, and plugin support. The `run-e2e-tests.sh` script must activate the virtualenv and invoke `pytest test_e2e.py`.
+- **Prefer structured event assertions over text substring checks** when the protocol supports it. Checking `data.get('event_type') == 'game_over'` is more robust than `'game over' in text` if the wording ever changes.
+
 ## Key Patterns
 
 - Bot uses asyncio with `@tasks.loop(seconds=3.0)` for polling Redis

@@ -9,5 +9,7 @@ echo ""
 # Change to the directory containing this script
 cd "$(dirname "$0")"
 
+source venv/bin/activate
+
 # Run the tests
-python test_e2e.py "$@"
+pytest test_e2e.py "$@"

@@ -1,4 +1,6 @@
 anthropic>=0.97.0
+pytest>=8.0.0
+pytest-timeout>=2.3.0
 openai>=2.33.0
 aioconsole==0.8.2
 aiohappyeyeballs==2.6.1

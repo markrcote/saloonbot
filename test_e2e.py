@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 import subprocess
+import tempfile
 import time
 import unittest
 
@@ -41,9 +42,6 @@ def setUpModule():
         stderr=subprocess.PIPE,
         timeout=60
     )
-
-    # Give services a moment to fully stabilize
-    time.sleep(2)
 
     logging.info("Docker-compose services ready")
 
@@ -121,13 +119,17 @@ class EndToEndTestCase(unittest.TestCase):
             'BLACKJACK_TIME_WAIT_FOR_PLAYERS': '0',
             'BLACKJACK_REMINDER_PERIOD': '1',
             'LLM_TIMEOUT': '1',
+            'PYTHONUNBUFFERED': '1',
         })
+
+        fd, cls._server_log_path = tempfile.mkstemp(suffix='.log', prefix='saloonbot_server_')
+        cls._server_log_fh = os.fdopen(fd, 'w')
 
         cls.server_process = subprocess.Popen(
             ['python', 'server.py'],
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stdout=cls._server_log_fh,
+            stderr=subprocess.STDOUT,
         )
 
         cls._wait_for_server_ready()
@@ -145,6 +147,15 @@ class EndToEndTestCase(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.server_process.kill()
                 cls.server_process.wait()
+        if hasattr(cls, '_server_log_fh') and cls._server_log_fh:
+            cls._server_log_fh.close()
+            cls._server_log_fh = None
+        if hasattr(cls, '_server_log_path') and cls._server_log_path:
+            try:
+                os.unlink(cls._server_log_path)
+            except OSError:
+                pass
+            cls._server_log_path = None
 
     @classmethod
     def _wait_for_server_ready(cls, timeout=15):
@@ -181,14 +192,33 @@ class EndToEndTestCase(unittest.TestCase):
 
     def setUp(self):
         """Set up for each test."""
-        # Clean up Redis before each test
         self.redis.flushall()
 
-        # Clean up MySQL before each test using class-level connection
         cursor = self.db.cursor()
+        cursor.execute("DELETE FROM game_channels")
+        cursor.execute("DELETE FROM games")
         cursor.execute("DELETE FROM users")
         self.db.commit()
         cursor.close()
+
+    def tearDown(self):
+        """Dump server log on test failure."""
+        outcome = getattr(self, '_outcome', None)
+        if outcome is not None and not outcome.success:
+            self._dump_server_log()
+
+    def _dump_server_log(self):
+        log_path = getattr(self.__class__, '_server_log_path', None)
+        if not log_path:
+            return
+        try:
+            with open(log_path) as f:
+                lines = f.readlines()
+            print(f"\n--- Server log ({self.__class__.__name__}) ---")
+            print(''.join(lines[-50:]))
+            print("--- End server log ---\n")
+        except Exception:
+            pass
 
     def subscribe_to_game(self, game_id):
         """Create pubsub subscription to a game's updates."""
@@ -421,16 +451,6 @@ class TestBlackjackGame(EndToEndTestCase):
 
 class TestServerRestart(EndToEndTestCase):
     """Test game persistence across server restarts."""
-
-    def setUp(self):
-        """Set up for each test - clean database tables including games."""
-        super().setUp()
-        # Also clean up games and game_channels tables
-        cursor = self.db.cursor()
-        cursor.execute("DELETE FROM game_channels")
-        cursor.execute("DELETE FROM games")
-        self.db.commit()
-        cursor.close()
 
     def test_game_persists_across_server_restart(self):
         """Test that a game with a bet survives server restart."""

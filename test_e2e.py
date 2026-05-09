@@ -198,15 +198,19 @@ class EndToEndTestCase(unittest.TestCase):
         return pubsub
 
     def collect_messages(self, pubsub, timeout=5, stop_on=None):
-        """Collect messages until timeout or stop condition met."""
+        """Collect messages until timeout or stop condition met.
+
+        stop_on may be a string or a list of strings; collection stops when any matches.
+        """
         messages = []
         start = time.time()
+        stop_conditions = [stop_on] if isinstance(stop_on, str) else (stop_on or [])
         while time.time() - start < timeout:
             msg = pubsub.get_message(timeout=0.5)
             if msg and msg['type'] == 'message':
                 text = json.loads(msg['data'])['text']
                 messages.append(text)
-                if stop_on and stop_on in text:
+                if any(cond in text for cond in stop_conditions):
                     break
         return messages
 
@@ -754,7 +758,12 @@ class TestMultiplePlayers(EndToEndTestCase):
             self.place_bet(game_id, 'Alpha', 10)
             self.place_bet(game_id, 'Beta', 10)
 
-            first_turn = self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+            first_turn = self.collect_messages(
+                pubsub, timeout=5, stop_on=["you're up", 'dust settles']
+            )
+            # Dealer blackjack resolves the hand immediately with no player turns — valid outcome.
+            if any('dust settles' in m for m in first_turn):
+                return
             self.assertTrue(
                 any("Alpha, you're up" in m for m in first_turn),
                 f"Alpha should be prompted first. Messages: {first_turn}"

@@ -81,6 +81,7 @@ def create_llm_client() -> LLMClient:
         return ClaudeClient()
     elif has_openai and not has_anthropic:
         return OpenAIClient()
-    else:
-        # Both set or neither set — default to Claude
+    elif has_anthropic and has_openai:
         return ClaudeClient()
+    else:
+        raise LLMError("No LLM API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")

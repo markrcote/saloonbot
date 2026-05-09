@@ -458,15 +458,21 @@ class TestServerRestart(EndToEndTestCase):
 
         pubsub = self.subscribe_to_game(game_id)
         try:
-            # Join and place bet
+            # Join and place bet; retry through dealer blackjacks until we reach PLAYING state
             self.join_player(game_id, 'PersistPlayer')
             self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
-            self.place_bet(game_id, 'PersistPlayer', 20)
 
-            # Wait for hand to start and player turn
-            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+            for _ in range(5):
+                self.place_bet(game_id, 'PersistPlayer', 20)
+                msgs = self.collect_messages(pubsub, timeout=10, stop_on=["you're up", "dust settles"])
+                if any("you're up" in m for m in msgs):
+                    break
+                # Dealer blackjack — hand resolved before player's turn; wait for next round
+                self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+            else:
+                self.fail("Never reached PLAYING state after 5 hands (dealer kept getting blackjack?)")
 
-            # Verify game is in database (poll until state is 'playing')
+            # Verify game is in database with state 'playing'
             result = self.poll_db(
                 "SELECT game_id, state FROM games WHERE game_id = %s",
                 (game_id,),

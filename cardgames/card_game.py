@@ -60,11 +60,14 @@ class Card:
 
 
 class CardGame:
-    def __init__(self):
+    def __init__(self, initial_deck=None):
         self.deck = []
         self.discards = []
         self.players = []
-        self.create_deck()
+        if initial_deck is not None:
+            self.deck = list(initial_deck)
+        else:
+            self.create_deck()
 
     def create_deck(self):
         # Initialize self.deck to a random deck of cards

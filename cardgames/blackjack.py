@@ -180,12 +180,13 @@ class Blackjack(CardGame):
         HandState.BETWEEN_HANDS: {Action.JOIN, Action.LEAVE},
     }
 
-    def __init__(self, game_id, casino):
+    def __init__(self, game_id, casino, initial_deck=None):
         """ Initialize a new Blackjack game.
         :param game_id: Unique identifier for the game.
         :param casino: The casino managing this game (required).
+        :param initial_deck: Optional pre-ordered list of Card objects; skips shuffle.
         """
-        super().__init__()
+        super().__init__(initial_deck=initial_deck)
         self.game_id = game_id
         self.casino = casino
         self.dealer = Dealer()

@@ -272,7 +272,21 @@ class EndToEndTestCase(unittest.TestCase):
             'amount': amount
         }))
 
-    def create_game(self, num_bots=0):
+    # A deck where dealer gets 16 (no blackjack) and player gets 15.
+    # Cards are dealt via pop(), so the last element is dealt first.
+    # Deal order: dealer face-up H6, dealer hole S10 (total 16),
+    #             player C7, player D8 (total 15).
+    # Dealer must hit; draws D2 for total 18, stands.
+    DETERMINISTIC_DECK = [
+        'H2', 'H3', 'H4', 'H5', 'H7', 'H8', 'H9',  # filler (never reached in one hand)
+        'D2',   # dealer hit card → dealer total 18
+        'D8',   # player card 2
+        'C7',   # player card 1
+        'S10',  # dealer hole card
+        'H6',   # dealer face-up (last in list = first popped)
+    ]
+
+    def create_game(self, num_bots=0, deck=None):
         """Helper method to create a game and return the game_id."""
         pubsub = self.redis.pubsub()
         try:
@@ -287,6 +301,8 @@ class EndToEndTestCase(unittest.TestCase):
             }
             if num_bots:
                 message['num_bots'] = num_bots
+            if deck is not None:
+                message['deck'] = deck
             self.redis.publish("casino", json.dumps(message))
 
             # Wait for game creation response
@@ -454,117 +470,99 @@ class TestServerRestart(EndToEndTestCase):
 
     def test_game_persists_across_server_restart(self):
         """Test that a game with a bet survives server restart."""
-        game_id = self.create_game()
+        game_id = self.create_game(deck=self.DETERMINISTIC_DECK)
 
-        pubsub = self.subscribe_to_game(game_id)
-        try:
-            # Join and place bet; retry through dealer blackjacks until we reach PLAYING state
-            self.join_player(game_id, 'PersistPlayer')
-            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+        self.join_player(game_id, 'PersistPlayer')
 
-            for _ in range(5):
-                self.place_bet(game_id, 'PersistPlayer', 20)
-                msgs = self.collect_messages(pubsub, timeout=10, stop_on=["you're up", "dust settles"])
-                if any("you're up" in m for m in msgs):
-                    break
-                # Dealer blackjack — hand resolved before player's turn; wait for next round
-                self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
-            else:
-                self.fail("Never reached PLAYING state after 5 hands (dealer kept getting blackjack?)")
+        # Wait for BETTING state
+        self.assertIsNotNone(
+            self.poll_db("SELECT state FROM games WHERE game_id = %s", (game_id,),
+                         predicate=lambda row: row[0] == 'betting', timeout=5),
+            "Game should reach betting state"
+        )
+        self.place_bet(game_id, 'PersistPlayer', 20)
 
-            # Verify game is in database with state 'playing'
-            result = self.poll_db(
-                "SELECT game_id, state FROM games WHERE game_id = %s",
-                (game_id,),
-                predicate=lambda row: row[1] == 'playing'
-            )
-            self.assertIsNotNone(result, "Game should be saved in database")
-            self.assertEqual(result[0], game_id)
-            self.assertEqual(result[1], 'playing')
+        # With a deterministic deck the dealer cannot get blackjack; expect PLAYING directly
+        result = self.poll_db(
+            "SELECT game_id, state FROM games WHERE game_id = %s",
+            (game_id,),
+            predicate=lambda row: row[1] == 'playing',
+            timeout=5
+        )
+        self.assertIsNotNone(result, "Game should reach playing state")
+        self.assertEqual(result[0], game_id)
+        self.assertEqual(result[1], 'playing')
 
-            # Verify bet is saved
-            result = self.poll_db(
-                "SELECT bets_json FROM games WHERE game_id = %s",
-                (game_id,),
-                predicate=lambda row: json.loads(row[0]).get('PersistPlayer') == 20
-            )
-            self.assertIsNotNone(result, "Bet should be saved in database")
-            bets = json.loads(result[0])
-            self.assertIn('PersistPlayer', bets)
-            self.assertEqual(bets['PersistPlayer'], 20)
-
-        finally:
-            pubsub.close()
+        # Verify the active bet is persisted
+        bet_result = self.poll_db(
+            "SELECT bets_json FROM games WHERE game_id = %s",
+            (game_id,),
+            predicate=lambda row: json.loads(row[0]).get('PersistPlayer') == 20
+        )
+        self.assertIsNotNone(bet_result, "Bet should be saved in database")
+        bets = json.loads(bet_result[0])
+        self.assertIn('PersistPlayer', bets)
+        self.assertEqual(bets['PersistPlayer'], 20)
 
         # Restart server
         self._stop_server()
         self._start_server()
 
-        # Reconnect pubsub after restart
+        # Subscribe before sending action so we don't miss any published messages
         pubsub = self.subscribe_to_game(game_id)
         try:
-            # Send a player action to verify game is restored
             self.player_action(game_id, 'PersistPlayer', 'stand')
-
-            # Collect messages - should get stand acknowledgment and dealer turn
-            messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
-
-            # Verify game continued after restart
-            stand_msg = any('stands pat' in m for m in messages)
-            self.assertTrue(stand_msg, f"Game should continue after restart. Got: {messages}")
-
-            # Verify hand resolved
-            resolved = any('dust settles' in m for m in messages)
-            self.assertTrue(resolved, "Hand should resolve after player stands")
+            messages = self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+            self.assertTrue(any('stands pat' in m for m in messages),
+                            f"Game should continue after restart. Got: {messages}")
+            self.assertTrue(any('dust settles' in m for m in messages),
+                            "Hand should resolve after player stands")
         finally:
             pubsub.close()
 
     def test_bet_preserved_after_restart(self):
         """Test that player bets are preserved after server restart."""
-        game_id = self.create_game()
+        game_id = self.create_game(deck=self.DETERMINISTIC_DECK)
 
-        pubsub = self.subscribe_to_game(game_id)
-        try:
-            # Join and place bet
-            self.join_player(game_id, 'BetPlayer')
-            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
-            self.place_bet(game_id, 'BetPlayer', 25)
+        self.join_player(game_id, 'BetPlayer')
 
-            # Wait for hand to start
-            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
+        # Wait for BETTING state, place bet, then wait for PLAYING
+        self.assertIsNotNone(
+            self.poll_db("SELECT state FROM games WHERE game_id = %s", (game_id,),
+                         predicate=lambda row: row[0] == 'betting', timeout=5),
+            "Game should reach betting state"
+        )
+        self.place_bet(game_id, 'BetPlayer', 25)
 
-            # Check wallet was decremented
-            after_bet = self.poll_db(
-                "SELECT wallet FROM users WHERE username = 'BetPlayer'",
-                ()
-            )
-            self.assertIsNotNone(after_bet)
-            # Default wallet is 200, so after betting 25 should be 175
-            self.assertEqual(float(after_bet[0]), 175.0)
+        # Deterministic deck: dealer can't get blackjack, game must reach PLAYING
+        self.assertIsNotNone(
+            self.poll_db("SELECT state FROM games WHERE game_id = %s", (game_id,),
+                         predicate=lambda row: row[0] == 'playing', timeout=5),
+            "Game should reach playing state"
+        )
 
-            # Poll until the bet appears in the games table (or timeout after 5s).
-            before_restart = self.poll_db(
-                "SELECT bets_json, state FROM games WHERE game_id = %s",
-                (game_id,),
-                predicate=lambda row: json.loads(row[0]).get('BetPlayer') == 25
-            )
-            self.assertIsNotNone(
-                before_restart,
-                "Bet should be saved in database before restart"
-            )
-            self.assertEqual(
-                json.loads(before_restart[0]).get('BetPlayer'), 25,
-                "Bet should be saved before restart"
-            )
+        # Wallet should be decremented by the bet amount
+        after_bet = self.poll_db(
+            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            (),
+            predicate=lambda row: float(row[0]) == 175.0
+        )
+        self.assertIsNotNone(after_bet, "Wallet should be decremented to 175 after $25 bet")
 
-        finally:
-            pubsub.close()
+        # Bet must be persisted while the hand is live (game is in PLAYING state)
+        before_restart = self.poll_db(
+            "SELECT bets_json FROM games WHERE game_id = %s",
+            (game_id,),
+            predicate=lambda row: json.loads(row[0]).get('BetPlayer') == 25
+        )
+        self.assertIsNotNone(before_restart, "Bet should be saved in database before restart")
+        self.assertEqual(json.loads(before_restart[0]).get('BetPlayer'), 25)
 
         # Restart server
         self._stop_server()
         self._start_server()
 
-        # Verify bet is still in database
+        # Verify bet survives restart
         result = self.poll_db(
             "SELECT bets_json FROM games WHERE game_id = %s",
             (game_id,)
@@ -572,6 +570,14 @@ class TestServerRestart(EndToEndTestCase):
         self.assertIsNotNone(result, "Game should still exist after restart")
         bets = json.loads(result[0])
         self.assertEqual(bets.get('BetPlayer'), 25, "Bet should be preserved")
+
+        # Wallet must not be double-decremented
+        after_restart = self.poll_db(
+            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            ()
+        )
+        self.assertEqual(float(after_restart[0]), 175.0,
+                         "Wallet should not be decremented again on restart")
 
         # Verify wallet wasn't double-decremented
         after_restart = self.poll_db(

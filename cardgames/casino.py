@@ -5,7 +5,7 @@ import uuid
 
 import redis
 
-from .blackjack import Blackjack, HandState
+from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
 from .llm_client import create_llm_client
 from .llm_npc import LLMBlackjackNPC
@@ -78,12 +78,12 @@ class Casino:
         except Exception as e:
             logging.error(f"Error deleting game {game_id}: {e}")
 
-    def new_game(self, guild_id=None, channel_id=None, num_bots=0):
+    def new_game(self, guild_id=None, channel_id=None, num_bots=0, initial_deck=None):
         while True:
             game_id = str(uuid.uuid4())
             if game_id not in self.games.keys():
                 break
-        self.games[game_id] = Blackjack(game_id, self)
+        self.games[game_id] = Blackjack(game_id, self, initial_deck=initial_deck)
 
         if num_bots > 0:
             self._pending_bots[game_id] = num_bots
@@ -247,7 +247,10 @@ class Casino:
                         guild_id = data.get('guild_id')
                         channel_id = data.get('channel_id')
                         num_bots = int(data.get('num_bots', 0))
-                        game_id = self.new_game(guild_id, channel_id, num_bots=num_bots)
+                        deck_data = data.get('deck')
+                        initial_deck = deserialize_hand(deck_data) if deck_data else None
+                        game_id = self.new_game(guild_id, channel_id, num_bots=num_bots,
+                                                initial_deck=initial_deck)
                         self.publish_event(
                             'casino_update',
                             {

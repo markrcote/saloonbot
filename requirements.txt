@@ -25,6 +25,6 @@ redis==7.4.0
 requests==2.33.1
 setuptools==82.0.1
 typing_extensions==4.15.0
-urllib3==2.6.3
+urllib3==2.7.0
 wheel==0.47.0
 yarl==1.23.0

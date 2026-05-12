@@ -282,7 +282,11 @@ class Blackjack(CardGame):
             if leaving_idx < self.current_player_idx:
                 self.current_player_idx -= 1
             if self.current_player_idx >= len(self.players):
-                self.state = HandState.DEALER_TURN
+                if not self.players:
+                    self.output("🌵 Table's empty. Everyone's skedaddled.")
+                    self.state = HandState.WAITING
+                else:
+                    self.state = HandState.DEALER_TURN
                 self.current_player_idx = None
 
     def start_betting(self):

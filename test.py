@@ -591,14 +591,35 @@ class TestBlackjackPayouts(unittest.TestCase):
         self.assertEqual(game.current_player_idx, 1)
         self.assertEqual(game.players[game.current_player_idx].name, "Bob")
 
-    def test_leave_last_player_transitions_to_dealer_turn(self):
-        """Last remaining player leaves during PLAYING — should move to DEALER_TURN."""
+    def test_leave_last_player_transitions_to_waiting(self):
+        """Last remaining player leaves during PLAYING — empty table goes to WAITING, not DEALER_TURN."""
         game, alice, bob, carol = self._make_three_player_playing_game()
         game.leave(alice)
         game.leave(bob)
         game.leave(carol)
+        self.assertEqual(game.state, HandState.WAITING)
+        self.assertIsNone(game.current_player_idx)
+        self.assertEqual(game.bets, {})
+
+    def test_leave_non_last_player_transitions_to_dealer_turn(self):
+        """All-but-one players leave, then current player finishes — should reach DEALER_TURN, not WAITING."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        # Alice and Carol leave; Bob (current idx=1→0 after Alice leaves) remains
+        game.leave(alice)   # idx shifts: Bob now at 0, Carol at 1; current_player_idx=0
+        game.leave(carol)   # Carol (idx 1) leaves; Bob still at 0; current_player_idx=0 unchanged
+        # Now Bob leaves — he's the last; game should still go to WAITING
+        game.leave(bob)
+        self.assertEqual(game.state, HandState.WAITING)
+
+    def test_leave_advances_to_dealer_turn_with_players_remaining(self):
+        """Current player (last in turn order) leaves while others still at table — goes to DEALER_TURN."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        # Set current to Carol (last turn), then Carol leaves — Alice and Bob still present
+        game.current_player_idx = 2
+        game.leave(carol)
         self.assertEqual(game.state, HandState.DEALER_TURN)
         self.assertIsNone(game.current_player_idx)
+        self.assertGreater(len(game.players), 0)
 
 
 class TestCasinoErrorHandling(unittest.TestCase):

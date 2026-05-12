@@ -178,3 +178,22 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
+
+## Testing
+- ALWAYS activate the virtualenv before running tests or scripts (e.g., `source .venv/bin/activate`)
+- ALWAYS run tests (unit + e2e where relevant) after code changes, before committing
+- After fixing a bug, run the full test suite to catch regressions in adjacent modules
+
+## Documentation Updates
+When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, and any plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.
+
+## Commits
+- Make small, focused commits — one logical change per commit
+- Run tests before every commit; do not commit failing code
+
+## Bug Triage Workflow
+When working from REVIEW.md / tech debt lists: (1) check if the issue is already fixed before making changes, (2) fix one issue per commit unless explicitly told otherwise, (3) update REVIEW.md status after each fix.
+
+When exploring the codebase, after every 5 file reads or searches, pause and summarize what you've learned and what you'll do next. When running commands that take >30s (e2e tests, builds), explicitly say 'starting X, this may take a minute' before and 'X complete, here's what I found' after.
+
+Before starting work, restate the exact scope back to me as a numbered list. Do not add adjacent improvements unless I explicitly approve. If you spot something extra worth doing, note it at the end as a 'follow-ups' suggestion.

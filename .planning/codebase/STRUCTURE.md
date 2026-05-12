@@ -157,9 +157,9 @@ saloonbot/
 
 ## Special Directories
 
-**`venv/`:**
+**`.venv/`:**
 - Purpose: Python virtual environment
-- Generated: Yes (via `python -m venv venv`)
+- Generated: Yes (via `python -m venv .venv`)
 - Committed: No (in `.gitignore`)
 
 **`cardgames/__pycache__/` and `wwnames/__pycache__/`:**

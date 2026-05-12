@@ -10,11 +10,11 @@ Covers the main flows end-to-end. Aim: **under 5 minutes** total.
 
 # Terminal B – server
 export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1 ANTHROPIC_API_KEY=<your-key>
-source venv/bin/activate && python server.py
+source .venv/bin/activate && python server.py
 
 # Terminal C – CLI
 export REDIS_HOST=localhost REDIS_PORT=6379
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 ---
@@ -74,7 +74,7 @@ Stop server, then:
 
 ```bash
 export LLM_TIMEOUT=0.001
-source venv/bin/activate && python server.py
+source .venv/bin/activate && python server.py
 ```
 
 ```

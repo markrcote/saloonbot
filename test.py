@@ -500,7 +500,7 @@ class TestBlackjackPayouts(unittest.TestCase):
                         if call[0][1] > 0]  # Positive amount = payout
         self.assertEqual(len(payout_calls), 0)
 
-    def test_leave_forfeits_bet(self):
+    def test_leave_during_betting_returns_bet(self):
         mock_db = MagicMock()
         mock_db.get_user_wallet.return_value = 200.0
         mock_db.update_wallet.return_value = True
@@ -516,7 +516,30 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.bet(player, 20)
         game.leave(player)
 
-        # Should not have any refund calls (bet forfeited)
+        # Bet should be returned — cards haven't been dealt yet
+        refund_calls = [call for call in mock_db.update_wallet.call_args_list
+                        if call[0][1] > 0]  # Positive amount = refund
+        self.assertEqual(len(refund_calls), 1)
+        self.assertEqual(refund_calls[0][0][1], 20)
+
+    def test_leave_during_playing_forfeits_bet(self):
+        mock_db = MagicMock()
+        mock_db.get_user_wallet.return_value = 200.0
+        mock_db.update_wallet.return_value = True
+        mock_casino = MagicMock()
+        mock_casino.db = mock_db
+        mock_casino.game_output = MagicMock()
+
+        game = Blackjack(game_id="test", casino=mock_casino)
+        game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6)]
+        game.join(Player("Player 1"))
+        game.tick()  # WAITING -> BETTING
+        player = game.players[0]
+        game.bet(player, 20)
+        game.tick()  # BETTING -> PLAYING (new_hand)
+        game.leave(player)
+
+        # Bet forfeited — player left mid-hand on their own turn
         refund_calls = [call for call in mock_db.update_wallet.call_args_list
                         if call[0][1] > 0]  # Positive amount = refund
         self.assertEqual(len(refund_calls), 0)

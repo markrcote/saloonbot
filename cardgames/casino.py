@@ -299,10 +299,12 @@ class Casino:
     def _tick_games(self):
         for game_id, game in list(self.games.items()):
             state_before = game.state
+            idx_before = game.current_player_idx
             game.tick()
             state_after = game.state
+            idx_after = game.current_player_idx
 
-            if state_before != state_after:
+            if state_before != state_after or idx_before != idx_after:
                 self._save_game(game_id)
 
             # Remove idle empty games

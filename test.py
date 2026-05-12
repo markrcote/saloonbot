@@ -1102,6 +1102,50 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.assertIn('simple', NPC_TYPES)
         self.assertEqual(NPC_TYPES['simple'], SimpleBlackjackNPC)
 
+    def test_tick_games_saves_after_npc_advances_current_player_idx(self):
+        """Game must be saved when NPC turn advances current_player_idx without changing state.
+
+        Regression test for the NPC save gap: when server restarts mid-PLAYING in a mixed
+        human+NPC game, current_player_idx was not persisted after NPC turns because
+        _tick_games() only saved on state changes, not on player-index changes.
+        """
+        # Deck (pop from end): dealer=[10,7], human1=[10,5], npc=[9,8], human2=[6,4]
+        # npc score=17, dealer shows 10 -> SimpleBlackjackNPC stands immediately
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+        game.deck = [
+            Card("H", 4), Card("H", 6),   # human2 cards
+            Card("H", 8), Card("H", 9),   # npc cards
+            Card("H", 5), Card("H", 10),  # human1 cards
+            Card("H", 7), Card("H", 10),  # dealer cards
+        ]
+
+        human1 = Player("Human1")
+        npc = SimpleBlackjackNPC("BotPlayer")
+        human2 = Player("Human2")
+        game.join(human1)
+        game.join(npc)
+        game.join(human2)
+
+        game.tick()                           # WAITING -> BETTING
+        game.bet(human1, game.MIN_BET)
+        game.bet(human2, game.MIN_BET)
+        game.tick()                           # BETTING: NPC auto-bets -> PLAYING
+
+        self.assertEqual(game.state, HandState.PLAYING)
+        self.assertEqual(game.players[game.current_player_idx], human1)
+
+        game.stand(human1)                    # human1 done; now NPC's turn (idx=1)
+        self.assertEqual(game.current_player_idx, 1)
+        self.assertEqual(game.state, HandState.PLAYING)
+
+        self.mock_db.save_game.reset_mock()
+        self.casino._tick_games()             # NPC stands; idx advances to 2 (human2), still PLAYING
+
+        self.assertEqual(game.state, HandState.PLAYING)
+        self.assertEqual(game.current_player_idx, 2)
+        self.mock_db.save_game.assert_called_once_with(game_id, game.to_dict())
+
 
 class TestLLMBlackjackNPC(unittest.TestCase):
     def _make_npc(self, llm_response):

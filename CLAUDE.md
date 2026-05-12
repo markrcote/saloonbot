@@ -154,18 +154,12 @@ For `DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`
 
 This means Docker secrets work automatically when mounted at `/run/secrets/` without any `_FILE` env var needed.
 
-## Development Workflow
-
-- After completing each milestone, create a git commit before moving to the next one.
-
 ## E2E Testing Best Practices
 
 - **`docker compose up --wait` is self-sufficient.** Never add `time.sleep()` after it — healthchecks are the correct signal that services are ready.
-- **Capture server logs.** Run the server subprocess with `stdout`/`stderr` redirected to a temp file (`subprocess.Popen(..., stdout=log_fh, stderr=subprocess.STDOUT)`). Set `PYTHONUNBUFFERED=1` in the server env so output is not buffered. On test failure, read and print the last 50 lines — this is the primary debugging tool when an E2E test breaks.
-- **Clean all stateful tables in every test's setUp**, not just some. The base setUp must `DELETE FROM game_channels`, `DELETE FROM games`, and `DELETE FROM users` (plus `redis.flushall()`). Individual test classes must not need to add extra cleanup — if they do, the base is incomplete.
-- **Add per-test timeouts.** Use `pytest-timeout` (configured in `pytest.ini` with `timeout = 60`) to prevent hung tests from blocking CI indefinitely.
-- **Use pytest as the test runner.** `pytest` discovers and runs `unittest.TestCase` subclasses natively — no rewrite needed — while adding better output, `pytest-timeout`, and plugin support. The `run-e2e-tests.sh` script must activate the virtualenv and invoke `pytest test_e2e.py`.
-- **Prefer structured event assertions over text substring checks** when the protocol supports it. Checking `data.get('event_type') == 'game_over'` is more robust than `'game over' in text` if the wording ever changes.
+- **Capture server logs.** Redirect server subprocess output to a temp file; print the last 50 lines on failure — this is the primary debugging tool when an E2E test breaks.
+- **Clean all stateful tables in every test's setUp**: `DELETE FROM game_channels`, `DELETE FROM games`, `DELETE FROM users`, plus `redis.flushall()`.
+- **Prefer structured event assertions** (`data.get('event_type') == 'game_over'`) over text substring checks — more robust if wording changes.
 
 ## Key Patterns
 
@@ -194,6 +188,6 @@ When implementing a feature or fix, update ALL relevant docs in the same change:
 ## Bug Triage Workflow
 When working from REVIEW.md / tech debt lists: (1) check if the issue is already fixed before making changes, (2) fix one issue per commit unless explicitly told otherwise, (3) update REVIEW.md status after each fix.
 
-When exploring the codebase, after every 5 file reads or searches, pause and summarize what you've learned and what you'll do next. When running commands that take >30s (e2e tests, builds), explicitly say 'starting X, this may take a minute' before and 'X complete, here's what I found' after.
-
 Before starting work, restate the exact scope back to me as a numbered list. Do not add adjacent improvements unless I explicitly approve. If you spot something extra worth doing, note it at the end as a 'follow-ups' suggestion.
+
+After 3–5 tool calls of pure exploration, stop and summarize findings before continuing. Before and after any command that takes >30s, print a status line.

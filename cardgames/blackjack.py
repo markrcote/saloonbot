@@ -207,6 +207,9 @@ class Blackjack(CardGame):
         self.time_betting_started = None
         self.time_first_player_joined = None
 
+        # Players who left mid-hand after acting; resolved at end_hand()
+        self.departed_players = []
+
     def output(self, output):
         self.casino.game_output(self.game_id, output)
 
@@ -259,19 +262,24 @@ class Blackjack(CardGame):
 
         leaving_idx = self.players.index(player)
 
-        # If player had a bet, forfeit it unless cards haven't been dealt yet,
-        # the hand outcome is already decided, or the player has already completed their turn
         if player.name in self.bets:
             bet_amount = self.bets[player.name]
             already_played = (self.state == HandState.PLAYING and
                               self.current_player_idx is not None and
                               leaving_idx < self.current_player_idx)
-            if self.state in (HandState.BETTING, HandState.DEALER_TURN, HandState.RESOLVING) or already_played:
+            if self.state == HandState.BETTING:
+                # Cards not yet dealt; bet is unlocked and returned
                 self.casino.db.update_wallet(player.name, bet_amount)
-                self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} bet is returned.")
+                del self.bets[player.name]
+                self.output(f"💨 {player} hightails it before the deal! Their ${bet_amount:.2f} bet is returned.")
+            elif already_played or self.state in (HandState.DEALER_TURN, HandState.RESOLVING):
+                # Already acted or waiting on dealer: hand resolves at end_hand()
+                self.departed_players.append(player)
+                self.output(f"💨 {player} hightails it outta here! Their hand will be settled when the dust clears.")
             else:
+                # Haven't played yet (or it's their turn now): bet forfeited
+                del self.bets[player.name]
                 self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} stays with the house.")
-            del self.bets[player.name]
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
@@ -282,7 +290,7 @@ class Blackjack(CardGame):
             if leaving_idx < self.current_player_idx:
                 self.current_player_idx -= 1
             if self.current_player_idx >= len(self.players):
-                if not self.players:
+                if not self.players and not self.departed_players:
                     self.output("🌵 Table's empty. Everyone's skedaddled.")
                     self.state = HandState.WAITING
                 else:
@@ -381,41 +389,39 @@ class Blackjack(CardGame):
 
         self.output(f"👉 {self.players[0]}, you're up, partner. Hit or stand?")
 
+    def _resolve_player(self, player, departed=False):
+        """Resolve a single player's hand against the dealer and update their wallet."""
+        tag = "(already left) " if departed else ""
+        bet_amount = self.bets.get(player.name)
+        if bet_amount is None:
+            logging.error(f"Player {player.name} has no bet at resolution time")
+            bet_amount = 0
+
+        if self.get_score(player) > 21:
+            self._output_player_result(player, f"💥 {tag}went bust! ${bet_amount:.2f} lost to the house.")
+        else:
+            self.output(f"{player}'s holding {self.get_score(player)}.")
+            if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
+                winnings = bet_amount * 2
+                self.casino.db.update_wallet(player.name, winnings)
+                self._output_player_result(player, f"🏆 {tag}strikes gold! Payout: ${winnings:.2f}")
+            elif self.get_score(player) == self.get_score(self.dealer):
+                self.casino.db.update_wallet(player.name, bet_amount)
+                self._output_player_result(player, f"🤝 {tag}pushes with the dealer. ${bet_amount:.2f} returned.")
+            else:
+                self._output_player_result(player, f"❌ {tag}loses to the house. ${bet_amount:.2f} gone.")
+
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""
-        wins = []
-        ties = []
-        losses = []
         self.output("✨ ~*~ The dust settles... ~*~ ✨")
         self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
         for player in self.players:
-            bet_amount = self.bets.get(player.name)
-            if bet_amount is None:
-                logging.error(f"Player {player.name} has no bet at resolution time")
-                bet_amount = 0
+            self._resolve_player(player)
+        for player in self.departed_players:
+            self._resolve_player(player, departed=True)
 
-            if self.get_score(player) > 21:
-                losses.append(player)
-                # Bet already deducted, nothing to do
-                self._output_player_result(player, f"💥 went bust! ${bet_amount:.2f} lost to the house.")
-            else:
-                self.output(f"{player}'s holding {self.get_score(player)}.")
-                if self.get_score(self.dealer) > 21 or \
-                   self.get_score(player) > self.get_score(self.dealer):
-                    winnings = bet_amount * 2  # Return bet + win equal amount
-                    wins.append(player)
-                    self.casino.db.update_wallet(player.name, winnings)
-                    self._output_player_result(player, f"🏆 strikes gold! Payout: ${winnings:.2f}")
-                elif self.get_score(player) == self.get_score(self.dealer):
-                    ties.append(player)
-                    self.casino.db.update_wallet(player.name, bet_amount)
-                    self._output_player_result(player, f"🤝 pushes with the dealer. ${bet_amount:.2f} returned.")
-                else:
-                    losses.append(player)
-                    # Bet already deducted, nothing to do
-                    self._output_player_result(player, f"❌ loses to the house. ${bet_amount:.2f} gone.")
-
-        self.bets = {}  # Clear bets for next hand
+        self.bets = {}
+        self.departed_players = []
         self.current_player_idx = None
         self.state = HandState.BETWEEN_HANDS
         self.time_last_hand_ended = time.time()
@@ -672,6 +678,7 @@ class Blackjack(CardGame):
             'dealer_hand': serialize_hand(self.dealer.hand),
             'players': [serialize_player(p) for p in self.players],
             'players_waiting': [serialize_player(p) for p in self.players_waiting],
+            'departed_players': [serialize_player(p) for p in self.departed_players],
             'bets': self.bets.copy(),
         }
 
@@ -707,6 +714,7 @@ class Blackjack(CardGame):
         # Restore players
         game.players = [deserialize_player(p, casino) for p in data['players']]
         game.players_waiting = [deserialize_player(p, casino) for p in data['players_waiting']]
+        game.departed_players = [deserialize_player(p, casino) for p in data.get('departed_players', [])]
 
         # Restore bets
         game.bets = data['bets'].copy()

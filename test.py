@@ -592,24 +592,32 @@ class TestBlackjackPayouts(unittest.TestCase):
         self.assertEqual(game.players[game.current_player_idx].name, "Bob")
 
     def test_leave_last_player_transitions_to_waiting(self):
-        """Last remaining player leaves during PLAYING — empty table goes to WAITING, not DEALER_TURN."""
+        """All players forfeit before acting — empty table with no departed players goes to WAITING."""
         game, alice, bob, carol = self._make_three_player_playing_game()
-        game.leave(alice)
-        game.leave(bob)
-        game.leave(carol)
+        # Reset to alice's turn so no one has acted yet; all leaves are forfeits
+        game.current_player_idx = 0
+        game.leave(alice)   # current player → forfeit
+        game.leave(bob)     # current player → forfeit
+        game.leave(carol)   # current player → forfeit
         self.assertEqual(game.state, HandState.WAITING)
         self.assertIsNone(game.current_player_idx)
-        self.assertEqual(game.bets, {})
+        self.assertEqual(game.departed_players, [])
 
-    def test_leave_non_last_player_transitions_to_dealer_turn(self):
-        """All-but-one players leave, then current player finishes — should reach DEALER_TURN, not WAITING."""
+    def test_leave_after_acting_goes_to_departed_then_dealer_turn(self):
+        """Player who already acted goes to departed_players; table moves to DEALER_TURN for resolution."""
         game, alice, bob, carol = self._make_three_player_playing_game()
-        # Alice and Carol leave; Bob (current idx=1→0 after Alice leaves) remains
-        game.leave(alice)   # idx shifts: Bob now at 0, Carol at 1; current_player_idx=0
-        game.leave(carol)   # Carol (idx 1) leaves; Bob still at 0; current_player_idx=0 unchanged
-        # Now Bob leaves — he's the last; game should still go to WAITING
+        # current_player_idx=1 (Bob's turn); Alice (idx 0) has already acted → departed
+        game.leave(alice)
+        self.assertIn(alice, game.departed_players)
+        self.assertNotIn(alice, game.players)
+        # Alice's bet still present for end_hand() to process
+        self.assertIn(alice.name, game.bets)
+        # Bob and Carol forfeit
+        game.leave(carol)
         game.leave(bob)
-        self.assertEqual(game.state, HandState.WAITING)
+        # departed_players=[alice] → DEALER_TURN, not WAITING
+        self.assertEqual(game.state, HandState.DEALER_TURN)
+        self.assertIsNone(game.current_player_idx)
 
     def test_leave_advances_to_dealer_turn_with_players_remaining(self):
         """Current player (last in turn order) leaves while others still at table — goes to DEALER_TURN."""
@@ -620,6 +628,27 @@ class TestBlackjackPayouts(unittest.TestCase):
         self.assertEqual(game.state, HandState.DEALER_TURN)
         self.assertIsNone(game.current_player_idx)
         self.assertGreater(len(game.players), 0)
+
+    def test_departed_player_resolved_at_end_hand(self):
+        """Departed player's hand is settled at end_hand() with correct payout."""
+        game, alice, bob, carol = self._make_three_player_playing_game()
+        # current_player_idx=1 (Bob's turn); Alice (idx 0) already acted → departed
+        game.leave(alice)
+        self.assertIn(alice, game.departed_players)
+        alice_bet = game.bets[alice.name]
+
+        # Give alice a winning hand (score 20), dealer a losing hand (score 16)
+        alice.hand = [Card("H", 10), Card("S", 10)]
+        game.dealer.hand = [Card("H", 8), Card("S", 8)]
+        game.state = HandState.RESOLVING
+
+        game.end_hand()
+
+        # Alice's bet cleared and departed_players reset
+        self.assertEqual(game.departed_players, [])
+        self.assertNotIn(alice.name, game.bets)
+        # Alice should have received 2× her bet (winning payout)
+        game.casino.db.update_wallet.assert_any_call(alice.name, alice_bet * 2)
 
 
 class TestCasinoErrorHandling(unittest.TestCase):

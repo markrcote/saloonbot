@@ -436,7 +436,7 @@ class TestBlackjackGame(EndToEndTestCase):
 
     def test_player_hit_action(self):
         """Test player hitting (requesting a card)."""
-        game_id = self.create_game()
+        game_id = self.create_game(deck=self.DETERMINISTIC_DECK)
 
         pubsub = self.subscribe_to_game(game_id)
         try:

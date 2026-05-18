@@ -1,8 +1,12 @@
 import json
 import logging
+import time
 
 import mysql.connector
 from mysql.connector import Error
+
+_DEADLOCK_ERRNO = 1213
+_DEADLOCK_RETRIES = 3
 
 DEFAULT_WALLET = 200.0
 
@@ -51,6 +55,12 @@ class Database:
         self.database = database
         self.connection = None
         self._init_database()
+
+    def _rollback_safe(self):
+        try:
+            self.connection.rollback()
+        except Exception:
+            pass
 
     def _connect(self):
         try:
@@ -154,79 +164,92 @@ class Database:
 
         Returns True on success, False if the update would make the wallet negative.
         """
-        self._connect()
-        cursor = None
-        try:
-            cursor = self.connection.cursor()
-            if amount < 0:
-                cursor.execute("""
-                    UPDATE users SET wallet = wallet + %s
-                    WHERE username = %s AND wallet + %s >= 0
-                """, (amount, username, amount))
-            else:
-                cursor.execute("""
-                    UPDATE users SET wallet = wallet + %s WHERE username = %s
-                """, (amount, username))
-            self.connection.commit()
-            rows_affected = cursor.rowcount
-            if rows_affected > 0:
-                logging.info(f"Updated wallet for {username} by {amount}")
-            return rows_affected > 0
-        except Error as e:
-            logging.error(f"Error updating wallet for {username}: {e}")
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        for attempt in range(_DEADLOCK_RETRIES):
+            self._connect()
+            cursor = None
+            try:
+                cursor = self.connection.cursor()
+                if amount < 0:
+                    cursor.execute("""
+                        UPDATE users SET wallet = wallet + %s
+                        WHERE username = %s AND wallet + %s >= 0
+                    """, (amount, username, amount))
+                else:
+                    cursor.execute("""
+                        UPDATE users SET wallet = wallet + %s WHERE username = %s
+                    """, (amount, username))
+                self.connection.commit()
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    logging.info(f"Updated wallet for {username} by {amount}")
+                return rows_affected > 0
+            except Error as e:
+                if e.errno == _DEADLOCK_ERRNO and attempt < _DEADLOCK_RETRIES - 1:
+                    logging.warning(f"Deadlock in update_wallet, retrying (attempt {attempt + 1})")
+                    self._rollback_safe()
+                    time.sleep(0.05 * (2 ** attempt))
+                else:
+                    logging.error(f"Error updating wallet for {username}: {e}")
+                    raise
+            finally:
+                if cursor:
+                    cursor.close()
 
     def save_game(self, game_id, game_data):
         """Save game state to database."""
-        self._connect()
-        cursor = None
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute("""
-                INSERT INTO games (
-                    game_id, state, current_player_idx,
-                    time_betting_started, time_last_hand_ended, time_last_event,
-                    deck_json, discards_json, dealer_hand_json,
-                    players_json, players_waiting_json, bets_json
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
-                ON DUPLICATE KEY UPDATE
-                    state = new.state,
-                    current_player_idx = new.current_player_idx,
-                    time_betting_started = new.time_betting_started,
-                    time_last_hand_ended = new.time_last_hand_ended,
-                    time_last_event = new.time_last_event,
-                    deck_json = new.deck_json,
-                    discards_json = new.discards_json,
-                    dealer_hand_json = new.dealer_hand_json,
-                    players_json = new.players_json,
-                    players_waiting_json = new.players_waiting_json,
-                    bets_json = new.bets_json
-            """, (
-                game_id,
-                game_data['state'],
-                game_data['current_player_idx'],
-                game_data['time_betting_started'],
-                game_data['time_last_hand_ended'],
-                game_data['time_last_event'],
-                json.dumps(game_data['deck']),
-                json.dumps(game_data['discards']),
-                json.dumps(game_data['dealer_hand']),
-                json.dumps(game_data['players']),
-                json.dumps(game_data['players_waiting']),
-                json.dumps(game_data['bets']),
-            ))
-            self.connection.commit()
-            logging.debug(f"Saved game {game_id}")
-            return True
-        except Error as e:
-            logging.error(f"Error saving game {game_id}: {e}")
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        params = (
+            game_id,
+            game_data['state'],
+            game_data['current_player_idx'],
+            game_data['time_betting_started'],
+            game_data['time_last_hand_ended'],
+            game_data['time_last_event'],
+            json.dumps(game_data['deck']),
+            json.dumps(game_data['discards']),
+            json.dumps(game_data['dealer_hand']),
+            json.dumps(game_data['players']),
+            json.dumps(game_data['players_waiting']),
+            json.dumps(game_data['bets']),
+        )
+        for attempt in range(_DEADLOCK_RETRIES):
+            self._connect()
+            cursor = None
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("""
+                    INSERT INTO games (
+                        game_id, state, current_player_idx,
+                        time_betting_started, time_last_hand_ended, time_last_event,
+                        deck_json, discards_json, dealer_hand_json,
+                        players_json, players_waiting_json, bets_json
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
+                    ON DUPLICATE KEY UPDATE
+                        state = new.state,
+                        current_player_idx = new.current_player_idx,
+                        time_betting_started = new.time_betting_started,
+                        time_last_hand_ended = new.time_last_hand_ended,
+                        time_last_event = new.time_last_event,
+                        deck_json = new.deck_json,
+                        discards_json = new.discards_json,
+                        dealer_hand_json = new.dealer_hand_json,
+                        players_json = new.players_json,
+                        players_waiting_json = new.players_waiting_json,
+                        bets_json = new.bets_json
+                """, params)
+                self.connection.commit()
+                logging.debug(f"Saved game {game_id}")
+                return True
+            except Error as e:
+                if e.errno == _DEADLOCK_ERRNO and attempt < _DEADLOCK_RETRIES - 1:
+                    logging.warning(f"Deadlock in save_game, retrying (attempt {attempt + 1})")
+                    self._rollback_safe()
+                    time.sleep(0.05 * (2 ** attempt))
+                else:
+                    logging.error(f"Error saving game {game_id}: {e}")
+                    raise
+            finally:
+                if cursor:
+                    cursor.close()
 
     def load_game(self, game_id):
         """Load game state from database."""
@@ -295,45 +318,57 @@ class Database:
 
     def delete_game(self, game_id):
         """Delete a game from database."""
-        self._connect()
-        cursor = None
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute("DELETE FROM games WHERE game_id = %s", (game_id,))
-            self.connection.commit()
-            rows_affected = cursor.rowcount
-            if rows_affected > 0:
-                logging.info(f"Deleted game {game_id}")
-            return rows_affected > 0
-        except Error as e:
-            logging.error(f"Error deleting game {game_id}: {e}")
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        for attempt in range(_DEADLOCK_RETRIES):
+            self._connect()
+            cursor = None
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("DELETE FROM games WHERE game_id = %s", (game_id,))
+                self.connection.commit()
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    logging.info(f"Deleted game {game_id}")
+                return rows_affected > 0
+            except Error as e:
+                if e.errno == _DEADLOCK_ERRNO and attempt < _DEADLOCK_RETRIES - 1:
+                    logging.warning(f"Deadlock in delete_game, retrying (attempt {attempt + 1})")
+                    self._rollback_safe()
+                    time.sleep(0.05 * (2 ** attempt))
+                else:
+                    logging.error(f"Error deleting game {game_id}: {e}")
+                    raise
+            finally:
+                if cursor:
+                    cursor.close()
 
     def save_game_channel(self, game_id, guild_id, channel_id):
         """Save game-channel association for bot recovery."""
-        self._connect()
-        cursor = None
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute("""
-                INSERT INTO game_channels (game_id, guild_id, channel_id)
-                VALUES (%s, %s, %s) AS new
-                ON DUPLICATE KEY UPDATE
-                    guild_id = new.guild_id,
-                    channel_id = new.channel_id
-            """, (game_id, guild_id, channel_id))
-            self.connection.commit()
-            logging.debug(f"Saved game channel: {game_id} -> {guild_id}/{channel_id}")
-            return True
-        except Error as e:
-            logging.error(f"Error saving game channel {game_id}: {e}")
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        for attempt in range(_DEADLOCK_RETRIES):
+            self._connect()
+            cursor = None
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute("""
+                    INSERT INTO game_channels (game_id, guild_id, channel_id)
+                    VALUES (%s, %s, %s) AS new
+                    ON DUPLICATE KEY UPDATE
+                        guild_id = new.guild_id,
+                        channel_id = new.channel_id
+                """, (game_id, guild_id, channel_id))
+                self.connection.commit()
+                logging.debug(f"Saved game channel: {game_id} -> {guild_id}/{channel_id}")
+                return True
+            except Error as e:
+                if e.errno == _DEADLOCK_ERRNO and attempt < _DEADLOCK_RETRIES - 1:
+                    logging.warning(f"Deadlock in save_game_channel, retrying (attempt {attempt + 1})")
+                    self._rollback_safe()
+                    time.sleep(0.05 * (2 ** attempt))
+                else:
+                    logging.error(f"Error saving game channel {game_id}: {e}")
+                    raise
+            finally:
+                if cursor:
+                    cursor.close()
 
     def load_game_channels(self):
         """Load all game-channel associations."""
@@ -360,24 +395,30 @@ class Database:
 
     def delete_game_channel(self, game_id):
         """Delete a game-channel association."""
-        self._connect()
-        cursor = None
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute(
-                "DELETE FROM game_channels WHERE game_id = %s", (game_id,)
-            )
-            self.connection.commit()
-            rows_affected = cursor.rowcount
-            if rows_affected > 0:
-                logging.debug(f"Deleted game channel {game_id}")
-            return rows_affected > 0
-        except Error as e:
-            logging.error(f"Error deleting game channel {game_id}: {e}")
-            raise
-        finally:
-            if cursor:
-                cursor.close()
+        for attempt in range(_DEADLOCK_RETRIES):
+            self._connect()
+            cursor = None
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute(
+                    "DELETE FROM game_channels WHERE game_id = %s", (game_id,)
+                )
+                self.connection.commit()
+                rows_affected = cursor.rowcount
+                if rows_affected > 0:
+                    logging.debug(f"Deleted game channel {game_id}")
+                return rows_affected > 0
+            except Error as e:
+                if e.errno == _DEADLOCK_ERRNO and attempt < _DEADLOCK_RETRIES - 1:
+                    logging.warning(f"Deadlock in delete_game_channel, retrying (attempt {attempt + 1})")
+                    self._rollback_safe()
+                    time.sleep(0.05 * (2 ** attempt))
+                else:
+                    logging.error(f"Error deleting game channel {game_id}: {e}")
+                    raise
+            finally:
+                if cursor:
+                    cursor.close()
 
     def close(self):
         """Close the database connection."""

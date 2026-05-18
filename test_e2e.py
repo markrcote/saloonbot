@@ -835,8 +835,13 @@ class TestNPCBots(EndToEndTestCase):
             # NPC auto-bets via tick loop; human places their bet
             self.place_bet(game_id, 'HumanPlayer', 10)
 
-            # Wait until it's the human's turn (NPC plays first and is handled automatically)
-            pre_human = self.collect_messages(pubsub, timeout=10, stop_on="HumanPlayer, you're up")
+            # Wait until it's the human's turn (NPC plays first and is handled automatically).
+            # Dealer blackjack resolves the hand immediately with no player turns — valid outcome.
+            pre_human = self.collect_messages(
+                pubsub, timeout=10, stop_on=["HumanPlayer, you're up", 'dust settles']
+            )
+            if any('dust settles' in m for m in pre_human):
+                return
             self.assertTrue(
                 any("HumanPlayer, you're up" in m for m in pre_human),
                 f"HumanPlayer should be prompted for their turn. Messages: {pre_human}"

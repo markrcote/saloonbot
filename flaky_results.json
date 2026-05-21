@@ -1,0 +1,76 @@
+{
+  "n_runs": 100,
+  "summary": {
+    "total": 13,
+    "stable": 13,
+    "flaky": 0,
+    "flaky_tests": []
+  },
+  "results": {
+    "TestGameCreation::test_create_new_game": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestPlayerActions::test_database_user_creation": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestPlayerActions::test_player_join_game": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestBlackjackGame::test_complete_blackjack_hand": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestBlackjackGame::test_player_hit_action": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestServerRestart::test_bet_preserved_after_restart": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestServerRestart::test_game_persists_across_server_restart": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestServerRestart::test_list_games_returns_active_games": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestStopGame::test_stop_game_ends_game": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestStopGame::test_stop_game_removes_from_database": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestWalletBalance::test_wallet_updated_correctly_after_hand": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestMultiplePlayers::test_turn_order_follows_join_order": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestNPCBots::test_npc_bot_plays_without_human_intervention": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    }
+  }
+}

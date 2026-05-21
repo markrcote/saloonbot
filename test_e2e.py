@@ -740,19 +740,35 @@ class TestWalletBalance(EndToEndTestCase):
         try:
             player_name = 'WalletPlayer'
             self.join_player(game_id, player_name)
-            self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
+
+            # Poll DB for betting state — more reliable than message timing under server load.
+            self.assertIsNotNone(
+                self.poll_db(
+                    "SELECT state FROM games WHERE game_id = %s",
+                    (game_id,),
+                    predicate=lambda row: row[0] == 'betting',
+                    timeout=10,
+                ),
+                "Game should reach betting state",
+            )
 
             row = self.poll_db("SELECT wallet FROM users WHERE username = %s", (player_name,))
             self.assertIsNotNone(row)
             starting = float(row[0])
 
             bet = 10
+            # Drain any buffered messages accumulated while we were polling.
+            self.collect_messages(pubsub, timeout=0.5)
             self.place_bet(game_id, player_name, bet)
 
-            self.collect_messages(pubsub, timeout=5, stop_on="you're up")
-            self.player_action(game_id, player_name, 'stand')
-
-            messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+            # Stop on either "you're up" (normal) or "dust settles" (dealer blackjack).
+            pre_stand = self.collect_messages(pubsub, timeout=5, stop_on=["you're up", 'dust settles'])
+            if any("you're up" in m for m in pre_stand):
+                self.player_action(game_id, player_name, 'stand')
+                messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+            else:
+                # Dealer blackjack — hand resolved without a player turn.
+                messages = pre_stand
 
             # Determine expected wallet from the outcome message
             if any('strikes gold' in m for m in messages):

@@ -1,0 +1,21 @@
+{
+  "n_runs": 100,
+  "summary": {
+    "total": 2,
+    "stable": 2,
+    "flaky": 0,
+    "flaky_tests": []
+  },
+  "results": {
+    "TestMultiplePlayers::test_turn_order_follows_join_order": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    },
+    "TestNPCBots::test_npc_bot_plays_without_human_intervention": {
+      "passes": 100,
+      "fails": 0,
+      "errors": []
+    }
+  }
+}

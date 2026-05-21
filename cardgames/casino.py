@@ -24,6 +24,7 @@ class Casino:
         self.redis = redis.Redis(host=redis_host, port=redis_port)
         self.db = db
         self._pending_bots = {}  # game_id -> num_bots to add on first human join
+        self._dirty_games = set()  # game_ids pending a DB write
         self._llm_client = None
         self._llm_client_tried = False
 
@@ -52,6 +53,18 @@ class Casino:
         except Exception as e:
             logging.error(f"Error loading games from database: {e}")
 
+    def _mark_dirty(self, game_id):
+        """Mark a game as needing a DB write on the next flush."""
+        self._dirty_games.add(game_id)
+
+    def _flush_dirty_games(self):
+        """Write all dirty games to DB and clear the dirty set."""
+        if self.db is None or not self._dirty_games:
+            return
+        for game_id in list(self._dirty_games):
+            self._save_game(game_id)
+        self._dirty_games.clear()
+
     def _save_game(self, game_id):
         """Save a game's current state to database."""
         if self.db is None:
@@ -69,6 +82,7 @@ class Casino:
 
     def _delete_game(self, game_id):
         """Delete a game from database."""
+        self._dirty_games.discard(game_id)  # no point writing then deleting
         if self.db is None:
             return
 
@@ -289,7 +303,7 @@ class Casino:
                             self.remove_npc(game_id, npc_name)
                 else:
                     self.games[game_id].action(data)
-                self._save_game(game_id)
+                self._mark_dirty(game_id)
             except CardGameError as e:
                 logging.warning(f"Game error: {e}")
                 self.game_output(game_id, e.user_message())
@@ -305,7 +319,7 @@ class Casino:
             idx_after = game.current_player_idx
 
             if state_before != state_after or idx_before != idx_after:
-                self._save_game(game_id)
+                self._mark_dirty(game_id)
 
             # Remove idle empty games
             if (game.state == HandState.WAITING
@@ -319,6 +333,8 @@ class Casino:
                     f"game_updates_{game_id}",
                     {'game_id': game_id, 'event_type': 'game_over'}
                 )
+
+        self._flush_dirty_games()
 
     def listen(self):
         db_loaded = False

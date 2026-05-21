@@ -208,3 +208,14 @@ Or use the helper script:
 - The tests will automatically start and stop the necessary services
 
 **Note:** End-to-end tests take longer to run (~2 minutes) as they start/stop Docker containers and wait for game timing events.
+
+### Flaky Test Detection
+
+`hunt_flaky.py` re-uses a single Docker stack across N runs per test case, making repeated flakiness detection roughly 100× faster than re-spinning containers each time.
+
+```bash
+source .venv/bin/activate
+python hunt_flaky.py --runs 20
+```
+
+Options: `--runs N` (default 10), `--output FILE` (JSON results), `--class ClassName` (limit to specific test class).

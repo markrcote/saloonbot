@@ -84,7 +84,7 @@ Discord Users
 ### Casino Protocol (published to "casino")
 
 **Casino actions** (`event_type: "casino_action"`):
-- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy)
+- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 
 **Player actions** (`event_type: "player_action"`):
@@ -160,6 +160,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Capture server logs.** Redirect server subprocess output to a temp file; print the last 50 lines on failure — this is the primary debugging tool when an E2E test breaks.
 - **Clean all stateful tables in every test's setUp**: `DELETE FROM game_channels`, `DELETE FROM games`, `DELETE FROM users`, plus `redis.flushall()`.
 - **Prefer structured event assertions** (`data.get('event_type') == 'game_over'`) over text substring checks — more robust if wording changes.
+- **Use injectable decks for game-flow tests**: pass `deck=[...]` in the `new_game` message to control card order and prevent flaky failures from bad deals (e.g., unexpected dealer blackjack).
 
 ## Key Patterns
 
@@ -169,6 +170,8 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders
 - **Schema migrations**: `_init_database()` runs on startup and applies any pending migrations from the `MIGRATIONS` list in order, each committed atomically; `schema_version` tracks the last applied index. To add a schema change, append a new entry to `MIGRATIONS` — never edit existing entries. Migrations run automatically on server restart, so no manual SQL is needed for staging/production deployments.
+- **Dirty-flag write-behind**: Casino tracks game IDs in `_dirty_games`; DB writes are batched and flushed only when the dirty set is non-empty, reducing unnecessary writes on each tick.
+- **MySQL deadlock retry**: `database.py` wraps writes in a retry helper that catches InnoDB deadlock errors (errno 1213) and retries automatically; callers don't need retry logic.
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
@@ -177,6 +180,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - ALWAYS activate the virtualenv before running tests or scripts (e.g., `source .venv/bin/activate`)
 - ALWAYS run tests (unit + e2e where relevant) after code changes, before committing
 - After fixing a bug, run the full test suite to catch regressions in adjacent modules
+- **Flaky test hunting**: `hunt_flaky.py` re-uses a single Docker stack across N runs per test (~100× faster than re-spinning docker each time). Usage: `python hunt_flaky.py [--runs N] [--output FILE] [--class ClassName]`
 
 ## Documentation Updates
 When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, and any plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.

@@ -436,7 +436,9 @@ class BlackjackCog(commands.Cog):
                         embed = nextcord.Embed(description=text, color=0xff0000)  # Red
                         await game.channel.send(embed=embed)
                     elif "✨ ~*~ The dust settles" in text:
-                        # End of hand - use blue
+                        # End of hand - use blue; brief pause signals the reveal
+                        async with game.channel.typing():
+                            await asyncio.sleep(1.0)
                         embed = nextcord.Embed(description=text, color=0x4169e1)  # Royal blue
                         await game.channel.send(embed=embed)
                     elif "🃏 The dealer shuffles" in text:
@@ -447,6 +449,11 @@ class BlackjackCog(commands.Cog):
                         # Betting phase - use orange
                         embed = nextcord.Embed(description=text, color=0xff8c00)  # Dark orange
                         await game.channel.send(embed=embed)
+                    elif "🔄 Dealer flips" in text:
+                        # Hole card reveal - dramatic pause before showing
+                        async with game.channel.typing():
+                            await asyncio.sleep(1.5)
+                        await game.channel.send(text)
                     else:
                         # Regular message - plain text
                         await game.channel.send(text)

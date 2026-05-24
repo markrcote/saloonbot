@@ -169,6 +169,7 @@ class Blackjack(CardGame):
     MIN_BET = int(os.getenv('BLACKJACK_MIN_BET', '5'))
     MAX_BET = int(os.getenv('BLACKJACK_MAX_BET', '100'))
     TIME_FOR_BETTING = int(os.getenv('BLACKJACK_TIME_FOR_BETTING', '30'))
+    DRAMATIC_PAUSE = float(os.getenv('BLACKJACK_DRAMATIC_PAUSE', '1.5'))
 
     # Valid actions for each state
     VALID_ACTIONS = {
@@ -387,6 +388,7 @@ class Blackjack(CardGame):
         for player in self.players:
             self.output(f"🎴 {player} has {player.hand_str()}")
 
+        time.sleep(self.DRAMATIC_PAUSE)
         self.output(f"👉 {self.players[0]}, you're up, partner. Hit or stand?")
 
     def _resolve_player(self, player, departed=False):

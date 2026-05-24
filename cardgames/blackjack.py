@@ -170,6 +170,8 @@ class Blackjack(CardGame):
     MAX_BET = int(os.getenv('BLACKJACK_MAX_BET', '100'))
     TIME_FOR_BETTING = int(os.getenv('BLACKJACK_TIME_FOR_BETTING', '30'))
     DRAMATIC_PAUSE = float(os.getenv('BLACKJACK_DRAMATIC_PAUSE', '1.5'))
+    DEALER_CARD_PAUSE = float(os.getenv('BLACKJACK_DEALER_CARD_PAUSE', '1.0'))
+    RESULT_PAUSE = float(os.getenv('BLACKJACK_RESULT_PAUSE', '0.8'))
 
     # Valid actions for each state
     VALID_ACTIONS = {
@@ -418,8 +420,10 @@ class Blackjack(CardGame):
         self.output("✨ ~*~ The dust settles... ~*~ ✨")
         self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
         for player in self.players:
+            time.sleep(self.RESULT_PAUSE)
             self._resolve_player(player)
         for player in self.departed_players:
+            time.sleep(self.RESULT_PAUSE)
             self._resolve_player(player, departed=True)
 
         self.bets = {}
@@ -496,9 +500,11 @@ class Blackjack(CardGame):
 
         self.output(f"👀 Dealer's showing {self.dealer.hand[0]}.")
         self.output("🔄 Dealer flips the hole card...")
+        time.sleep(self.DEALER_CARD_PAUSE)
         self.output(f"🎴 Dealer's got {self.dealer.hand_str()}")
 
         while self.get_score(self.dealer) < 17:
+            time.sleep(self.DEALER_CARD_PAUSE)
             self.deal(self.dealer)
             self.output(f"🃏 Dealer draws... {self.dealer.hand[-1]}")
 
@@ -654,6 +660,7 @@ class Blackjack(CardGame):
     def _tick_dealer_turn(self):
         """Handle DEALER_TURN state: execute dealer's turn."""
         self.output("👁️ All eyes on the dealer...")
+        time.sleep(self.DRAMATIC_PAUSE)
         self.dealer_turn()
 
     def _tick_resolving(self):

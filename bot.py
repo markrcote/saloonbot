@@ -56,6 +56,8 @@ if not DISCORD_TOKEN:
 
 GUILD_IDS = [int(x) for x in GUILD_IDS_STR.split(",")] if GUILD_IDS_STR else None
 
+MESSAGE_PACING_DELAY = 0.8  # seconds between game messages sent to Discord
+
 VERSION = None
 
 try:
@@ -448,6 +450,7 @@ class BlackjackCog(commands.Cog):
                     else:
                         # Regular message - plain text
                         await game.channel.send(text)
+                    await asyncio.sleep(MESSAGE_PACING_DELAY)
                     break
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")

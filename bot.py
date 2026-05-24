@@ -347,13 +347,13 @@ class BlackjackCog(commands.Cog):
         await self.send_command(sanitize_username(interaction.user.name), game, "bet", amount=amount)
         await interaction.send(f"💵 Placing bet of ${amount}...")
 
-    @tasks.loop(seconds=3.0)
+    @tasks.loop(seconds=0.5)
     async def listen(self):
         '''Background tasks that listens for messages on self.pubsub.'''
         # Wait until subscription is live
         await self.subscribed.wait()
         try:
-            message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=3.0)
+            message = await self.pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
             if message:
                 await self.process_message(message)
             # drain messages

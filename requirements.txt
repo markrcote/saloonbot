@@ -27,4 +27,4 @@ setuptools==82.0.1
 typing_extensions==4.15.0
 urllib3==2.7.0
 wheel==0.47.0
-yarl==1.23.0
+yarl==1.24.2

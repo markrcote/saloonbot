@@ -391,7 +391,9 @@ class Blackjack(CardGame):
             self.output(f"🎴 {player} has {player.hand_str()}")
 
         time.sleep(self.DRAMATIC_PAUSE)
-        self.output(f"👉 {self.players[0]}, you're up, partner. Hit or stand?")
+        first_player = self.players[0]
+        self.output(f"🎴 {first_player}'s got {first_player.hand_str()} ({self.get_score(first_player)})")
+        self.output(f"👉 {first_player}, you're up, partner. Hit or stand?")
 
     def _resolve_player(self, player, departed=False):
         """Resolve a single player's hand against the dealer and update their wallet."""
@@ -475,7 +477,9 @@ class Blackjack(CardGame):
             self.state = HandState.DEALER_TURN
             self.current_player_idx = None
         elif not self.players[self.current_player_idx].is_npc:
-            self.output(f"👉 {self.players[self.current_player_idx]}, you're up, partner. Hit or stand?")
+            player = self.players[self.current_player_idx]
+            self.output(f"🎴 {player}'s got {player.hand_str()} ({self.get_score(player)})")
+            self.output(f"👉 {player}, you're up, partner. Hit or stand?")
 
     def get_score(self, player):
         sorted_hand = sorted(player.hand, key=lambda card: card.value)

@@ -83,6 +83,13 @@ class Casino:
     def _delete_game(self, game_id):
         """Delete a game from database."""
         self._dirty_games.discard(game_id)  # no point writing then deleting
+
+        game = self.games.get(game_id)
+        if game is not None:
+            for player in game.players + game.players_waiting:
+                if isinstance(player, LLMBlackjackNPC):
+                    player.shutdown()
+
         if self.db is None:
             return
 

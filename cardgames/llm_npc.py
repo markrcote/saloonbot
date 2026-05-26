@@ -110,6 +110,9 @@ class LLMBlackjackNPC(NPCPlayer):
             logger.warning("LLM bet parse failed for %s: %s", self.name, e)
             return {"amount": min_bet, "quip": None}
 
+    def shutdown(self):
+        self._executor.shutdown(wait=False)
+
     def _build_betting_system_prompt(self) -> str:
         base = self.personality.system_prompt
         marker = "Respond ONLY with valid JSON:"

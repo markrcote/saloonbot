@@ -1265,6 +1265,13 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         # Fallback is min_bet
         self.assertEqual(result, 5)
 
+    def test_shutdown_calls_executor_shutdown(self):
+        """shutdown() must call executor shutdown to release thread resources."""
+        npc = self._make_npc('{"action": "stand", "quip": ""}')
+        with patch.object(npc._executor, 'shutdown') as mock_shutdown:
+            npc.shutdown()
+            mock_shutdown.assert_called_once_with(wait=False)
+
 
 class TestNPCSerialization(unittest.TestCase):
     def test_serialize_human_player(self):

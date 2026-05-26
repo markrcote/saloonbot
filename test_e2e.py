@@ -118,6 +118,9 @@ class EndToEndTestCase(unittest.TestCase):
             'BLACKJACK_TIME_BETWEEN_HANDS': '0',
             'BLACKJACK_TIME_WAIT_FOR_PLAYERS': '0',
             'BLACKJACK_REMINDER_PERIOD': '1',
+            'BLACKJACK_DRAMATIC_PAUSE': '0',
+            'BLACKJACK_DEALER_CARD_PAUSE': '0',
+            'BLACKJACK_RESULT_PAUSE': '0',
             'LLM_TIMEOUT': '1',
             'PYTHONUNBUFFERED': '1',
         })

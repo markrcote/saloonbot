@@ -13,7 +13,7 @@ certifi==2026.4.22
 charset-normalizer==3.4.7
 flake8==7.3.0
 frozenlist==1.8.0
-idna==3.15
+idna==3.16
 mccabe==0.7.0
 multidict==6.7.1
 mysql-connector-python==9.7.0
@@ -27,4 +27,4 @@ setuptools==82.0.1
 typing_extensions==4.15.0
 urllib3==2.7.0
 wheel==0.47.0
-yarl==1.23.0
+yarl==1.24.2

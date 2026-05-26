@@ -40,13 +40,9 @@ class LLMBlackjackNPC(NPCPlayer):
         future = self._pending_action_future
         self._pending_action_future = None
 
-        try:
-            result = future.result()
-            self.last_quip = result.get("quip") or None
-            return result["action"]
-        except Exception as e:
-            logger.warning("LLM action decision failed for %s: %s", self.name, e)
-            return self._fallback.decide_action(hand, dealer_visible_card, score)
+        result = future.result()
+        self.last_quip = result.get("quip") or None
+        return result["action"]
 
     def decide_bet(self, min_bet, max_bet, wallet):
         if self._pending_bet_future is None:

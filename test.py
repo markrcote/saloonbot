@@ -1179,6 +1179,42 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.assertEqual(game.current_player_idx, 2)
         self.mock_db.save_game.assert_called_once_with(game_id, game.to_dict())
 
+    def test_delete_game_shuts_down_llm_npcs(self):
+        """_delete_game() must call shutdown() on LLM NPC executors to prevent thread leaks."""
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+        personality = get_personality("The Grizzled Prospector")
+        npc = LLMBlackjackNPC("BotPlayer", personality, MagicMock())
+        game.players_waiting.append(npc)
+        with patch.object(npc, 'shutdown') as mock_shutdown:
+            self.casino._delete_game(game_id)
+            mock_shutdown.assert_called_once()
+
+    def test_tick_games_saves_after_npc_bets_while_human_pending(self):
+        """Game must be saved after NPC auto-bets even when state stays BETTING.
+
+        Regression for NPC bet save gap: if a human hasn't bet yet, state stays
+        BETTING after NPC bets, so the old state-change guard wouldn't trigger a save.
+        """
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+        npc = SimpleBlackjackNPC("BotPlayer")
+        human = Player("Human")
+        game.join(human)
+        game.join(npc)
+        game.tick()  # WAITING -> BETTING
+        self.assertEqual(game.state, HandState.BETTING)
+
+        self.mock_db.save_game.reset_mock()
+        self.casino._tick_games()  # NPC auto-bets; human hasn't; state stays BETTING
+
+        self.assertIn('BotPlayer', game.bets)
+        self.assertEqual(game.state, HandState.BETTING)
+        self.mock_db.save_game.assert_called_once_with(game_id, game.to_dict())
+        self.assertFalse(game._bets_dirty)
+
 
 class TestLLMBlackjackNPC(unittest.TestCase):
     def _make_npc(self, llm_response):

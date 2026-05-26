@@ -207,6 +207,7 @@ class Blackjack(CardGame):
 
         # Betting state
         self.bets = {}  # Player -> bet amount
+        self._bets_dirty = False
         self.time_betting_started = None
         self.time_first_player_joined = None
 
@@ -348,6 +349,7 @@ class Blackjack(CardGame):
             raise InsufficientFundsError(player, balance, amount)
 
         self.bets[player.name] = amount
+        self._bets_dirty = True
         self._update_time_last_event()
 
         # Output bet and updated wallet

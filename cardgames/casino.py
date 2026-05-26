@@ -325,8 +325,9 @@ class Casino:
             state_after = game.state
             idx_after = game.current_player_idx
 
-            if state_before != state_after or idx_before != idx_after:
+            if state_before != state_after or idx_before != idx_after or game._bets_dirty:
                 self._mark_dirty(game_id)
+                game._bets_dirty = False
 
             # Remove idle empty games
             if (game.state == HandState.WAITING

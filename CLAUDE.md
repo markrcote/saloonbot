@@ -182,8 +182,14 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - After fixing a bug, run the full test suite to catch regressions in adjacent modules
 - **Flaky test hunting**: `hunt_flaky.py` re-uses a single Docker stack across N runs per test (~100× faster than re-spinning docker each time). Usage: `python hunt_flaky.py [--runs N] [--output FILE] [--class ClassName]`
 
+## Planning Docs
+- `VISION.md` — high-level product vision: the atmospheric frontier casino simulator and its goals
+- `DESIGN-VISION.md` — design decisions and refinements that shaped VISION.md
+- `ROADMAP.md` — milestone-by-milestone implementation plan for achieving VISION.md; includes dependency order and cross-cutting concerns (LLM usage tracking, detail level config)
+- `M1-ARCH.md` — architectural decisions for Milestone 1 (Persistent NPC Roster); records options considered and resolutions for each decision
+
 ## Documentation Updates
-When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, and any plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.
+When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, ROADMAP.md, M1-ARCH.md (if M1-related), and any other plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.
 
 ## Commits
 - Make small, focused commits — one logical change per commit

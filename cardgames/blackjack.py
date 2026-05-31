@@ -403,11 +403,10 @@ class Blackjack(CardGame):
         )
 
         for player in self.players:
-            self.output(f"🎴 {player} has {player.hand_str()}")
+            self.output(f"🎴 {player} has {player.hand_str()} ({self.get_score(player)})")
 
         time.sleep(self.DRAMATIC_PAUSE)
         first_player = self.players[0]
-        self.output(f"🎴 {first_player}'s got {first_player.hand_str()} ({self.get_score(first_player)})")
         self.output(f"👉 {first_player}, you're up, partner. Hit or stand?")
 
     def _resolve_player(self, player, departed=False):
@@ -422,7 +421,6 @@ class Blackjack(CardGame):
             self._output_player_result(player, f"💥 {tag}went bust! ${bet_amount:.2f} lost to the house.")
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: bust — loses ${bet_amount:.2f}")
         else:
-            self.output(f"{player}'s holding {self.get_score(player)}.")
             if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
                 winnings = bet_amount * 2
                 self.casino.db.update_wallet(player.name, winnings)

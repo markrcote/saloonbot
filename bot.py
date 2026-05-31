@@ -460,7 +460,7 @@ class BlackjackCog(commands.Cog):
                         msg_type = "game_event"
                         await game.channel.send(text)
 
-                    logging.info(f"[{game.game_id[:8]}] → Discord: {msg_type}")
+                    logging.info(f"[{game.game_id[:8]}] → Discord: {msg_type} | {text[:70]!r}")
                     logging.debug(f"[{game.game_id[:8]}] Pacing: {MESSAGE_PACING_DELAY:.1f}s")
                     await asyncio.sleep(MESSAGE_PACING_DELAY)
                     break

@@ -625,6 +625,7 @@ class Blackjack(CardGame):
                     continue
                 amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
                 if amount is None:
+                    logging.info(f"[{self.game_id[:8]}] NPC {player.name}: bet pending (LLM thinking)")
                     continue
                 quip = getattr(player, 'last_quip', None)
                 if quip:
@@ -644,6 +645,8 @@ class Blackjack(CardGame):
         time_expired = time.time() > self.time_betting_started + self.TIME_FOR_BETTING
 
         if all_bet or time_expired:
+            if all_bet:
+                logging.info(f"[{self.game_id[:8]}] All {len(self.players)} players bet — starting hand")
             if time_expired and not all_bet:
                 self.output("⏰ Time's up! The clock don't wait for nobody.")
                 logging.info(f"[{self.game_id[:8]}] Betting timeout — {len(self.bets)}/{len(self.players)} players bet")

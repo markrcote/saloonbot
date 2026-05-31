@@ -30,6 +30,7 @@ class LLMBlackjackNPC(NPCPlayer):
 
     def decide_action(self, hand, dealer_visible_card, score):
         if self._pending_action_future is None:
+            logger.info("LLM action call submitted for %s", self.name)
             self._pending_action_future = self._executor.submit(
                 self._llm_decide_action, list(hand), dealer_visible_card, score
             )
@@ -47,6 +48,7 @@ class LLMBlackjackNPC(NPCPlayer):
 
     def decide_bet(self, min_bet, max_bet, wallet):
         if self._pending_bet_future is None:
+            logger.info("LLM bet call submitted for %s", self.name)
             self._pending_bet_future = self._executor.submit(
                 self._llm_decide_bet, min_bet, max_bet, wallet
             )
@@ -85,7 +87,7 @@ class LLMBlackjackNPC(NPCPlayer):
             result = json.loads(raw)
             if result.get("action") not in _ACTION_VALID:
                 raise ValueError(f"Invalid action: {result.get('action')!r}")
-            logger.debug("LLM action for %s: %.1fs → %s", self.name, time.time() - t0, result["action"])
+            logger.info("LLM action for %s: %.1fs → %s", self.name, time.time() - t0, result["action"])
             return result
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("LLM action fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
@@ -109,7 +111,7 @@ class LLMBlackjackNPC(NPCPlayer):
             )
             result = json.loads(raw)
             amount = int(result["amount"])
-            logger.debug("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, amount)
+            logger.info("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, amount)
             return {"amount": max(min_bet, min(max_bet, amount)), "quip": result.get("quip")}
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("LLM bet fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)

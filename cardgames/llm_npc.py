@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .llm_client import LLMClient, LLMError
@@ -74,6 +75,7 @@ class LLMBlackjackNPC(NPCPlayer):
             f"Dealer shows: {dealer_visible_card.str(short=True)}. "
             "Hit or stand?"
         )
+        t0 = time.time()
         try:
             raw = self._llm_client.complete(
                 system=self.personality.system_prompt,
@@ -83,9 +85,10 @@ class LLMBlackjackNPC(NPCPlayer):
             result = json.loads(raw)
             if result.get("action") not in _ACTION_VALID:
                 raise ValueError(f"Invalid action: {result.get('action')!r}")
+            logger.debug("LLM action for %s: %.1fs → %s", self.name, time.time() - t0, result["action"])
             return result
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.warning("LLM action parse failed for %s: %s", self.name, e)
+            logger.warning("LLM action fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
             action = self._fallback.decide_action(hand, dealer_visible_card, score)
             return {"action": action, "quip": None}
 
@@ -97,6 +100,7 @@ class LLMBlackjackNPC(NPCPlayer):
             f"The bet range is ${min_bet}–${max_bet}. "
             "How much do you bet?"
         )
+        t0 = time.time()
         try:
             raw = self._llm_client.complete(
                 system=system,
@@ -105,9 +109,10 @@ class LLMBlackjackNPC(NPCPlayer):
             )
             result = json.loads(raw)
             amount = int(result["amount"])
+            logger.debug("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, amount)
             return {"amount": max(min_bet, min(max_bet, amount)), "quip": result.get("quip")}
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
-            logger.warning("LLM bet parse failed for %s: %s", self.name, e)
+            logger.warning("LLM bet fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
             return {"amount": min_bet, "quip": None}
 
     def shutdown(self):

@@ -111,6 +111,7 @@ class Casino:
             if game_id not in self.games.keys():
                 break
         self.games[game_id] = Blackjack(game_id, self, initial_deck=initial_deck)
+        logging.info(f"New game {game_id[:8]} created (bots: {num_bots})")
 
         if num_bots > 0:
             self._pending_bots[game_id] = num_bots

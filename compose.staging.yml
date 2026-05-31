@@ -73,9 +73,9 @@ services:
       - DOCKER_API_VERSION=1.54
       - WATCHTOWER_LABEL_ENABLE=true
       - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_ROLLING_RESTART=true
+      - WATCHTOWER_ROLLING_RESTART=false
       - WATCHTOWER_TIMEOUT=60s
-      - WATCHTOWER_SCHEDULE=0 */2 * * * *
+      - WATCHTOWER_POLL_INTERVAL=120
       - TZ=America/Toronto
     labels:
       - com.centurylinklabs.watchtower.enable=false

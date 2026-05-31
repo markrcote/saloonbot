@@ -145,9 +145,23 @@ docker compose -f compose.dev-bot-local.yml down
 
 ### Production/Staging Deployment
 
-For production and staging deployments, use the standard `compose.yml` file:
+Environment-specific compose files are provided:
+
+- **`compose-production.yml`** — production deployment
+- **`compose.staging.yml`** — staging deployment
+
+Run the appropriate environment directly:
 
 ```bash
+docker compose -f compose-production.yml up -d
+docker compose -f compose.staging.yml up -d
+```
+
+If you always deploy the same environment on a given host, you can symlink `compose.yml` to avoid specifying `-f` every time:
+
+```bash
+# Example: always use production on this host
+ln -s compose-production.yml compose.yml
 docker compose up -d
 ```
 

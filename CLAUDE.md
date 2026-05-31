@@ -46,7 +46,13 @@ python server.py
 
 **Run server locally (bot in Docker):** `./dev-server.sh`
 
-**Production:** `docker compose up -d`
+**Production:** `docker compose -f compose-production.yml up -d`
+**Staging:** `docker compose -f compose.staging.yml up -d`
+
+If you always run the same environment on a host, symlink `compose.yml` for convenience:
+```bash
+ln -s compose-production.yml compose.yml  # then: docker compose up -d
+```
 
 ### CLI Testing
 ```bash

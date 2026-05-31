@@ -1,5 +1,6 @@
 services:
   redis:
+    container_name: saloonbot-test-redis
     image: redis:alpine
     ports:
       - "6379:6379"
@@ -9,6 +10,7 @@ services:
       timeout: 3s
       retries: 5
   mysql:
+    container_name: saloonbot-test-mysql
     image: mysql:8.0
     environment:
       - MYSQL_ROOT_PASSWORD=root_password

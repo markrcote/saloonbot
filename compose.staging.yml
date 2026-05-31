@@ -1,5 +1,6 @@
 services:
   saloonbot-server:
+    container_name: saloonbot-server
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -24,6 +25,7 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
   saloonbot-bot:
+    container_name: saloonbot-bot
     build:
       context: .
       dockerfile: Dockerfile.bot
@@ -43,11 +45,13 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
   redis:
+    container_name: saloonbot-redis
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
   mysql:
+    container_name: saloonbot-mysql
     image: mysql:8.0
     restart: always
     environment:

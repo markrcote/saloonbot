@@ -1,5 +1,6 @@
 services:
   saloonbot-server:
+    container_name: saloonbot-server
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -22,6 +23,7 @@ services:
       - redis
       - mysql
   saloonbot-bot:
+    container_name: saloonbot-bot
     build:
       context: .
       dockerfile: Dockerfile.bot
@@ -40,11 +42,13 @@ services:
     depends_on:
       - redis
   redis:
+    container_name: saloonbot-redis
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
   mysql:
+    container_name: saloonbot-mysql
     image: mysql:8.0
     restart: always
     environment:

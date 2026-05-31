@@ -1,5 +1,6 @@
 services:
   saloonbot-server:
+    container_name: saloonbot-server
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -15,6 +16,7 @@ services:
     depends_on:
       - redis
   redis:
+    container_name: saloonbot-redis
     image: redis:alpine
     restart: always
     ports:

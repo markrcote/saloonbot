@@ -56,7 +56,7 @@ if not DISCORD_TOKEN:
 
 GUILD_IDS = [int(x) for x in GUILD_IDS_STR.split(",")] if GUILD_IDS_STR else None
 
-MESSAGE_PACING_DELAY = 1.5  # seconds between game messages sent to Discord
+MESSAGE_PACING_DELAY = 1.2  # seconds between game messages sent to Discord
 
 VERSION = None
 

@@ -34,6 +34,10 @@ class Casino:
             self._llm_client_tried = True
             try:
                 self._llm_client = create_llm_client()
+                logging.info(
+                    f"LLM client ready: {self._llm_client.provider} (model={self._llm_client.model})."
+                    " Bot players will use AI strategy."
+                )
             except Exception as e:
                 logging.info(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
         return self._llm_client
@@ -361,6 +365,7 @@ class Casino:
             if not db_loaded:
                 db_loaded = True
                 self._load_games_from_db()
+                self.llm_client  # trigger key detection and log result at startup
 
             logging.info("Casino online.")
 

@@ -19,22 +19,27 @@ def _read_key(env_var):
 
 
 class LLMClient(ABC):
+    provider: str
+    model: str
+
     @abstractmethod
     def complete(self, system: str, user: str, timeout: float) -> str:
         pass
 
 
 class ClaudeClient(LLMClient):
+    provider = "claude"
+
     def __init__(self):
         import anthropic
-        self._model = os.environ.get("LLM_MODEL", "claude-haiku-4-5")
+        self.model = os.environ.get("LLM_MODEL", "claude-haiku-4-5")
         self._client = anthropic.Anthropic(api_key=_read_key("ANTHROPIC_API_KEY"))
 
     def complete(self, system: str, user: str, timeout: float) -> str:
         import anthropic
         try:
             response = self._client.with_options(timeout=timeout).messages.create(
-                model=self._model,
+                model=self.model,
                 max_tokens=256,
                 system=system,
                 messages=[{"role": "user", "content": user}],
@@ -45,15 +50,17 @@ class ClaudeClient(LLMClient):
 
 
 class OpenAIClient(LLMClient):
+    provider = "openai"
+
     def __init__(self):
         import openai
-        self._model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+        self.model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
         self._client = openai.OpenAI(api_key=_read_key("OPENAI_API_KEY"))
 
     def complete(self, system: str, user: str, timeout: float) -> str:
         try:
             response = self._client.chat.completions.create(
-                model=self._model,
+                model=self.model,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},

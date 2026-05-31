@@ -424,45 +424,52 @@ class BlackjackCog(commands.Cog):
 
                     # Use embeds for special messages
                     if text.startswith("🤠") and ': "' in text:
-                        # NPC quip - warm sepia color
+                        msg_type = "npc_quip"
                         embed = nextcord.Embed(description=text, color=0xc8a96e)  # Sepia
                         await game.channel.send(embed=embed)
                     elif "🏆 strikes gold" in text:
-                        # Win message - use green/gold
+                        msg_type = "win"
                         embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
                         await game.channel.send(embed=embed)
                     elif "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
-                        # Bust/loss message - use red
+                        msg_type = "bust"
                         embed = nextcord.Embed(description=text, color=0xff0000)  # Red
                         await game.channel.send(embed=embed)
                     elif "✨ ~*~ The dust settles" in text:
-                        # End of hand - use blue; brief pause signals the reveal
+                        msg_type = "hand_result"
+                        logging.debug(f"[{game.game_id[:8]}] Dramatic pause: 1.0s (hand_result)")
                         async with game.channel.typing():
                             await asyncio.sleep(1.0)
                         embed = nextcord.Embed(description=text, color=0x4169e1)  # Royal blue
                         await game.channel.send(embed=embed)
                     elif "🃏 The dealer shuffles" in text:
-                        # New hand - use purple
+                        msg_type = "new_hand"
                         embed = nextcord.Embed(description=text, color=0x9370db)  # Medium purple
                         await game.channel.send(embed=embed)
                     elif "💰 Ante up" in text:
-                        # Betting phase - use orange
+                        msg_type = "bet_prompt"
                         embed = nextcord.Embed(description=text, color=0xff8c00)  # Dark orange
                         await game.channel.send(embed=embed)
                     elif "🔄 Dealer flips" in text:
-                        # Hole card reveal - dramatic pause before showing
+                        msg_type = "dealer_reveal"
+                        logging.debug(f"[{game.game_id[:8]}] Dramatic pause: 1.5s (dealer_reveal)")
                         async with game.channel.typing():
                             await asyncio.sleep(1.5)
                         await game.channel.send(text)
                     else:
-                        # Regular message - plain text
+                        msg_type = "game_event"
                         await game.channel.send(text)
+
+                    logging.info(f"[{game.game_id[:8]}] → Discord: {msg_type}")
+                    logging.debug(f"[{game.game_id[:8]}] Pacing: {MESSAGE_PACING_DELAY:.1f}s")
                     await asyncio.sleep(MESSAGE_PACING_DELAY)
                     break
             else:
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
 
     async def send_command(self, player_name, game, cmd, **kwargs):
+        extra = f" ${kwargs['amount']}" if 'amount' in kwargs else ""
+        logging.info(f"[{game.game_id[:8]}] Player {player_name!r}: {cmd}{extra}")
         message = {
             "player": player_name,
             "event_type": "player_action",

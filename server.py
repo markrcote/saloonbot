@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 
 from cardgames.casino import Casino
 from cardgames.database import Database
@@ -28,6 +29,20 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+VERSION = None
+try:
+    with open('.version') as version_file:
+        VERSION = version_file.readline().strip()
+except FileNotFoundError:
+    pass
+
+if not VERSION:
+    try:
+        VERSION = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                                 text=True).stdout.strip()
+    except FileNotFoundError:
+        pass
+
 
 def _key_status(env_var):
     """Return 'set', 'set (via file)', or 'not set' for a secret resolved via env/_FILE/secrets."""
@@ -39,6 +54,7 @@ def _key_status(env_var):
 
 def _log_config():
     logging.info("=== Server Configuration ===")
+    logging.info(f"  Version: {VERSION or 'unknown'}")
     logging.info(f"  Redis: {REDIS_HOST}:{REDIS_PORT}")
     logging.info(f"  Debug logging: {'enabled' if DEBUG_LOGGING else 'disabled'}")
     if USE_SQLITE:

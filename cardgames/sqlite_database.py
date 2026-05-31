@@ -125,7 +125,7 @@ class SqliteDatabase:
                 )
             self.connection.commit()
             if cursor.rowcount > 0:
-                logging.info(f"Updated wallet for {username} by {amount}")
+                logging.debug(f"Updated wallet for {username} by {amount}")
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error updating wallet for {username}: {e}")

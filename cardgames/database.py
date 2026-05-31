@@ -199,7 +199,7 @@ class Database:
                 """, (amount, username))
             rows_affected = cursor.rowcount
             if rows_affected > 0:
-                logging.info(f"Updated wallet for {username} by {amount}")
+                logging.debug(f"Updated wallet for {username} by {amount}")
             return rows_affected > 0
 
         return self._execute_write(fn, f"update_wallet({username})")

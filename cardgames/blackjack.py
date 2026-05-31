@@ -46,15 +46,19 @@ def serialize_player(player):
     is_npc = getattr(player, 'is_npc', False)
     npc_type = getattr(player, 'npc_type', None) if is_npc else None
     npc_personality = None
-    if is_npc and npc_type == 'llm':
-        personality = getattr(player, 'personality', None)
-        npc_personality = personality.name if personality else None
+    npc_db_id = None
+    if is_npc:
+        npc_db_id = getattr(player, 'npc_db_id', None)
+        if npc_type == 'llm':
+            personality = getattr(player, 'personality', None)
+            npc_personality = personality.name if personality else None
     return {
         'name': player.name,
         'hand': serialize_hand(player.hand),
         'is_npc': is_npc,
         'npc_type': npc_type,
         'npc_personality': npc_personality,
+        'npc_db_id': npc_db_id,
     }
 
 
@@ -68,24 +72,36 @@ def deserialize_player(data, casino=None):
         player.hand = hand
         return player
 
-    npc_type = data.get('npc_type', 'simple')
+    npc_db_id = data.get('npc_db_id')
 
-    if npc_type == 'llm':
+    # Load NPC record from DB if we have an id
+    npc_record = None
+    if npc_db_id is not None and casino is not None and getattr(casino, 'db', None) is not None:
+        try:
+            npc_record = casino.db.get_npc_by_id(npc_db_id)
+        except Exception:
+            pass
+
+    backstory = npc_record.get('backstory', '') if npc_record else ''
+    personality_name = (npc_record.get('personality_name') if npc_record
+                        else data.get('npc_personality'))
+
+    if personality_name:
         from .llm_npc import LLMBlackjackNPC
         from .personalities import get_personality
         llm_client = getattr(casino, 'llm_client', None)
-        personality_name = data.get('npc_personality')
-        if llm_client is not None and personality_name:
+        if llm_client is not None:
             try:
                 personality = get_personality(personality_name)
-                player = LLMBlackjackNPC(name, personality, llm_client)
+                player = LLMBlackjackNPC(name, personality, llm_client,
+                                         npc_db_id=npc_db_id, backstory=backstory)
                 player.hand = hand
                 return player
             except Exception:
                 pass
 
     from .simple_npc import SimpleBlackjackNPC
-    player = SimpleBlackjackNPC(name)
+    player = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)
     player.hand = hand
     return player
 
@@ -219,7 +235,7 @@ class Blackjack(CardGame):
 
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
-        balance = self.casino.db.get_user_wallet(player.name) or 0
+        balance = self.casino.get_wallet(player)
         self.output(f"{player} {result} 💰 Wallet: ${balance:.2f}")
 
     def _check_turn(self, player):
@@ -244,10 +260,11 @@ class Blackjack(CardGame):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
 
-        try:
-            self.casino.db.add_user(player.name)
-        except Exception as e:
-            logging.error(f"Failed to add user to database: {e}")
+        if not getattr(player, 'is_npc', False):
+            try:
+                self.casino.db.add_user(player.name)
+            except Exception as e:
+                logging.error(f"Failed to add user to database: {e}")
 
         if self.state == HandState.BETTING:
             self.output(f"🪑 {_player_label(player)} pulls up a chair. They're in for this round!")
@@ -275,7 +292,7 @@ class Blackjack(CardGame):
                               leaving_idx < self.current_player_idx)
             if self.state == HandState.BETTING:
                 # Cards not yet dealt; bet is unlocked and returned
-                self.casino.db.update_wallet(player.name, bet_amount)
+                self.casino.update_wallet(player, bet_amount)
                 del self.bets[player.name]
                 self.output(f"💨 {player} hightails it before the deal! Their ${bet_amount:.2f} bet is returned.")
             elif already_played or self.state in (HandState.DEALER_TURN, HandState.RESOLVING):
@@ -325,7 +342,7 @@ class Blackjack(CardGame):
         # Output all players' wallets before betting
         wallet_lines = []
         for p in self.players:
-            balance = self.casino.db.get_user_wallet(p.name) or 0
+            balance = self.casino.get_wallet(p)
             wallet_lines.append(f"{p}: ${balance:.2f}")
         self.output("👛 Coin purses: " + ", ".join(wallet_lines))
 
@@ -348,8 +365,8 @@ class Blackjack(CardGame):
             raise InvalidBetError(f"Maximum bet is ${self.MAX_BET}")
 
         # Atomically deduct bet; returns False if wallet has insufficient funds
-        if not self.casino.db.update_wallet(player.name, -amount):
-            balance = self.casino.db.get_user_wallet(player.name) or 0
+        if not self.casino.update_wallet(player, -amount):
+            balance = self.casino.get_wallet(player)
             raise InsufficientFundsError(player, balance, amount)
 
         self.bets[player.name] = amount
@@ -358,7 +375,7 @@ class Blackjack(CardGame):
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${amount:.2f}")
 
         # Output bet and updated wallet
-        new_balance = self.casino.db.get_user_wallet(player.name) or 0
+        new_balance = self.casino.get_wallet(player)
         self.output(f"💵 {player} throws ${amount:.2f} on the table. 👛 Coin purse: ${new_balance:.2f}")
 
     def new_hand(self):
@@ -423,11 +440,11 @@ class Blackjack(CardGame):
         else:
             if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
                 winnings = bet_amount * 2
-                self.casino.db.update_wallet(player.name, winnings)
+                self.casino.update_wallet(player, winnings)
                 self._output_player_result(player, f"🏆 {tag}strikes gold! Payout: ${winnings:.2f}")
                 logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: wins ${winnings:.2f} (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})")
             elif self.get_score(player) == self.get_score(self.dealer):
-                self.casino.db.update_wallet(player.name, bet_amount)
+                self.casino.update_wallet(player, bet_amount)
                 self._output_player_result(player, f"🤝 {tag}pushes with the dealer. ${bet_amount:.2f} returned.")
                 logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: push at {self.get_score(player)}")
             else:
@@ -617,7 +634,7 @@ class Blackjack(CardGame):
         broke_npcs = []
         for player in self.players:
             if player.is_npc and player.name not in self.bets:
-                wallet = self.casino.db.get_user_wallet(player.name) or 0
+                wallet = self.casino.get_wallet(player)
                 if wallet < self.MIN_BET:
                     broke_npcs.append(player)
                     continue

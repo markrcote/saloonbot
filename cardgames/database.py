@@ -44,6 +44,18 @@ MIGRATIONS = [
             FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
         )""",
     ],
+    [   # Migration 2: NPC roster table
+        """CREATE TABLE IF NOT EXISTS npcs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            personality_name VARCHAR(255) NOT NULL,
+            backstory TEXT NOT NULL,
+            wallet INT NOT NULL DEFAULT 200,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_played_at TIMESTAMP NULL,
+            current_game_id VARCHAR(36) NULL
+        )""",
+    ],
 ]
 
 
@@ -220,6 +232,7 @@ class Database:
             json.dumps(game_data['players_waiting']),
             json.dumps(game_data['bets']),
         )
+
         def fn(cursor):
             cursor.execute("""
                 INSERT INTO games (
@@ -372,6 +385,137 @@ class Database:
             return rows_affected > 0
 
         return self._execute_write(fn, f"delete_game_channel({game_id})")
+
+    def create_npc(self, name, personality_name, wallet):
+        """Create a new NPC record. Returns the new npc id."""
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO npcs (name, personality_name, backstory, wallet) VALUES (%s, %s, '', %s)
+            """, (name, personality_name, int(wallet)))
+            return cursor.lastrowid
+        return self._execute_write(fn, f"create_npc({name})")
+
+    def get_available_npcs(self, limit, exclude_personality_names=None):
+        """Get available NPCs (current_game_id IS NULL). Returns list of dicts."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            excl = list(exclude_personality_names) if exclude_personality_names else []
+            if excl:
+                placeholders = ','.join(['%s'] * len(excl))
+                cursor.execute(
+                    f"SELECT * FROM npcs WHERE current_game_id IS NULL"
+                    f" AND personality_name NOT IN ({placeholders})"
+                    f" ORDER BY RAND() LIMIT %s",
+                    excl + [limit]
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM npcs WHERE current_game_id IS NULL ORDER BY RAND() LIMIT %s",
+                    (limit,)
+                )
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting available NPCs: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def get_npc_by_id(self, npc_id):
+        """Get NPC by id. Returns dict or None."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM npcs WHERE id = %s", (npc_id,))
+            return cursor.fetchone()
+        except Error as e:
+            logging.error(f"Error getting NPC {npc_id}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def get_npc_wallet(self, npc_id):
+        """Get NPC wallet balance. Returns float or None."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT wallet FROM npcs WHERE id = %s", (npc_id,))
+            result = cursor.fetchone()
+            return float(result[0]) if result else None
+        except Error as e:
+            logging.error(f"Error getting NPC wallet {npc_id}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def update_npc_wallet(self, npc_id, amount):
+        """Add amount to NPC wallet. Returns True on success, False if would go negative."""
+        def fn(cursor):
+            if amount < 0:
+                cursor.execute("""
+                    UPDATE npcs SET wallet = wallet + %s
+                    WHERE id = %s AND wallet + %s >= 0
+                """, (amount, npc_id, amount))
+            else:
+                cursor.execute(
+                    "UPDATE npcs SET wallet = wallet + %s WHERE id = %s",
+                    (amount, npc_id)
+                )
+            return cursor.rowcount > 0
+        return self._execute_write(fn, f"update_npc_wallet({npc_id})")
+
+    def set_npc_game(self, npc_id, game_id):
+        """Assign NPC to a game and update last_played_at."""
+        def fn(cursor):
+            cursor.execute("""
+                UPDATE npcs SET current_game_id = %s, last_played_at = NOW()
+                WHERE id = %s
+            """, (game_id, npc_id))
+        return self._execute_write(fn, f"set_npc_game({npc_id})")
+
+    def clear_npc_game(self, npc_id):
+        """Clear an NPC's current_game_id."""
+        def fn(cursor):
+            cursor.execute(
+                "UPDATE npcs SET current_game_id = NULL WHERE id = %s", (npc_id,)
+            )
+        return self._execute_write(fn, f"clear_npc_game({npc_id})")
+
+    def count_npcs(self):
+        """Return total number of NPC records."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("SELECT COUNT(*) FROM npcs")
+            return cursor.fetchone()[0]
+        except Error as e:
+            logging.error(f"Error counting NPCs: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def clear_stale_npc_games(self, active_game_ids):
+        """Clear current_game_id for NPCs whose game is no longer active."""
+        def fn(cursor):
+            if active_game_ids:
+                placeholders = ','.join(['%s'] * len(active_game_ids))
+                cursor.execute(
+                    f"UPDATE npcs SET current_game_id = NULL"
+                    f" WHERE current_game_id IS NOT NULL"
+                    f" AND current_game_id NOT IN ({placeholders})",
+                    list(active_game_ids)
+                )
+            else:
+                cursor.execute("UPDATE npcs SET current_game_id = NULL WHERE current_game_id IS NOT NULL")
+        return self._execute_write(fn, "clear_stale_npc_games")
 
     def close(self):
         """Close the database connection."""

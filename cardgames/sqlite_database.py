@@ -37,6 +37,18 @@ MIGRATIONS = [
             FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
         )""",
     ],
+    [   # Migration 2: NPC roster table
+        """CREATE TABLE IF NOT EXISTS npcs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            personality_name TEXT NOT NULL,
+            backstory TEXT NOT NULL DEFAULT '',
+            wallet INTEGER NOT NULL DEFAULT 200,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_played_at TIMESTAMP NULL,
+            current_game_id TEXT NULL
+        )""",
+    ],
 ]
 
 
@@ -273,6 +285,141 @@ class SqliteDatabase:
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error deleting game channel {game_id}: {e}")
+            raise
+
+    def create_npc(self, name, personality_name, wallet):
+        """Create a new NPC record. Returns the new npc id."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "INSERT INTO npcs (name, personality_name, wallet) VALUES (?, ?, ?)",
+                (name, personality_name, int(wallet))
+            )
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            logging.error(f"Error creating NPC {name}: {e}")
+            raise
+
+    def get_available_npcs(self, limit, exclude_personality_names=None):
+        """Get available NPCs (current_game_id IS NULL). Returns list of dicts."""
+        self._connect()
+        try:
+            excl = list(exclude_personality_names) if exclude_personality_names else []
+            if excl:
+                placeholders = ','.join(['?'] * len(excl))
+                cursor = self.connection.execute(
+                    f"SELECT * FROM npcs WHERE current_game_id IS NULL"
+                    f" AND personality_name NOT IN ({placeholders})"
+                    f" ORDER BY RANDOM() LIMIT ?",
+                    excl + [limit]
+                )
+            else:
+                cursor = self.connection.execute(
+                    "SELECT * FROM npcs WHERE current_game_id IS NULL ORDER BY RANDOM() LIMIT ?",
+                    (limit,)
+                )
+            return [dict(r) for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logging.error(f"Error getting available NPCs: {e}")
+            raise
+
+    def get_npc_by_id(self, npc_id):
+        """Get NPC by id. Returns dict or None."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Error getting NPC {npc_id}: {e}")
+            raise
+
+    def get_npc_wallet(self, npc_id):
+        """Get NPC wallet balance. Returns float or None."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("SELECT wallet FROM npcs WHERE id = ?", (npc_id,))
+            row = cursor.fetchone()
+            return float(row[0]) if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Error getting NPC wallet {npc_id}: {e}")
+            raise
+
+    def update_npc_wallet(self, npc_id, amount):
+        """Add amount to NPC wallet. Returns True on success, False if would go negative."""
+        self._connect()
+        try:
+            if amount < 0:
+                cursor = self.connection.execute(
+                    "UPDATE npcs SET wallet = wallet + ? WHERE id = ? AND wallet + ? >= 0",
+                    (amount, npc_id, amount)
+                )
+            else:
+                cursor = self.connection.execute(
+                    "UPDATE npcs SET wallet = wallet + ? WHERE id = ?",
+                    (amount, npc_id)
+                )
+            self.connection.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Error updating NPC wallet {npc_id}: {e}")
+            raise
+
+    def set_npc_game(self, npc_id, game_id):
+        """Assign NPC to a game and update last_played_at."""
+        self._connect()
+        try:
+            self.connection.execute(
+                "UPDATE npcs SET current_game_id = ?, last_played_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (game_id, npc_id)
+            )
+            self.connection.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error setting NPC game {npc_id}: {e}")
+            raise
+
+    def clear_npc_game(self, npc_id):
+        """Clear an NPC's current_game_id."""
+        self._connect()
+        try:
+            self.connection.execute(
+                "UPDATE npcs SET current_game_id = NULL WHERE id = ?", (npc_id,)
+            )
+            self.connection.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error clearing NPC game {npc_id}: {e}")
+            raise
+
+    def count_npcs(self):
+        """Return total number of NPC records."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("SELECT COUNT(*) FROM npcs")
+            return cursor.fetchone()[0]
+        except sqlite3.Error as e:
+            logging.error(f"Error counting NPCs: {e}")
+            raise
+
+    def clear_stale_npc_games(self, active_game_ids):
+        """Clear current_game_id for NPCs whose game is no longer active."""
+        self._connect()
+        try:
+            if active_game_ids:
+                placeholders = ','.join(['?'] * len(active_game_ids))
+                self.connection.execute(
+                    f"UPDATE npcs SET current_game_id = NULL"
+                    f" WHERE current_game_id IS NOT NULL"
+                    f" AND current_game_id NOT IN ({placeholders})",
+                    list(active_game_ids)
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE npcs SET current_game_id = NULL WHERE current_game_id IS NOT NULL"
+                )
+            self.connection.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error clearing stale NPC games: {e}")
             raise
 
     def close(self):

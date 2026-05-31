@@ -18,8 +18,9 @@ class LLMBlackjackNPC(NPCPlayer):
 
     npc_type = "llm"
 
-    def __init__(self, name: str, personality: Personality, llm_client: LLMClient):
-        super().__init__(name)
+    def __init__(self, name: str, personality: Personality, llm_client: LLMClient,
+                 npc_db_id=None, backstory=''):
+        super().__init__(name, npc_db_id=npc_db_id, backstory=backstory)
         self.personality = personality
         self._llm_client = llm_client
         self.last_quip: str | None = None

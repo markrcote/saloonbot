@@ -13,6 +13,11 @@ class NPCPlayer(Player, ABC):
     is_npc = True
     npc_type = "simple"
 
+    def __init__(self, name, npc_db_id=None, backstory=''):
+        super().__init__(name)
+        self.npc_db_id = npc_db_id
+        self.backstory = backstory
+
     @abstractmethod
     def decide_bet(self, min_bet, max_bet, wallet):
         """Decide how much to bet.

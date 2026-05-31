@@ -11,6 +11,9 @@ class SimpleBlackjackNPC(NPCPlayer):
       a weak card (2-6), the NPC stands on 12+ to let the dealer bust.
     """
 
+    def __init__(self, name, npc_db_id=None, backstory=''):
+        super().__init__(name, npc_db_id=npc_db_id, backstory=backstory)
+
     def decide_bet(self, min_bet, max_bet, wallet):
         return min_bet
 

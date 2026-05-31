@@ -9,13 +9,17 @@ from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
 from .llm_client import create_llm_client
 from .llm_npc import LLMBlackjackNPC
-from .personalities import get_random as get_random_personality
+from .personalities import get_personality, get_random as get_random_personality
 from .simple_npc import SimpleBlackjackNPC
+from wwnames.wwnames import WildWestNames
 
 NPC_TYPES = {
     'simple': SimpleBlackjackNPC,
     'llm': LLMBlackjackNPC,
 }
+
+
+MIN_NPC_ROSTER = 20
 
 
 class Casino:
@@ -27,6 +31,7 @@ class Casino:
         self._dirty_games = set()  # game_ids pending a DB write
         self._llm_client = None
         self._llm_client_tried = False
+        self._name_generator = WildWestNames()
 
     @property
     def llm_client(self):
@@ -44,6 +49,84 @@ class Casino:
                 logging.warning(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
         return self._llm_client
 
+    def get_wallet(self, player):
+        """Get a player's wallet balance (routes to users or npcs table)."""
+        if self.db is None:
+            return 0
+        npc_db_id = getattr(player, 'npc_db_id', None)
+        if getattr(player, 'is_npc', False) and npc_db_id is not None:
+            return self.db.get_npc_wallet(npc_db_id) or 0
+        return self.db.get_user_wallet(player.name) or 0
+
+    def update_wallet(self, player, amount):
+        """Update a player's wallet (routes to users or npcs table).
+
+        Returns True on success, False if the update would make the wallet negative.
+        """
+        if self.db is None:
+            return True
+        npc_db_id = getattr(player, 'npc_db_id', None)
+        if getattr(player, 'is_npc', False) and npc_db_id is not None:
+            return self.db.update_npc_wallet(npc_db_id, amount)
+        return self.db.update_wallet(player.name, amount)
+
+    def _generate_npc_name(self):
+        """Generate a Wild West name for a new NPC, stripping the gender symbol."""
+        raw = self._name_generator.random_name()
+        # raw is like "♀ Jane McCready" — strip the leading symbol and space
+        parts = raw.split(' ', 1)
+        return parts[1] if len(parts) > 1 else raw
+
+    def _ensure_npc_roster(self):
+        """Fill the NPC roster up to MIN_NPC_ROSTER if it's below that threshold."""
+        if self.db is None:
+            return
+        current = self.db.count_npcs()
+        if current >= MIN_NPC_ROSTER:
+            return
+        to_create = MIN_NPC_ROSTER - current
+        for _ in range(to_create):
+            personality = get_random_personality()
+            name = self._generate_npc_name()
+            self.db.create_npc(name, personality.name, personality.starting_wallet)
+        logging.info(f"NPC roster: created {to_create} NPCs (roster was {current})")
+
+    def _get_or_create_npcs(self, n, exclude_personalities):
+        """Return n NPC records for a game, creating new ones if the roster is thin."""
+        if self.db is None:
+            # No DB: return ephemeral placeholder dicts
+            result = []
+            excl = set(exclude_personalities)
+            for _ in range(n):
+                personality = get_random_personality(exclude_names=excl)
+                excl.add(personality.name)
+                result.append({
+                    'id': None,
+                    'name': personality.name,
+                    'personality_name': personality.name,
+                    'backstory': '',
+                    'wallet': personality.starting_wallet,
+                })
+            return result
+
+        available = self.db.get_available_npcs(n, exclude_personality_names=exclude_personalities)
+
+        # Create more if still not enough
+        while len(available) < n:
+            cur_excl = set(exclude_personalities) | {r['personality_name'] for r in available}
+            personality = get_random_personality(exclude_names=cur_excl)
+            name = self._generate_npc_name()
+            npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet)
+            available.append({
+                'id': npc_id,
+                'name': name,
+                'personality_name': personality.name,
+                'backstory': '',
+                'wallet': personality.starting_wallet,
+            })
+
+        return available[:n]
+
     def _load_games_from_db(self):
         """Load all active games from database on startup."""
         if self.db is None:
@@ -58,6 +141,18 @@ class Casino:
                 logging.info(f"Restored game {game_id} in state {game.state.value}")
         except Exception as e:
             logging.error(f"Error loading games from database: {e}")
+
+        # Clear current_game_id for NPCs in games that no longer exist
+        try:
+            self.db.clear_stale_npc_games(set(self.games.keys()))
+        except Exception as e:
+            logging.error(f"Error clearing stale NPC games: {e}")
+
+        # Ensure the NPC roster is populated
+        try:
+            self._ensure_npc_roster()
+        except Exception as e:
+            logging.error(f"Error ensuring NPC roster: {e}")
 
     def _mark_dirty(self, game_id):
         """Mark a game as needing a DB write on the next flush."""
@@ -92,9 +187,15 @@ class Casino:
 
         game = self.games.get(game_id)
         if game is not None:
-            for player in game.players + game.players_waiting:
+            for player in game.players + game.players_waiting + game.departed_players:
                 if isinstance(player, LLMBlackjackNPC):
                     player.shutdown()
+                npc_db_id = getattr(player, 'npc_db_id', None)
+                if npc_db_id is not None and self.db is not None:
+                    try:
+                        self.db.clear_npc_game(npc_db_id)
+                    except Exception as e:
+                        logging.error(f"Error clearing NPC game for {player.name}: {e}")
 
         if self.db is None:
             return
@@ -140,22 +241,42 @@ class Casino:
         all_players = game.players + game.players_waiting
         used_names = {p.name for p in all_players}
         used_personalities: set[str] = {
-            p.personality.name for p in all_players if isinstance(p, LLMBlackjackNPC)
+            getattr(p, 'personality', None).name
+            for p in all_players
+            if getattr(p, 'personality', None) is not None
         }
-        for _ in range(num_bots):
-            personality = get_random_personality(exclude_names=used_personalities)
-            used_personalities.add(personality.name)
-            name = personality.name
+
+        npc_records = self._get_or_create_npcs(num_bots, used_personalities)
+
+        for npc_record in npc_records:
+            used_personalities.add(npc_record['personality_name'])
+            name = npc_record['name']
             if name in used_names:
                 i = 2
                 while f"{name} #{i}" in used_names:
                     i += 1
                 name = f"{name} #{i}"
             used_names.add(name)
+
+            npc_db_id = npc_record.get('id')
+            backstory = npc_record.get('backstory', '')
+
+            if npc_db_id is not None and self.db is not None:
+                try:
+                    self.db.set_npc_game(npc_db_id, game_id)
+                except Exception as e:
+                    logging.error(f"Error setting NPC game for {name}: {e}")
+
+            try:
+                personality = get_personality(npc_record['personality_name'])
+            except ValueError:
+                personality = get_random_personality(exclude_names=used_personalities)
+
             if llm_client is not None:
-                npc = LLMBlackjackNPC(name, personality, llm_client)
+                npc = LLMBlackjackNPC(name, personality, llm_client,
+                                      npc_db_id=npc_db_id, backstory=backstory)
             else:
-                npc = SimpleBlackjackNPC(name)
+                npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)
             game.join(npc)
 
     def _handle_list_games(self, request_id):
@@ -250,6 +371,13 @@ class Casino:
             raise CardGameError(f"NPC '{npc_name}' not found in game")
 
         game.leave(npc)
+
+        npc_db_id = getattr(npc, 'npc_db_id', None)
+        if npc_db_id is not None and self.db is not None:
+            try:
+                self.db.clear_npc_game(npc_db_id)
+            except Exception as e:
+                logging.error(f"Error clearing NPC game for {npc_name}: {e}")
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")

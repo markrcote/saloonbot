@@ -16,9 +16,8 @@ services:
       - MYSQL_PASSWORD=saloonbot_password
       - MYSQL_DATABASE=saloonbot
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
-    secrets:
-      - anthropic_api_key
-      - openai_api_key
+    volumes:
+      - /etc/saloonbot/secrets:/run/secrets:ro
     depends_on:
       - redis
       - mysql
@@ -64,7 +63,3 @@ secrets:
     file: /etc/saloonbot/secrets/discord_token
   discord_guilds:
     file: /etc/saloonbot/secrets/discord_guilds
-  anthropic_api_key:
-    file: /etc/saloonbot/secrets/anthropic_api_key
-  openai_api_key:
-    file: /etc/saloonbot/secrets/openai_api_key

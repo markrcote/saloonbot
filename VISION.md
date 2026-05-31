@@ -10,6 +10,8 @@ The setting is the American frontier, late 19th century. The saloon has a name, 
 
 Saloonbot is a simulator more so than a game. It runs continuously, with a cast of regular NPCs who come and go to the tables, interacting with each other and the players. There are emergent stories amongst all the players, PC and NPC alike.
 
+The pace is deliberate. There's no urgency to rush through hands — the atmosphere is the point as much as the game. In Poker Night 2, the banter between characters is not filler between deals; it is half the reason to be there. In RDR2's saloons, watching an NPC fold with a sigh or double down with a grin makes you feel like you're sharing a table with someone real. Saloonbot aims for that same texture: NPC interactions are not decorative. A comment about the last hand, a grudge carried from three sessions ago, a moment of camaraderie after a shared loss — these are the things that make the simulator feel alive rather than mechanical.
+
 NPCs have lives beyond the table. Each one is generated with a backstory and relationships to other regulars — old friends, rivals, strangers with history. Random events shape them over time, drawing some to the tables more and pushing others away. They form opinions of each other through play, and they'll form opinions of you too. Show up enough, win enough, and word gets around; a notorious player won't get the same game from a sharp-eyed regular as an unknown one would.
 
 The saloon never closes. NPCs keep their habits and their histories whether anyone's at the table or not. Players can pull up a chair — from Discord, the command line, or wherever else — drop into whatever's happening, and leave when they're done. The world doesn't wait for them, and it doesn't stop when they go.

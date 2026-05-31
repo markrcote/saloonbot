@@ -132,6 +132,7 @@ dmypy.json
 discord_token.txt
 discord_guilds.txt
 saloonbot.db
+compose.yml
 
 # Claude Code
 .claude/

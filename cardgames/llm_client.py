@@ -18,12 +18,20 @@ def _read_key(env_var):
     return None
 
 
+_PROBE_TIMEOUT = 10.0
+
+
 class LLMClient(ABC):
     provider: str
     model: str
 
     @abstractmethod
     def complete(self, system: str, user: str, timeout: float) -> str:
+        pass
+
+    @abstractmethod
+    def probe(self) -> None:
+        """Make a minimal API call to verify the key and model are valid. Raises LLMError on failure."""
         pass
 
 
@@ -48,6 +56,17 @@ class ClaudeClient(LLMClient):
         except anthropic.APIError as e:
             raise LLMError(str(e)) from e
 
+    def probe(self) -> None:
+        import anthropic
+        try:
+            self._client.with_options(timeout=_PROBE_TIMEOUT).messages.create(
+                model=self.model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        except anthropic.APIError as e:
+            raise LLMError(str(e)) from e
+
 
 class OpenAIClient(LLMClient):
     provider = "openai"
@@ -69,6 +88,17 @@ class OpenAIClient(LLMClient):
                 timeout=timeout,
             )
             return response.choices[0].message.content
+        except Exception as e:
+            raise LLMError(str(e)) from e
+
+    def probe(self) -> None:
+        try:
+            self._client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                timeout=_PROBE_TIMEOUT,
+            )
         except Exception as e:
             raise LLMError(str(e)) from e
 

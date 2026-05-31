@@ -33,13 +33,15 @@ class Casino:
         if not self._llm_client_tried:
             self._llm_client_tried = True
             try:
-                self._llm_client = create_llm_client()
+                client = create_llm_client()
+                client.probe()
+                self._llm_client = client
                 logging.info(
-                    f"LLM client ready: {self._llm_client.provider} (model={self._llm_client.model})."
+                    f"LLM client ready: {client.provider} (model={client.model})."
                     " Bot players will use AI strategy."
                 )
             except Exception as e:
-                logging.info(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
+                logging.warning(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
         return self._llm_client
 
     def _load_games_from_db(self):

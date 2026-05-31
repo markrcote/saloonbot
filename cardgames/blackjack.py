@@ -615,20 +615,27 @@ class Blackjack(CardGame):
             self.time_first_player_joined = None
             return
 
-        # Auto-bet for any NPCs that haven't bet yet
+        # Auto-bet for any NPCs that haven't bet yet; drop broke ones immediately
+        broke_npcs = []
         for player in self.players:
             if player.is_npc and player.name not in self.bets:
                 wallet = self.casino.db.get_user_wallet(player.name) or 0
-                if wallet >= self.MIN_BET:
-                    amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
-                    if amount is None:
-                        continue
-                    quip = getattr(player, 'last_quip', None)
-                    if quip:
-                        self.output(f"🤠 {player.name}: \"{quip}\"")
-                        player.last_quip = None
-                    amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
-                    self.bet(player, amount)
+                if wallet < self.MIN_BET:
+                    broke_npcs.append(player)
+                    continue
+                amount = player.decide_bet(self.MIN_BET, self.MAX_BET, wallet)
+                if amount is None:
+                    continue
+                quip = getattr(player, 'last_quip', None)
+                if quip:
+                    self.output(f"🤠 {player.name}: \"{quip}\"")
+                    player.last_quip = None
+                amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
+                self.bet(player, amount)
+        for player in broke_npcs:
+            self.output(f"💸 {player.name} is tapped out and tips their hat goodbye.")
+            logging.info(f"[{self.game_id[:8]}] NPC {player.name} removed — insufficient funds")
+            self.players.remove(player)
 
         # Check if all players have bet
         all_bet = all(player.name in self.bets for player in self.players)

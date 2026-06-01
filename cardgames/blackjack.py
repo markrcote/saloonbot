@@ -442,14 +442,20 @@ class Blackjack(CardGame):
                 winnings = bet_amount * 2
                 self.casino.update_wallet(player, winnings)
                 self._output_player_result(player, f"🏆 {tag}strikes gold! Payout: ${winnings:.2f}")
-                logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: wins ${winnings:.2f} (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})")
+                logging.info(
+                    f"[{self.game_id[:8]}] {_player_label(player)}: wins ${winnings:.2f}"
+                    f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
+                )
             elif self.get_score(player) == self.get_score(self.dealer):
                 self.casino.update_wallet(player, bet_amount)
                 self._output_player_result(player, f"🤝 {tag}pushes with the dealer. ${bet_amount:.2f} returned.")
                 logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: push at {self.get_score(player)}")
             else:
                 self._output_player_result(player, f"❌ {tag}loses to the house. ${bet_amount:.2f} gone.")
-                logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: loses ${bet_amount:.2f} (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})")
+                logging.info(
+                    f"[{self.game_id[:8]}] {_player_label(player)}: loses ${bet_amount:.2f}"
+                    f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
+                )
 
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""
@@ -475,7 +481,10 @@ class Blackjack(CardGame):
         self.deal(player)
         self.output(f"🃏 {player} draws... {player.hand[-1]}")
         self.output(f"🎴 {player}'s showing {player.hand_str()}")
-        logging.info(f"[{self.game_id[:8]}] {_player_label(player)} hits — draws {player.hand[-1]}, hand: {player.hand_str()} ({self.get_score(player)})")
+        logging.info(
+            f"[{self.game_id[:8]}] {_player_label(player)} hits — draws {player.hand[-1]},"
+            f" hand: {player.hand_str()} ({self.get_score(player)})"
+        )
 
         score = self.get_score(player)
         if score == 21:
@@ -548,7 +557,10 @@ class Blackjack(CardGame):
             time.sleep(self.DEALER_CARD_PAUSE)
             self.deal(self.dealer)
             self.output(f"🃏 Dealer draws... {self.dealer.hand[-1]}")
-            logging.info(f"[{self.game_id[:8]}] Dealer draws {self.dealer.hand[-1]} → {self.dealer.hand_str()} ({self.get_score(self.dealer)})")
+            logging.info(
+                f"[{self.game_id[:8]}] Dealer draws {self.dealer.hand[-1]}"
+                f" → {self.dealer.hand_str()} ({self.get_score(self.dealer)})"
+            )
 
         if self.get_score(self.dealer) == 21:
             self.output("🎯 Dealer hits 21!")

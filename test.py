@@ -1221,7 +1221,7 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         from cardgames.llm_npc import LLMBlackjackNPC
         from cardgames.personalities import get_personality
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = llm_response
+        mock_llm.complete.return_value = (llm_response, 100, 50)
         personality = get_personality("The Grizzled Prospector")
         return LLMBlackjackNPC("TestNPC", personality, mock_llm)
 
@@ -1291,7 +1291,7 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         from cardgames.llm_npc import LLMBlackjackNPC
         from cardgames.personalities import get_personality
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = "not valid json at all"
+        mock_llm.complete.return_value = ("not valid json at all", 100, 50)
         personality = get_personality("The Grizzled Prospector")
         npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
         with self.assertLogs('cardgames.llm_npc', level='WARNING'):
@@ -1401,7 +1401,7 @@ class TestLLMNPCBlackjackIntegration(unittest.TestCase):
         from cardgames.llm_npc import LLMBlackjackNPC
         from cardgames.personalities import get_personality
         mock_llm = MagicMock()
-        mock_llm.complete.return_value = llm_response
+        mock_llm.complete.return_value = (llm_response, 100, 50)
         personality = get_personality("The Grizzled Prospector")
         return LLMBlackjackNPC("LLMBot", personality, mock_llm)
 
@@ -1657,6 +1657,129 @@ class TestNPCPersistence(unittest.TestCase):
         game.players_waiting.append(npc)
         casino._delete_game(game_id)
         mock_db.clear_npc_game.assert_called_with(99)
+
+
+class TestM2LLMUsageTracking(unittest.TestCase):
+    """Tests for M2 LLM usage tracking."""
+
+    def _make_sqlite_db(self):
+        from cardgames.sqlite_database import SqliteDatabase
+        return SqliteDatabase(":memory:")
+
+    def test_log_and_summarize_usage(self):
+        db = self._make_sqlite_db()
+        db.log_llm_usage('npc_action', 'claude-haiku-4-5', 100, 50, npc_id=1)
+        db.log_llm_usage('npc_action', 'claude-haiku-4-5', 200, 80, npc_id=2)
+        db.log_llm_usage('npc_bet', 'claude-haiku-4-5', 150, 60)
+        rows = db.get_llm_usage_summary(days=7)
+        purposes = {r['purpose'] for r in rows}
+        self.assertIn('npc_action', purposes)
+        self.assertIn('npc_bet', purposes)
+        for r in rows:
+            if r['purpose'] == 'npc_action':
+                self.assertEqual(r['total_input'], 300)
+                self.assertEqual(r['total_output'], 130)
+                self.assertEqual(r['call_count'], 2)
+
+    def test_update_npc_backstory(self):
+        db = self._make_sqlite_db()
+        npc_id = db.create_npc("Clara", "The Saloon Singer", 200)
+        db.update_npc_backstory(npc_id, "She came from New Orleans with a voice like honeysuckle.")
+        npc = db.get_npc_by_id(npc_id)
+        self.assertEqual(npc['backstory'], "She came from New Orleans with a voice like honeysuckle.")
+
+    def test_log_usage_no_db_silent(self):
+        from cardgames.casino import Casino
+        casino = Casino(redis_host="localhost", redis_port=6379, db=None)
+        casino._log_usage('npc_action', 'claude-haiku-4-5', 100, 50)  # should not raise
+
+    def test_log_usage_db_failure_silent(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.log_llm_usage.side_effect = Exception("DB error")
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        casino._log_usage('npc_action', 'claude-haiku-4-5', 100, 50)  # should not raise
+
+
+class TestM2SaloonContext(unittest.TestCase):
+    """Tests for M2 saloon context injection into LLM prompts."""
+
+    def _make_npc(self, detail_level='medium', backstory='', table_context_fn=None):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.model = 'claude-haiku-4-5'
+        mock_llm.complete.return_value = ('{"action": "stand", "quip": "Steady."}', 100, 50)
+        personality = get_personality("The Grizzled Prospector")
+        return LLMBlackjackNPC(
+            "TestNPC", personality, mock_llm,
+            saloon_name="The Golden Nugget", saloon_town="Dusty Creek, Nevada",
+            detail_level=detail_level, backstory=backstory,
+            table_context_fn=table_context_fn,
+        )
+
+    def test_action_prompt_includes_saloon_name(self):
+        npc = self._make_npc()
+        prompt = npc._build_action_system_prompt()
+        self.assertIn("The Golden Nugget", prompt)
+        self.assertIn("Dusty Creek, Nevada", prompt)
+
+    def test_action_prompt_includes_backstory_medium(self):
+        npc = self._make_npc(detail_level='medium', backstory='Old miner with a limp.')
+        prompt = npc._build_action_system_prompt()
+        self.assertIn("Old miner with a limp.", prompt)
+
+    def test_action_prompt_omits_backstory_low(self):
+        npc = self._make_npc(detail_level='low', backstory='Old miner with a limp.')
+        prompt = npc._build_action_system_prompt()
+        self.assertNotIn("Old miner with a limp.", prompt)
+
+    def test_action_prompt_includes_other_players_medium(self):
+        def table_fn():
+            return [{'name': 'Alice', 'archetype': 'The Card Sharp'}]
+        npc = self._make_npc(detail_level='medium', table_context_fn=table_fn)
+        prompt = npc._build_action_system_prompt()
+        self.assertIn("Alice", prompt)
+        self.assertIn("The Card Sharp", prompt)
+
+    def test_action_prompt_low_lists_names_only(self):
+        def table_fn():
+            return [{'name': 'Bob', 'archetype': 'The Railroad Baron'}]
+        npc = self._make_npc(detail_level='low', table_context_fn=table_fn)
+        prompt = npc._build_action_system_prompt()
+        self.assertIn("Bob", prompt)
+        # archetype not included for low detail
+        self.assertNotIn("The Railroad Baron", prompt)
+
+    def test_usage_callback_called_on_action(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.model = 'claude-haiku-4-5'
+        mock_llm.complete.return_value = ('{"action": "stand", "quip": ""}', 120, 60)
+        personality = get_personality("The Grizzled Prospector")
+        usage_calls = []
+
+        def record_usage(*a, **kw):
+            usage_calls.append((a, kw))
+
+        npc = LLMBlackjackNPC("Bot", personality, mock_llm,
+                              npc_db_id=7, usage_callback=record_usage)
+        hand = [Card("H", 10), Card("H", 8)]
+        dealer_card = Card("S", 7)
+        npc.decide_action(hand, dealer_card, 18)
+        npc._pending_action_future.result(timeout=2.0)
+        self.assertEqual(len(usage_calls), 1)
+        args, kwargs = usage_calls[0]
+        self.assertEqual(args[0], 'npc_action')
+        self.assertEqual(kwargs.get('npc_id'), 7)
+
+    def test_table_context_fn_error_returns_empty(self):
+        def bad_fn():
+            raise RuntimeError("boom")
+        npc = self._make_npc(table_context_fn=bad_fn)
+        result = npc._get_table_players()
+        self.assertEqual(result, [])
 
 
 if __name__ == '__main__':

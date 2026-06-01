@@ -86,6 +86,9 @@ def _log_config():
     logging.info(f"  BLACKJACK_TIME_FOR_BETTING: {os.getenv('BLACKJACK_TIME_FOR_BETTING', '30')}s")
     logging.info(f"  BLACKJACK_TIME_BETWEEN_HANDS: {os.getenv('BLACKJACK_TIME_BETWEEN_HANDS', '10')}s")
     logging.info(f"  BLACKJACK_REMINDER_PERIOD: {os.getenv('BLACKJACK_REMINDER_PERIOD', '30')}s")
+    logging.info(f"  SALOON_NAME: {os.getenv('SALOON_NAME', 'The Rusty Spur')}")
+    logging.info(f"  SALOON_TOWN: {os.getenv('SALOON_TOWN', 'Redemption, Texas')}")
+    logging.info(f"  SALOON_DETAIL_LEVEL: {os.getenv('SALOON_DETAIL_LEVEL', 'medium')}")
     logging.info("============================")
 
 

@@ -42,6 +42,9 @@ else:
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
+SALOON_NAME = os.getenv("SALOON_NAME", "The Rusty Spur")
+SALOON_TOWN = os.getenv("SALOON_TOWN", "Redemption, Texas")
+
 logging.basicConfig(
     level=LOG_LEVEL,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -141,6 +144,7 @@ class BlackjackCog(commands.Cog):
         self.subscribed = asyncio.Event()
         self.subscribe_task = None
         self._list_games_request_id = None
+        self._pending_usage_interactions = {}  # request_id -> interaction
 
     def cog_unload(self):
         self.listen.stop()
@@ -219,6 +223,33 @@ class BlackjackCog(commands.Cog):
         else:
             logging.info("No active games to restore")
 
+    async def _handle_usage_stats_response(self, interaction, rows):
+        """Format and send LLM usage stats as an ephemeral followup."""
+        if not rows:
+            await interaction.followup.send("No LLM usage recorded in the past 7 days.", ephemeral=True)
+            return
+
+        lines = []
+        total_in = total_out = 0
+        for r in rows:
+            in_tok = r.get('total_input', 0) or 0
+            out_tok = r.get('total_output', 0) or 0
+            total_in += in_tok
+            total_out += out_tok
+            lines.append(
+                f"**{r['purpose']}** ({r['model']}) — "
+                f"{r.get('call_count', 0)} calls, "
+                f"{in_tok:,} in / {out_tok:,} out tokens"
+            )
+
+        lines.append(f"\n**Total:** {total_in:,} input / {total_out:,} output tokens")
+        embed = nextcord.Embed(
+            title="LLM Usage (past 7 days)",
+            description="\n".join(lines),
+            color=0x4169e1,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     @commands.Cog.listener()
     async def on_message(self, message: nextcord.Message):
         if message.author == self.bot.user:
@@ -247,6 +278,47 @@ class BlackjackCog(commands.Cog):
                 await message.channel.send("⚠️ Invalid bet amount. Usage: bet <amount>")
         else:
             await self.send_command(sanitize_username(message.author.name), game, command)
+
+    @nextcord.slash_command(name="saloon", guild_ids=GUILD_IDS,
+                            description="Show info about the saloon")
+    async def saloon_info(self, interaction: nextcord.Interaction):
+        active_games = [g for g in self.games if g.state == GameState.ACTIVE]
+        if active_games:
+            table_lines = []
+            for g in active_games:
+                channel_mention = f"<#{g.channel_id}>"
+                table_lines.append(f"• {channel_mention}")
+            tables_str = "\n".join(table_lines)
+        else:
+            tables_str = "No games in progress."
+        embed = nextcord.Embed(
+            title=f"🤠 {SALOON_NAME}",
+            description=f"*{SALOON_TOWN}*",
+            color=0xc8a96e,
+        )
+        embed.add_field(name="Active Tables", value=tables_str, inline=False)
+        await interaction.send(embed=embed)
+
+    @nextcord.slash_command(name="usage", guild_ids=GUILD_IDS,
+                            description="Show LLM usage stats for the past 7 days (admin only)")
+    async def usage_stats(self, interaction: nextcord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.send("⚠️ Only server admins can view usage stats.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_usage_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'get_usage',
+            'request_id': request_id,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for get_usage: {e}")
+            self._pending_usage_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(
@@ -405,6 +477,12 @@ class BlackjackCog(commands.Cog):
                 if hasattr(self, '_list_games_request_id') and \
                    request_id == self._list_games_request_id:
                     await self._handle_list_games_response(data.get("games", []))
+
+            elif data.get("event_type") == "usage_stats":
+                request_id = data.get("request_id")
+                interaction = self._pending_usage_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_usage_stats_response(interaction, data.get("rows", []))
         else:
             for game in self.games:
                 if game.topic() == topic:

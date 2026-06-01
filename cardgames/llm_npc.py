@@ -19,7 +19,9 @@ class LLMBlackjackNPC(NPCPlayer):
     npc_type = "llm"
 
     def __init__(self, name: str, personality: Personality, llm_client: LLMClient,
-                 npc_db_id=None, backstory=''):
+                 npc_db_id=None, backstory='',
+                 saloon_name='The Rusty Spur', saloon_town='Redemption, Texas',
+                 detail_level='medium', table_context_fn=None, usage_callback=None):
         super().__init__(name, npc_db_id=npc_db_id, backstory=backstory)
         self.personality = personality
         self._llm_client = llm_client
@@ -28,6 +30,11 @@ class LLMBlackjackNPC(NPCPlayer):
         self._pending_action_future = None
         self._pending_bet_future = None
         self._fallback = SimpleBlackjackNPC(name)
+        self._saloon_name = saloon_name
+        self._saloon_town = saloon_town
+        self._detail_level = detail_level
+        self._table_context_fn = table_context_fn
+        self._usage_callback = usage_callback
 
     def decide_action(self, hand, dealer_visible_card, score):
         if self._pending_action_future is None:
@@ -70,6 +77,67 @@ class LLMBlackjackNPC(NPCPlayer):
             logger.warning("LLM bet decision failed for %s: %s", self.name, e)
             return min_bet
 
+    def _get_table_players(self):
+        """Return list of other players at the table (name, archetype)."""
+        if self._table_context_fn is None:
+            return []
+        try:
+            return self._table_context_fn()
+        except Exception:
+            return []
+
+    def _build_action_system_prompt(self) -> str:
+        base = self.personality.system_prompt
+        context = self._build_context_block()
+        if context:
+            marker = "Respond ONLY with valid JSON:"
+            idx = base.rfind(marker)
+            if idx >= 0:
+                base = base[:idx].rstrip() + "\n\n" + context + "\n\n" + base[idx:]
+        return base
+
+    def _build_betting_system_prompt(self) -> str:
+        base = self.personality.system_prompt
+        context = self._build_context_block()
+        marker = "Respond ONLY with valid JSON:"
+        idx = base.rfind(marker)
+        if idx >= 0:
+            base = base[:idx].rstrip()
+        if context:
+            base = base + "\n\n" + context
+        return (
+            base + " "
+            "Respond ONLY with valid JSON: "
+            '{"amount": <integer bet amount>, "quip": "<in-character remark under 20 words>"}'
+        )
+
+    def _build_context_block(self) -> str:
+        parts = []
+
+        parts.append(
+            f"You are playing blackjack at {self._saloon_name} in {self._saloon_town}."
+        )
+
+        if self._detail_level != 'low' and self.backstory:
+            parts.append(f"Your backstory: {self.backstory}")
+
+        table_players = self._get_table_players()
+        if table_players:
+            if self._detail_level == 'low':
+                names = ", ".join(p['name'] for p in table_players)
+                parts.append(f"Others at the table: {names}.")
+            else:
+                descriptions = []
+                for p in table_players:
+                    archetype = p.get('archetype')
+                    if archetype:
+                        descriptions.append(f"{p['name']} ({archetype})")
+                    else:
+                        descriptions.append(p['name'])
+                parts.append(f"Others at the table: {', '.join(descriptions)}.")
+
+        return " ".join(parts)
+
     def _llm_decide_action(self, hand, dealer_visible_card, score) -> dict:
         timeout = float(os.environ.get("LLM_TIMEOUT", "5"))
         hand_str = ", ".join(c.str(short=True) for c in hand)
@@ -80,8 +148,8 @@ class LLMBlackjackNPC(NPCPlayer):
         )
         t0 = time.time()
         try:
-            raw = self._llm_client.complete(
-                system=self.personality.system_prompt,
+            raw, in_tok, out_tok = self._llm_client.complete(
+                system=self._build_action_system_prompt(),
                 user=user_msg,
                 timeout=timeout,
             )
@@ -89,6 +157,7 @@ class LLMBlackjackNPC(NPCPlayer):
             if result.get("action") not in _ACTION_VALID:
                 raise ValueError(f"Invalid action: {result.get('action')!r}")
             logger.info("LLM action for %s: %.1fs → %s", self.name, time.time() - t0, result["action"])
+            self._record_usage('npc_action', in_tok, out_tok)
             return result
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("LLM action fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
@@ -105,7 +174,7 @@ class LLMBlackjackNPC(NPCPlayer):
         )
         t0 = time.time()
         try:
-            raw = self._llm_client.complete(
+            raw, in_tok, out_tok = self._llm_client.complete(
                 system=system,
                 user=user_msg,
                 timeout=timeout,
@@ -113,22 +182,21 @@ class LLMBlackjackNPC(NPCPlayer):
             result = json.loads(raw)
             amount = int(result["amount"])
             logger.info("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, amount)
+            self._record_usage('npc_bet', in_tok, out_tok)
             return {"amount": max(min_bet, min(max_bet, amount)), "quip": result.get("quip")}
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("LLM bet fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
             return {"amount": min_bet, "quip": None}
 
+    def _record_usage(self, purpose, input_tokens, output_tokens):
+        if self._usage_callback is not None:
+            try:
+                self._usage_callback(
+                    purpose, self._llm_client.model, input_tokens, output_tokens,
+                    npc_id=self.npc_db_id
+                )
+            except Exception as e:
+                logger.warning("Failed to record LLM usage: %s", e)
+
     def shutdown(self):
         self._executor.shutdown(wait=False)
-
-    def _build_betting_system_prompt(self) -> str:
-        base = self.personality.system_prompt
-        marker = "Respond ONLY with valid JSON:"
-        idx = base.rfind(marker)
-        if idx >= 0:
-            base = base[:idx].rstrip()
-        return (
-            base + " "
-            "Respond ONLY with valid JSON: "
-            '{"amount": <integer bet amount>, "quip": "<in-character remark under 20 words>"}'
-        )

@@ -34,19 +34,20 @@ See `M1-ARCH.md` for detailed architectural decisions.
 
 ---
 
-## Milestone 2: Saloon Identity & Richer LLM Context
+## Milestone 2: Saloon Identity & Richer LLM Context ✓ DONE
 
 **Goal:** The saloon has a name. NPCs know where they are, who they're playing with, and what their backstory is.
 
-**Changes:**
-- Saloon config via env vars: `SALOON_NAME` (default "The Rusty Spur"), `SALOON_TOWN` (default "Redemption, Texas")
-- All game-start output greets players in saloon context; output messages use the saloon name where natural
-- LLM system prompt enrichment in `llm_npc.py`: inject `saloon_name`, `saloon_town`, `npc_backstory`, and names of other players at the table
-- New `/saloon` Discord slash command in `bot.py`: shows saloon name, town, and who's currently seated
-- NPC quips can reference the saloon name / setting naturally
-- Files: `server.py` (pass saloon config to Casino), `cardgames/casino.py`, `cardgames/llm_npc.py`, `bot.py`
-
-**Verification:** Join a game, confirm messages reference saloon name; inspect LLM prompts (add debug logging temporarily); run `/saloon` command.
+**Changes (implemented):**
+- Saloon config via env vars: `SALOON_NAME` (default "The Rusty Spur"), `SALOON_TOWN` (default "Redemption, Texas"), `SALOON_DETAIL_LEVEL` (low/medium/high, default medium)
+- LLM system prompt enrichment in `llm_npc.py`: inject saloon name/town, NPC backstory (based on detail level), other players at the table
+- Backstory generation via LLM on NPC first creation; stored in `npcs.backstory`; skipped when `low` detail level or no LLM
+- `LLMClient.complete()` returns `(text, input_tokens, output_tokens)` tuple
+- LLM usage tracking: `llm_usage` DB table (migration 3); logged fire-and-forget for all LLM calls
+- `casino.py`: `_log_usage()`, `_generate_backstory()`, `_make_table_context_fn()`, `_handle_get_usage()`
+- `/saloon` Discord slash command: shows saloon name, town, active game channels
+- `/usage` Discord slash command (admin-only): deferred, Redis request/response, shows 7-day token totals by purpose
+- Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/llm_client.py`, `cardgames/llm_npc.py`, `cardgames/casino.py`, `server.py`, `bot.py`
 
 ---
 

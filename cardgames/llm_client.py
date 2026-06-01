@@ -26,7 +26,8 @@ class LLMClient(ABC):
     model: str
 
     @abstractmethod
-    def complete(self, system: str, user: str, timeout: float) -> str:
+    def complete(self, system: str, user: str, timeout: float) -> tuple[str, int, int]:
+        """Return (text, input_tokens, output_tokens)."""
         pass
 
     @abstractmethod
@@ -43,7 +44,7 @@ class ClaudeClient(LLMClient):
         self.model = os.environ.get("LLM_MODEL", "claude-haiku-4-5")
         self._client = anthropic.Anthropic(api_key=_read_key("ANTHROPIC_API_KEY"))
 
-    def complete(self, system: str, user: str, timeout: float) -> str:
+    def complete(self, system: str, user: str, timeout: float) -> tuple[str, int, int]:
         import anthropic
         try:
             response = self._client.with_options(timeout=timeout).messages.create(
@@ -52,7 +53,8 @@ class ClaudeClient(LLMClient):
                 system=system,
                 messages=[{"role": "user", "content": user}],
             )
-            return response.content[0].text
+            usage = response.usage
+            return response.content[0].text, usage.input_tokens, usage.output_tokens
         except anthropic.APIError as e:
             raise LLMError(str(e)) from e
 
@@ -76,7 +78,7 @@ class OpenAIClient(LLMClient):
         self.model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
         self._client = openai.OpenAI(api_key=_read_key("OPENAI_API_KEY"))
 
-    def complete(self, system: str, user: str, timeout: float) -> str:
+    def complete(self, system: str, user: str, timeout: float) -> tuple[str, int, int]:
         try:
             response = self._client.chat.completions.create(
                 model=self.model,
@@ -87,7 +89,8 @@ class OpenAIClient(LLMClient):
                 max_tokens=256,
                 timeout=timeout,
             )
-            return response.choices[0].message.content
+            usage = response.usage
+            return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
         except Exception as e:
             raise LLMError(str(e)) from e
 

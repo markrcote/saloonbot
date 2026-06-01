@@ -49,6 +49,18 @@ MIGRATIONS = [
             current_game_id TEXT NULL
         )""",
     ],
+    [   # Migration 3: LLM usage tracking
+        """CREATE TABLE IF NOT EXISTS llm_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            purpose TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            npc_id INTEGER NULL,
+            game_id TEXT NULL
+        )""",
+    ],
 ]
 
 
@@ -420,6 +432,48 @@ class SqliteDatabase:
             self.connection.commit()
         except sqlite3.Error as e:
             logging.error(f"Error clearing stale NPC games: {e}")
+            raise
+
+    def update_npc_backstory(self, npc_id, backstory):
+        """Set the backstory text for an NPC."""
+        self._connect()
+        try:
+            self.connection.execute("UPDATE npcs SET backstory = ? WHERE id = ?", (backstory, npc_id))
+            self.connection.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error updating NPC backstory {npc_id}: {e}")
+            raise
+
+    def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
+        """Record a single LLM API call for usage tracking."""
+        self._connect()
+        try:
+            self.connection.execute("""
+                INSERT INTO llm_usage (purpose, model, input_tokens, output_tokens, npc_id, game_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (purpose, model, input_tokens, output_tokens, npc_id, game_id))
+            self.connection.commit()
+        except sqlite3.Error as e:
+            logging.error(f"Error logging LLM usage: {e}")
+            raise
+
+    def get_llm_usage_summary(self, days=7):
+        """Return token totals grouped by purpose for the past N days."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("""
+                SELECT purpose, model,
+                       SUM(input_tokens) AS total_input,
+                       SUM(output_tokens) AS total_output,
+                       COUNT(*) AS call_count
+                FROM llm_usage
+                WHERE occurred_at >= datetime('now', ?)
+                GROUP BY purpose, model
+                ORDER BY total_input + total_output DESC
+            """, (f'-{days} days',))
+            return [dict(r) for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logging.error(f"Error getting LLM usage summary: {e}")
             raise
 
     def close(self):

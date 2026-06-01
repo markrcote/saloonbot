@@ -92,6 +92,7 @@ Discord Users
 **Casino actions** (`event_type: "casino_action"`):
 - `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
+- `get_usage` - Request 7-day LLM usage summary (admin; bot sends with `request_id`, server responds via `usage_stats`)
 
 **Player actions** (`event_type: "player_action"`):
 - `join`, `bet` (with `amount`), `hit`, `stand`, `double_down`, `split`
@@ -100,16 +101,17 @@ Discord Users
 
 - `new_game` response - includes `game_id`, `request_id`, and optional channel info
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
+- `usage_stats` response - includes `request_id` and `rows` list (each entry: `purpose`, `model`, `total_input`, `total_output`, `call_count`)
 
 ### Key Modules
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` for bot recovery; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy)
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` and `get_usage` for bot recovery/admin; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
-- `llm_client.py` - LLM provider abstraction (Claude / OpenAI); falls back to basic strategy on timeout
+- `llm_client.py` - LLM provider abstraction (Claude / OpenAI); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
 - `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list
 - `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
@@ -119,6 +121,8 @@ Discord Users
 - `users` - Stores player usernames and wallet balances (default $200)
 - `games` - Persists game state (deck, hands, bets, timers) for server restart recovery
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
+- `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), wallet, current_game_id
+- `llm_usage` - Per-call LLM token tracking: purpose, model, input/output tokens, npc_id, game_id
 
 **wwnames/**
 - `wwnames.py` - Random name generator using data files in `names/`
@@ -149,6 +153,9 @@ Discord Users
 | OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy; see secret resolution below |
 | LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
 | LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
+| SALOON_NAME | The Rusty Spur | Name of the saloon (shown in Discord and injected into LLM context) |
+| SALOON_TOWN | Redemption, Texas | Town/location of the saloon |
+| SALOON_DETAIL_LEVEL | medium | Controls LLM context richness: `low` (names only, no backstory), `medium` (2-sentence backstory, archetypes), `high` (4-sentence backstory, full context) |
 
 ### Secret resolution
 

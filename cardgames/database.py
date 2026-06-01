@@ -56,6 +56,18 @@ MIGRATIONS = [
             current_game_id VARCHAR(36) NULL
         )""",
     ],
+    [   # Migration 3: LLM usage tracking
+        """CREATE TABLE IF NOT EXISTS llm_usage (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            purpose VARCHAR(64) NOT NULL,
+            model VARCHAR(128) NOT NULL,
+            input_tokens INT NOT NULL DEFAULT 0,
+            output_tokens INT NOT NULL DEFAULT 0,
+            npc_id INT NULL,
+            game_id VARCHAR(36) NULL
+        )""",
+    ],
 ]
 
 
@@ -516,6 +528,45 @@ class Database:
             else:
                 cursor.execute("UPDATE npcs SET current_game_id = NULL WHERE current_game_id IS NOT NULL")
         return self._execute_write(fn, "clear_stale_npc_games")
+
+    def update_npc_backstory(self, npc_id, backstory):
+        """Set the backstory text for an NPC."""
+        def fn(cursor):
+            cursor.execute("UPDATE npcs SET backstory = %s WHERE id = %s", (backstory, npc_id))
+        return self._execute_write(fn, f"update_npc_backstory({npc_id})")
+
+    def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
+        """Record a single LLM API call for usage tracking."""
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO llm_usage (purpose, model, input_tokens, output_tokens, npc_id, game_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (purpose, model, input_tokens, output_tokens, npc_id, game_id))
+        return self._execute_write(fn, "log_llm_usage")
+
+    def get_llm_usage_summary(self, days=7):
+        """Return token totals grouped by purpose for the past N days."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT purpose, model,
+                       SUM(input_tokens) AS total_input,
+                       SUM(output_tokens) AS total_output,
+                       COUNT(*) AS call_count
+                FROM llm_usage
+                WHERE occurred_at >= NOW() - INTERVAL %s DAY
+                GROUP BY purpose, model
+                ORDER BY total_input + total_output DESC
+            """, (days,))
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting LLM usage summary: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
 
     def close(self):
         """Close the database connection."""

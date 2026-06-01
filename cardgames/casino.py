@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 import uuid
 
@@ -7,7 +8,7 @@ import redis
 
 from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
-from .llm_client import create_llm_client
+from .llm_client import create_llm_client, LLMError
 from .llm_npc import LLMBlackjackNPC
 from .personalities import get_personality, get_random as get_random_personality
 from .simple_npc import SimpleBlackjackNPC
@@ -20,6 +21,19 @@ NPC_TYPES = {
 
 
 MIN_NPC_ROSTER = 20
+
+SALOON_NAME = os.environ.get("SALOON_NAME", "The Rusty Spur")
+SALOON_TOWN = os.environ.get("SALOON_TOWN", "Redemption, Texas")
+SALOON_DETAIL_LEVEL = os.environ.get("SALOON_DETAIL_LEVEL", "medium").lower()
+
+_VALID_DETAIL_LEVELS = {"low", "medium", "high"}
+if SALOON_DETAIL_LEVEL not in _VALID_DETAIL_LEVELS:
+    logging.warning(
+        f"Invalid SALOON_DETAIL_LEVEL {SALOON_DETAIL_LEVEL!r}; defaulting to 'medium'"
+    )
+    SALOON_DETAIL_LEVEL = "medium"
+
+_BACKSTORY_SENTENCES = {"low": 0, "medium": 2, "high": 4}
 
 
 class Casino:
@@ -70,12 +84,69 @@ class Casino:
             return self.db.update_npc_wallet(npc_db_id, amount)
         return self.db.update_wallet(player.name, amount)
 
+    def _log_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
+        """Write an LLM usage record to DB. Silently ignores failures."""
+        if self.db is None:
+            return
+        try:
+            self.db.log_llm_usage(purpose, model, input_tokens, output_tokens, npc_id, game_id)
+        except Exception as e:
+            logging.warning(f"Failed to log LLM usage ({purpose}): {e}")
+
+    def _generate_backstory(self, npc_id, personality, name):
+        """Generate and persist a backstory for a new NPC. Returns the backstory string."""
+        n_sentences = _BACKSTORY_SENTENCES.get(SALOON_DETAIL_LEVEL, 2)
+        if n_sentences == 0 or self.llm_client is None:
+            return ''
+
+        system = (
+            f"{personality.system_prompt}\n\n"
+            f"You are {name}, a character in the Old West frontier town of {SALOON_TOWN}. "
+            f"Write your backstory in {n_sentences} sentences, in first person, "
+            "focusing on what brought you to this life and what you're known for. "
+            "Be vivid and specific. Respond with only the backstory text, no JSON."
+        )
+        try:
+            timeout = float(os.environ.get("LLM_TIMEOUT", "5")) * 3  # more time for backstory
+            text, in_tok, out_tok = self.llm_client.complete(
+                system=system,
+                user="Tell me your backstory.",
+                timeout=timeout,
+            )
+            backstory = text.strip()
+            self._log_usage('backstory_gen', self.llm_client.model, in_tok, out_tok, npc_id=npc_id)
+            if self.db is not None and npc_id is not None:
+                try:
+                    self.db.update_npc_backstory(npc_id, backstory)
+                except Exception as e:
+                    logging.warning(f"Failed to save backstory for NPC {npc_id}: {e}")
+            logging.info(f"Generated backstory for {name} ({npc_id})")
+            return backstory
+        except (LLMError, Exception) as e:
+            logging.warning(f"Backstory generation failed for {name}: {e}")
+            return ''
+
     def _generate_npc_name(self):
         """Generate a Wild West name for a new NPC, stripping the gender symbol."""
         raw = self._name_generator.random_name()
         # raw is like "♀ Jane McCready" — strip the leading symbol and space
         parts = raw.split(' ', 1)
         return parts[1] if len(parts) > 1 else raw
+
+    def _make_table_context_fn(self, game_id, npc_name):
+        """Return a callable that yields other players at the table when invoked."""
+        def get_table_context():
+            game = self.games.get(game_id)
+            if game is None:
+                return []
+            result = []
+            for p in game.players + game.players_waiting:
+                if p.name == npc_name:
+                    continue
+                archetype = getattr(getattr(p, 'personality', None), 'name', None)
+                result.append({'name': p.name, 'archetype': archetype})
+            return result
+        return get_table_context
 
     def _ensure_npc_roster(self):
         """Fill the NPC roster up to MIN_NPC_ROSTER if it's below that threshold."""
@@ -117,11 +188,12 @@ class Casino:
             personality = get_random_personality(exclude_names=cur_excl)
             name = self._generate_npc_name()
             npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet)
+            backstory = self._generate_backstory(npc_id, personality, name)
             available.append({
                 'id': npc_id,
                 'name': name,
                 'personality_name': personality.name,
-                'backstory': '',
+                'backstory': backstory,
                 'wallet': personality.starting_wallet,
             })
 
@@ -273,8 +345,15 @@ class Casino:
                 personality = get_random_personality(exclude_names=used_personalities)
 
             if llm_client is not None:
-                npc = LLMBlackjackNPC(name, personality, llm_client,
-                                      npc_db_id=npc_db_id, backstory=backstory)
+                table_ctx = self._make_table_context_fn(game_id, name)
+                npc = LLMBlackjackNPC(
+                    name, personality, llm_client,
+                    npc_db_id=npc_db_id, backstory=backstory,
+                    saloon_name=SALOON_NAME, saloon_town=SALOON_TOWN,
+                    detail_level=SALOON_DETAIL_LEVEL,
+                    table_context_fn=table_ctx,
+                    usage_callback=self._log_usage,
+                )
             else:
                 npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)
             game.join(npc)
@@ -311,6 +390,24 @@ class Casino:
             }
         )
         logging.info(f"Responded to list_games with {len(games_info)} games")
+
+    def _handle_get_usage(self, request_id):
+        """Handle a get_usage request: query DB and publish 7-day summary."""
+        rows = []
+        if self.db is not None:
+            try:
+                rows = self.db.get_llm_usage_summary(days=7)
+            except Exception as e:
+                logging.error(f"Error getting LLM usage summary: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'usage_stats',
+                'request_id': request_id,
+                'rows': [dict(r) for r in rows],
+            }
+        )
 
     def add_npc(self, game_id, npc_name, npc_type='simple'):
         """Add an NPC player to a game.
@@ -419,6 +516,10 @@ class Casino:
                     request_id = data.get('request_id')
                     if request_id:
                         self._handle_list_games(request_id)
+                elif data['action'] == 'get_usage':
+                    request_id = data.get('request_id')
+                    if request_id:
+                        self._handle_get_usage(request_id)
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:

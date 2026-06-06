@@ -35,6 +35,19 @@ if SALOON_DETAIL_LEVEL not in _VALID_DETAIL_LEVELS:
 
 _BACKSTORY_SENTENCES = {"low": 0, "medium": 2, "high": 4}
 
+_FAME_THRESHOLDS = [
+    (3, "unknown stranger"),
+    (15, "known regular"),
+    (None, "notorious gambler"),
+]
+
+
+def _fame_label(games_played):
+    for threshold, label in _FAME_THRESHOLDS:
+        if threshold is None or games_played < threshold:
+            return label
+    return "notorious gambler"
+
 
 class Casino:
     def __init__(self, redis_host, redis_port, db=None):
@@ -133,6 +146,36 @@ class Casino:
         parts = raw.split(' ', 1)
         return parts[1] if len(parts) > 1 else raw
 
+    def record_hand_result(self, player, won, lost):
+        """Record a hand outcome for a human player. Fire-and-forget; ignores failures."""
+        if getattr(player, 'is_npc', False) or self.db is None:
+            return
+        try:
+            self.db.update_player_stats(player.name, won=won, lost=lost)
+        except Exception as e:
+            logging.warning(f"Failed to update player stats for {player.name}: {e}")
+
+    def _handle_get_stats(self, request_id, player_name):
+        """Handle a get_stats request: query DB and publish player stats."""
+        stats = None
+        if self.db is not None:
+            try:
+                stats = self.db.get_player_stats(player_name)
+                if stats:
+                    stats['fame'] = _fame_label(stats['games_played'])
+            except Exception as e:
+                logging.error(f"Error getting player stats for {player_name}: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'player_stats',
+                'request_id': request_id,
+                'player': player_name,
+                'stats': stats,
+            }
+        )
+
     def _make_table_context_fn(self, game_id, npc_name):
         """Return a callable that yields other players at the table when invoked."""
         def get_table_context():
@@ -144,7 +187,15 @@ class Casino:
                 if p.name == npc_name:
                     continue
                 archetype = getattr(getattr(p, 'personality', None), 'name', None)
-                result.append({'name': p.name, 'archetype': archetype})
+                fame = None
+                if not getattr(p, 'is_npc', False) and self.db is not None:
+                    try:
+                        player_stats = self.db.get_player_stats(p.name)
+                        if player_stats:
+                            fame = _fame_label(player_stats['games_played'])
+                    except Exception:
+                        pass
+                result.append({'name': p.name, 'archetype': archetype, 'fame': fame})
             return result
         return get_table_context
 
@@ -520,6 +571,11 @@ class Casino:
                     request_id = data.get('request_id')
                     if request_id:
                         self._handle_get_usage(request_id)
+                elif data['action'] == 'get_stats':
+                    request_id = data.get('request_id')
+                    player_name = data.get('player')
+                    if request_id and player_name:
+                        self._handle_get_stats(request_id, player_name)
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:
@@ -546,6 +602,15 @@ class Casino:
                             self.remove_npc(game_id, npc_name)
                 else:
                     self.games[game_id].action(data)
+                    if (data['event_type'] == 'player_action'
+                            and data.get('action') == 'join'
+                            and self.db is not None):
+                        player_name = data.get('player')
+                        if player_name:
+                            try:
+                                self.db.increment_games_played(player_name)
+                            except Exception as e:
+                                logging.warning(f"Failed to increment games_played for {player_name}: {e}")
                 self._mark_dirty(game_id)
             except CardGameError as e:
                 logging.warning(f"Game error: {e}")

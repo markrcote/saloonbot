@@ -130,10 +130,13 @@ class LLMBlackjackNPC(NPCPlayer):
                 descriptions = []
                 for p in table_players:
                     archetype = p.get('archetype')
+                    fame = p.get('fame') if self._detail_level == 'high' else None
+                    desc = p['name']
                     if archetype:
-                        descriptions.append(f"{p['name']} ({archetype})")
-                    else:
-                        descriptions.append(p['name'])
+                        desc += f" ({archetype})"
+                    if fame:
+                        desc += f", a {fame}"
+                    descriptions.append(desc)
                 parts.append(f"Others at the table: {', '.join(descriptions)}.")
 
         return " ".join(parts)

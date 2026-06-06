@@ -1782,5 +1782,132 @@ class TestM2SaloonContext(unittest.TestCase):
         self.assertEqual(result, [])
 
 
+class TestM3PlayerStatsFame(unittest.TestCase):
+    """Tests for M3 Player Statistics & Fame."""
+
+    def _make_sqlite_db(self):
+        from cardgames.sqlite_database import SqliteDatabase
+        return SqliteDatabase(":memory:")
+
+    # --- fame label ---
+
+    def test_fame_label_below_threshold_is_unknown(self):
+        from cardgames.casino import _fame_label
+        self.assertEqual(_fame_label(0), "unknown stranger")
+        self.assertEqual(_fame_label(2), "unknown stranger")
+
+    def test_fame_label_at_lower_threshold_is_regular(self):
+        from cardgames.casino import _fame_label
+        self.assertEqual(_fame_label(3), "known regular")
+        self.assertEqual(_fame_label(14), "known regular")
+
+    def test_fame_label_at_upper_threshold_is_notorious(self):
+        from cardgames.casino import _fame_label
+        self.assertEqual(_fame_label(15), "notorious gambler")
+        self.assertEqual(_fame_label(1000), "notorious gambler")
+
+    # --- DB stats ---
+
+    def test_update_and_get_player_stats(self):
+        db = self._make_sqlite_db()
+        db.add_user("alice")
+        db.update_player_stats("alice", won=50.0, lost=0.0)
+        db.update_player_stats("alice", won=0.0, lost=20.0)
+        stats = db.get_player_stats("alice")
+        self.assertEqual(stats['hands_played'], 2)
+        self.assertEqual(stats['total_won'], 50.0)
+        self.assertEqual(stats['total_lost'], 20.0)
+        self.assertEqual(stats['biggest_win'], 50.0)
+
+    def test_biggest_win_tracks_maximum(self):
+        db = self._make_sqlite_db()
+        db.add_user("bob")
+        db.update_player_stats("bob", won=10.0, lost=0.0)
+        db.update_player_stats("bob", won=75.0, lost=0.0)
+        db.update_player_stats("bob", won=30.0, lost=0.0)
+        stats = db.get_player_stats("bob")
+        self.assertEqual(stats['biggest_win'], 75.0)
+
+    def test_get_player_stats_returns_none_for_unknown_player(self):
+        db = self._make_sqlite_db()
+        self.assertIsNone(db.get_player_stats("nobody"))
+
+    def test_increment_games_played(self):
+        db = self._make_sqlite_db()
+        db.add_user("carol")
+        db.increment_games_played("carol")
+        db.increment_games_played("carol")
+        stats = db.get_player_stats("carol")
+        self.assertEqual(stats['games_played'], 2)
+
+    # --- Casino record_hand_result ---
+
+    def test_record_hand_result_calls_db_for_human(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        player = Player("dave")
+        casino.record_hand_result(player, won=50.0, lost=0.0)
+        mock_db.update_player_stats.assert_called_once_with("dave", won=50.0, lost=0.0)
+
+    def test_record_hand_result_skips_npc(self):
+        from cardgames.casino import Casino
+        from cardgames.simple_npc import SimpleBlackjackNPC
+        mock_db = MagicMock()
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        npc = SimpleBlackjackNPC("Bot")
+        casino.record_hand_result(npc, won=50.0, lost=0.0)
+        mock_db.update_player_stats.assert_not_called()
+
+    def test_record_hand_result_no_db_silent(self):
+        from cardgames.casino import Casino
+        casino = Casino(redis_host="localhost", redis_port=6379, db=None)
+        player = Player("eve")
+        casino.record_hand_result(player, won=10.0, lost=0.0)  # should not raise
+
+    def test_record_hand_result_db_failure_silent(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.update_player_stats.side_effect = Exception("DB down")
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        player = Player("frank")
+        casino.record_hand_result(player, won=10.0, lost=0.0)  # should not raise
+
+    # --- Fame in table context ---
+
+    def test_table_context_includes_fame_for_human(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.get_player_stats.return_value = {'games_played': 20, 'hands_played': 50,
+                                                  'total_won': 200.0, 'total_lost': 100.0,
+                                                  'biggest_win': 75.0, 'last_seen': None}
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        human = Player("grace")
+        game.players = [human]
+        game.players_waiting = []
+        casino.games['g1'] = game
+        ctx_fn = casino._make_table_context_fn('g1', 'SomeNPC')
+        result = ctx_fn()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['name'], 'grace')
+        self.assertEqual(result[0]['fame'], 'notorious gambler')
+
+    def test_table_context_fame_none_for_npc(self):
+        from cardgames.casino import Casino
+        from cardgames.simple_npc import SimpleBlackjackNPC
+        mock_db = MagicMock()
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        npc = SimpleBlackjackNPC("Bot")
+        game.players = [npc]
+        game.players_waiting = []
+        casino.games['g2'] = game
+        ctx_fn = casino._make_table_context_fn('g2', 'SomeOtherNPC')
+        result = ctx_fn()
+        self.assertEqual(result[0]['fame'], None)
+        mock_db.get_player_stats.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

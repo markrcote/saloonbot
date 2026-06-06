@@ -51,7 +51,7 @@ See `M1-ARCH.md` for detailed architectural decisions.
 
 ---
 
-## Milestone 3: Player Statistics & Fame
+## Milestone 3: Player Statistics & Fame ✓ DONE
 
 **Goal:** The game tracks how players play. Notorious players get a different game.
 

@@ -145,6 +145,7 @@ class BlackjackCog(commands.Cog):
         self.subscribe_task = None
         self._list_games_request_id = None
         self._pending_usage_interactions = {}  # request_id -> interaction
+        self._pending_stats_interactions = {}  # request_id -> interaction
 
     def cog_unload(self):
         self.listen.stop()
@@ -320,6 +321,51 @@ class BlackjackCog(commands.Cog):
             self._pending_usage_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
 
+    async def _handle_stats_response(self, interaction, player_name, stats):
+        """Format and send player stats as an ephemeral followup."""
+        if stats is None:
+            await interaction.followup.send(
+                "No record found. Join a game and play some hands first!", ephemeral=True
+            )
+            return
+
+        games_played = stats.get('games_played', 0)
+        fame = stats.get('fame', 'unknown stranger')
+        lines = [
+            f"**Fame:** {fame}",
+            f"**Games joined:** {games_played}",
+            f"**Hands played:** {stats.get('hands_played', 0)}",
+            f"**Total won:** ${stats.get('total_won', 0):.2f}",
+            f"**Total lost:** ${stats.get('total_lost', 0):.2f}",
+            f"**Biggest win:** ${stats.get('biggest_win', 0):.2f}",
+        ]
+        embed = nextcord.Embed(
+            title=f"🌟 {player_name}'s Saloon Record",
+            description="\n".join(lines),
+            color=0xc8a96e,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @nextcord.slash_command(name="stats", guild_ids=GUILD_IDS,
+                            description="View your stats at the saloon")
+    async def player_stats(self, interaction: nextcord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        player_name = sanitize_username(interaction.user.name)
+        request_id = str(uuid.uuid4())
+        self._pending_stats_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'get_stats',
+            'request_id': request_id,
+            'player': player_name,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for get_stats: {e}")
+            self._pending_stats_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
     async def new_game(
         self,
@@ -483,6 +529,14 @@ class BlackjackCog(commands.Cog):
                 interaction = self._pending_usage_interactions.pop(request_id, None)
                 if interaction:
                     await self._handle_usage_stats_response(interaction, data.get("rows", []))
+
+            elif data.get("event_type") == "player_stats":
+                request_id = data.get("request_id")
+                interaction = self._pending_stats_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_stats_response(
+                        interaction, data.get("player", ""), data.get("stats")
+                    )
         else:
             for game in self.games:
                 if game.topic() == topic:

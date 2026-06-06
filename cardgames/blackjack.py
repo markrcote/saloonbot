@@ -434,9 +434,11 @@ class Blackjack(CardGame):
             logging.error(f"Player {player.name} has no bet at resolution time")
             bet_amount = 0
 
+        won = lost = 0.0
         if self.get_score(player) > 21:
             self._output_player_result(player, f"💥 {tag}went bust! ${bet_amount:.2f} lost to the house.")
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: bust — loses ${bet_amount:.2f}")
+            lost = bet_amount
         else:
             if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
                 winnings = bet_amount * 2
@@ -446,6 +448,7 @@ class Blackjack(CardGame):
                     f"[{self.game_id[:8]}] {_player_label(player)}: wins ${winnings:.2f}"
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
+                won = bet_amount
             elif self.get_score(player) == self.get_score(self.dealer):
                 self.casino.update_wallet(player, bet_amount)
                 self._output_player_result(player, f"🤝 {tag}pushes with the dealer. ${bet_amount:.2f} returned.")
@@ -456,6 +459,8 @@ class Blackjack(CardGame):
                     f"[{self.game_id[:8]}] {_player_label(player)}: loses ${bet_amount:.2f}"
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
+                lost = bet_amount
+        self.casino.record_hand_result(player, won, lost)
 
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""

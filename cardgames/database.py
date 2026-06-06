@@ -68,6 +68,14 @@ MIGRATIONS = [
             game_id VARCHAR(36) NULL
         )""",
     ],
+    [   # Migration 4: player statistics for fame system
+        "ALTER TABLE users ADD COLUMN games_played INT NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN hands_played INT NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN total_won DECIMAL(10, 2) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN total_lost DECIMAL(10, 2) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN biggest_win DECIMAL(10, 2) NOT NULL DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP NULL",
+    ],
 ]
 
 
@@ -563,6 +571,57 @@ class Database:
             return cursor.fetchall()
         except Error as e:
             logging.error(f"Error getting LLM usage summary: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def increment_games_played(self, username):
+        """Increment games_played and refresh last_seen for a human player."""
+        def fn(cursor):
+            cursor.execute("""
+                UPDATE users SET games_played = games_played + 1, last_seen = NOW()
+                WHERE username = %s
+            """, (username,))
+        return self._execute_write(fn, f"increment_games_played({username})")
+
+    def update_player_stats(self, username, won=0.0, lost=0.0):
+        """Record the outcome of a hand for a human player."""
+        def fn(cursor):
+            cursor.execute("""
+                UPDATE users SET
+                    hands_played = hands_played + 1,
+                    total_won = total_won + %s,
+                    total_lost = total_lost + %s,
+                    biggest_win = GREATEST(biggest_win, %s),
+                    last_seen = NOW()
+                WHERE username = %s
+            """, (won, lost, won, username))
+        return self._execute_write(fn, f"update_player_stats({username})")
+
+    def get_player_stats(self, username):
+        """Return stats dict for a player, or None if not found."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT games_played, hands_played, total_won, total_lost, biggest_win, last_seen
+                FROM users WHERE username = %s
+            """, (username,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return {
+                'games_played': int(row['games_played']),
+                'hands_played': int(row['hands_played']),
+                'total_won': float(row['total_won']),
+                'total_lost': float(row['total_lost']),
+                'biggest_win': float(row['biggest_win']),
+                'last_seen': str(row['last_seen']) if row['last_seen'] else None,
+            }
+        except Error as e:
+            logging.error(f"Error getting player stats for {username}: {e}")
             raise
         finally:
             if cursor:

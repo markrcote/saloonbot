@@ -235,8 +235,11 @@ class Blackjack(CardGame):
 
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
-        balance = self.casino.get_wallet(player)
-        self.output(f"{player} {result} 💰 Wad: ${balance:.2f}")
+        if player.is_npc:
+            self.output(f"{player} {result}")
+        else:
+            balance = self.casino.get_wallet(player)
+            self.output(f"{player} {result} 💰 Wad: ${balance:.2f}")
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -339,11 +342,14 @@ class Blackjack(CardGame):
         self.output(f"🎰 Table limits: ${self.MIN_BET} to ${self.MAX_BET}")
         self.output(f"⏱️ You've got {self.TIME_FOR_BETTING} seconds before the cards fly.")
 
-        # Output all players' wallets before betting
+        # Output all players' wallets before betting (NPC balances hidden)
         wallet_lines = []
         for p in self.players:
-            balance = self.casino.get_wallet(p)
-            wallet_lines.append(f"{p}: ${balance:.2f}")
+            if p.is_npc:
+                wallet_lines.append(f"{p}: ???")
+            else:
+                balance = self.casino.get_wallet(p)
+                wallet_lines.append(f"{p}: ${balance:.2f}")
         self.output("💰 Wads: " + ", ".join(wallet_lines))
 
     def bet(self, player, amount):
@@ -374,9 +380,12 @@ class Blackjack(CardGame):
         self._update_time_last_event()
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${amount:.2f}")
 
-        # Output bet and updated wallet
-        new_balance = self.casino.get_wallet(player)
-        self.output(f"💵 {player} throws ${amount:.2f} on the table. 💰 Wad: ${new_balance:.2f}")
+        # Output bet (NPC balance hidden)
+        if player.is_npc:
+            self.output(f"💵 {player} throws ${amount:.2f} on the table.")
+        else:
+            new_balance = self.casino.get_wallet(player)
+            self.output(f"💵 {player} throws ${amount:.2f} on the table. 💰 Wad: ${new_balance:.2f}")
 
     def new_hand(self):
         if not self.players:

@@ -146,6 +146,7 @@ class BlackjackCog(commands.Cog):
         self._list_games_request_id = None
         self._pending_usage_interactions = {}  # request_id -> interaction
         self._pending_stats_interactions = {}  # request_id -> interaction
+        self._pending_debug_interactions = {}  # request_id -> interaction
 
     def cog_unload(self):
         self.listen.stop()
@@ -318,6 +319,84 @@ class BlackjackCog(commands.Cog):
             logging.error(f"Redis publish error for get_usage: {e}")
             self._pending_usage_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
+    @nextcord.slash_command(name="debug", guild_ids=GUILD_IDS,
+                            description="Show full internal state for debugging (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def debug_state(self, interaction: nextcord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_debug_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'get_debug',
+            'request_id': request_id,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for get_debug: {e}")
+            self._pending_debug_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
+    async def _handle_debug_response(self, interaction, data):
+        """Format and send full debug state as ephemeral embeds."""
+        embeds = []
+
+        # --- Bot-side state ---
+        bot_lines = []
+        for g in self.games:
+            bot_lines.append(
+                f"`{g.game_id or '(pending)'}` ch=<#{g.channel_id}> state={g.state.value}"
+            )
+        embeds.append(nextcord.Embed(
+            title="Bot game tracking",
+            description="\n".join(bot_lines) if bot_lines else "No games tracked",
+            color=0x888888,
+        ))
+
+        # --- Games ---
+        for g in data.get('games', []):
+            gid = g['game_id']
+            dirty = " [dirty]" if g.get('dirty') else ""
+            desc_lines = [
+                f"State: **{g['state']}**{dirty} | "
+                f"Deck: {g['deck_remaining']} remaining, {g['discards']} discarded | "
+                f"Current player idx: {g['current_player_idx']}",
+                f"Dealer: {' '.join(g['dealer_hand']) or '—'}",
+            ]
+            if g.get('pending_bots'):
+                desc_lines.append(f"Pending bots to add: {g['pending_bots']}")
+            for p in g['players']:
+                npc_tag = f" ({p['npc_type']}/{p['personality']})" if p['is_npc'] else ""
+                hand_str = ' '.join(p['hand']) if p['hand'] else '—'
+                desc_lines.append(f"**{p['name']}**{npc_tag} | {hand_str} | Bet: ${p['bet']}")
+            if g.get('players_waiting'):
+                waiting = ', '.join(p['name'] for p in g['players_waiting'])
+                desc_lines.append(f"Waiting: {waiting}")
+            embeds.append(nextcord.Embed(
+                title=f"Game {gid[:8]}",
+                description="\n".join(desc_lines),
+                color=0xc8a96e,
+            ))
+
+        if not data.get('games'):
+            embeds.append(nextcord.Embed(title="Games", description="No active games", color=0xc8a96e))
+
+        # --- NPC Roster ---
+        npc_lines = []
+        for npc in data.get('npcs', []):
+            status = f"in game `{str(npc['current_game_id'])[:8]}`" if npc.get('current_game_id') else "idle"
+            npc_lines.append(
+                f"**{npc['name']}** ({npc['personality_name']}) | ${npc['wallet']:.0f} | {status}"
+            )
+        embeds.append(nextcord.Embed(
+            title="NPC Roster",
+            description="\n".join(npc_lines) if npc_lines else "No NPCs in roster",
+            color=0x4169e1,
+        ))
+
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
 
     async def _handle_stats_response(self, interaction, player_name, stats):
         """Format and send player stats as an ephemeral followup."""
@@ -525,6 +604,12 @@ class BlackjackCog(commands.Cog):
                 interaction = self._pending_usage_interactions.pop(request_id, None)
                 if interaction:
                     await self._handle_usage_stats_response(interaction, data.get("rows", []))
+
+            elif data.get("event_type") == "debug_state":
+                request_id = data.get("request_id")
+                interaction = self._pending_debug_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_debug_response(interaction, data)
 
             elif data.get("event_type") == "player_stats":
                 request_id = data.get("request_id")

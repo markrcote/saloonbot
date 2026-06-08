@@ -460,6 +460,52 @@ class Casino:
             }
         )
 
+    def _handle_get_debug(self, request_id):
+        """Gather full internal state and publish as debug_state response."""
+        from .blackjack import serialize_hand
+
+        games_debug = []
+        for game_id, game in self.games.items():
+            def player_info(p):
+                return {
+                    'name': p.name,
+                    'is_npc': getattr(p, 'is_npc', False),
+                    'npc_type': getattr(p, 'npc_type', None),
+                    'personality': getattr(getattr(p, 'personality', None), 'name', None),
+                    'hand': serialize_hand(p.hand),
+                    'bet': game.bets.get(p.name, 0),
+                }
+            games_debug.append({
+                'game_id': game_id,
+                'state': game.state.value,
+                'current_player_idx': game.current_player_idx,
+                'pending_bots': self._pending_bots.get(game_id, 0),
+                'dirty': game_id in self._dirty_games,
+                'deck_remaining': len(game.deck),
+                'discards': len(game.discards),
+                'dealer_hand': serialize_hand(game.dealer.hand),
+                'players': [player_info(p) for p in game.players],
+                'players_waiting': [player_info(p) for p in game.players_waiting],
+            })
+
+        npcs = []
+        if self.db is not None:
+            try:
+                npcs = [dict(r) for r in self.db.get_all_npcs()]
+            except Exception as e:
+                logging.error(f"Error fetching NPC roster for debug: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'debug_state',
+                'request_id': request_id,
+                'games': games_debug,
+                'npcs': npcs,
+                'dirty_games': list(self._dirty_games),
+            }
+        )
+
     def add_npc(self, game_id, npc_name, npc_type='simple'):
         """Add an NPC player to a game.
 
@@ -571,6 +617,10 @@ class Casino:
                     request_id = data.get('request_id')
                     if request_id:
                         self._handle_get_usage(request_id)
+                elif data['action'] == 'get_debug':
+                    request_id = data.get('request_id')
+                    if request_id:
+                        self._handle_get_debug(request_id)
                 elif data['action'] == 'get_stats':
                     request_id = data.get('request_id')
                     player_name = data.get('player')

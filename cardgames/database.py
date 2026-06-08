@@ -458,6 +458,21 @@ class Database:
             if cursor:
                 cursor.close()
 
+    def get_all_npcs(self):
+        """Get all NPCs ordered by name. Returns list of dicts."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM npcs ORDER BY name")
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting all NPCs: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance. Returns float or None."""
         self._connect()

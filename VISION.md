@@ -15,3 +15,5 @@ The pace is deliberate. There's no urgency to rush through hands — the atmosph
 NPCs have lives beyond the table. Each one is generated with a backstory and relationships to other regulars — old friends, rivals, strangers with history. Random events shape them over time, drawing some to the tables more and pushing others away. They form opinions of each other through play, and they'll form opinions of you too. Show up enough, win enough, and word gets around; a notorious player won't get the same game from a sharp-eyed regular as an unknown one would.
 
 The saloon never closes. NPCs keep their habits and their histories whether anyone's at the table or not. Players can pull up a chair — from Discord, the command line, or wherever else — drop into whatever's happening, and leave when they're done. The world doesn't wait for them, and it doesn't stop when they go.
+
+When no humans are present, the pace slows. NPC-only games should feel like background noise — the murmur of a card game in the next room that you can tune out entirely or stop and listen to. Hands take longer, banter lingers. The moment a player sits down, the table snaps back to a normal rhythm.

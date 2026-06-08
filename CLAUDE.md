@@ -93,6 +93,7 @@ Discord Users
 - `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 - `get_usage` - Request 7-day LLM usage summary (admin; bot sends with `request_id`, server responds via `usage_stats`)
+- `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
 
 **Player actions** (`event_type: "player_action"`):
 - `join`, `bet` (with `amount`), `hit`, `stand`, `double_down`, `split`
@@ -102,6 +103,7 @@ Discord Users
 - `new_game` response - includes `game_id`, `request_id`, and optional channel info
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
 - `usage_stats` response - includes `request_id` and `rows` list (each entry: `purpose`, `model`, `total_input`, `total_output`, `call_count`)
+- `player_wallet` response - includes `request_id`, `player`, and `balance` (float or null if no record)
 
 ### Key Modules
 

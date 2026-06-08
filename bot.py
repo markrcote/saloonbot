@@ -366,7 +366,8 @@ class BlackjackCog(commands.Cog):
             self._pending_stats_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
 
-    @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS)
+    @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS,
+                            default_member_permissions=nextcord.Permissions(administrator=True))
     async def new_game(
         self,
         interaction: nextcord.Interaction,

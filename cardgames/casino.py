@@ -176,6 +176,25 @@ class Casino:
             }
         )
 
+    def _handle_get_wallet(self, request_id, player_name):
+        """Handle a get_wallet request: query DB and publish user wallet balance."""
+        balance = None
+        if self.db is not None:
+            try:
+                balance = self.db.get_user_wallet(player_name)
+            except Exception as e:
+                logging.error(f"Error getting wallet for {player_name}: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'player_wallet',
+                'request_id': request_id,
+                'player': player_name,
+                'balance': balance,
+            }
+        )
+
     def _make_table_context_fn(self, game_id, npc_name):
         """Return a callable that yields other players at the table when invoked."""
         def get_table_context():
@@ -492,6 +511,7 @@ class Casino:
         if self.db is not None:
             try:
                 from datetime import datetime
+
                 def sanitize(row):
                     return {k: v.isoformat() if isinstance(v, datetime) else v
                             for k, v in row.items()}
@@ -630,6 +650,11 @@ class Casino:
                     player_name = data.get('player')
                     if request_id and player_name:
                         self._handle_get_stats(request_id, player_name)
+                elif data['action'] == 'get_wallet':
+                    request_id = data.get('request_id')
+                    player_name = data.get('player')
+                    if request_id and player_name:
+                        self._handle_get_wallet(request_id, player_name)
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:

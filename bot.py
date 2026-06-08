@@ -427,13 +427,10 @@ class BlackjackCog(commands.Cog):
         await self.send_command(sanitize_username(interaction.user.name), game, "leave")
         await interaction.send("👋 Leaving game...")
 
-    @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS)
+    @nextcord.slash_command(name="stopgame", guild_ids=GUILD_IDS,
+                            default_member_permissions=nextcord.Permissions(administrator=True))
     async def stop_game(self, interaction: nextcord.Interaction):
         """Stop the current game (admins only)."""
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.send("⚠️ Only server admins can stop a game.", ephemeral=True)
-            return
-
         game = self.find_game_by_interaction(interaction)
         if not game:
             await interaction.send("⚠️ No game currently in progress.", ephemeral=True)

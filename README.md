@@ -16,7 +16,14 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ### Cards
 
-* `/newgame [num_bots]` starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Commands (hit, stand, etc.) are read from messages.
+* `/newgame [num_bots]` — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy.
+* `/joingame` — sit down at the table.
+* `/bet <amount>` — place a bet during the betting phase.
+* `/hit`, `/stand`, `/doubledown`, `/split` — standard blackjack actions on your turn.
+* `/leavegame` — leave the current game.
+* `/wad` — privately check your current balance (only visible to you).
+* `/stats` — view your saloon record (hands played, winnings, etc.; only visible to you).
+* `/stopgame` *(admin)* — end the current game.
 
 ### Metadata
 

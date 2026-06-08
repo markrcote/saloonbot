@@ -301,11 +301,9 @@ class BlackjackCog(commands.Cog):
         await interaction.send(embed=embed)
 
     @nextcord.slash_command(name="usage", guild_ids=GUILD_IDS,
-                            description="Show LLM usage stats for the past 7 days (admin only)")
+                            description="Show LLM usage stats for the past 7 days (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
     async def usage_stats(self, interaction: nextcord.Interaction):
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.send("⚠️ Only server admins can view usage stats.", ephemeral=True)
-            return
         await interaction.response.defer(ephemeral=True)
         request_id = str(uuid.uuid4())
         self._pending_usage_interactions[request_id] = interaction

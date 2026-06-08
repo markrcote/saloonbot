@@ -236,7 +236,7 @@ class Blackjack(CardGame):
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
         balance = self.casino.get_wallet(player)
-        self.output(f"{player} {result} 💰 Wallet: ${balance:.2f}")
+        self.output(f"{player} {result} 💰 Wad: ${balance:.2f}")
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -344,7 +344,7 @@ class Blackjack(CardGame):
         for p in self.players:
             balance = self.casino.get_wallet(p)
             wallet_lines.append(f"{p}: ${balance:.2f}")
-        self.output("👛 Coin purses: " + ", ".join(wallet_lines))
+        self.output("💰 Wads: " + ", ".join(wallet_lines))
 
     def bet(self, player, amount):
         """Place a bet for a player."""
@@ -376,7 +376,7 @@ class Blackjack(CardGame):
 
         # Output bet and updated wallet
         new_balance = self.casino.get_wallet(player)
-        self.output(f"💵 {player} throws ${amount:.2f} on the table. 👛 Coin purse: ${new_balance:.2f}")
+        self.output(f"💵 {player} throws ${amount:.2f} on the table. 💰 Wad: ${new_balance:.2f}")
 
     def new_hand(self):
         if not self.players:

@@ -106,6 +106,7 @@ See `M1-ARCH.md` for detailed architectural decisions.
 **Changes:**
 - Background world loop in `server.py` (or new `world.py`): runs on a configurable interval (e.g., every 5–15 minutes real time); spawns NPC-only games when no human games are active; lets them play out a few hands; updates all relationship data
 - NPC "availability" model: each NPC has a `next_available_at` timestamp; world loop picks available NPCs and seats them together, simulating a night at the saloon
+- **NPC-only pacing**: when no human players are at the table, the game runs at a slower, ambient pace — longer delays between hands and actions, so it reads like background conversation rather than active play. New env var `SALOON_NPC_PACE_MULTIPLIER` (default `3.0`) scales `BLACKJACK_TIME_BETWEEN_HANDS` and inter-action delays; the channel stream becomes something players can ignore or tune into for entertainment. Pace returns to normal the moment a human joins.
 - Random world events (small set): NPC goes on winning/losing streak (adjust wallet), NPC gets "restless" (plays more often), NPC has a falling-out with another (relationship type changes)
 - World event log: lightweight `world_events` table (npc_id, event_type, description, occurred_at); last 20 events queryable
 - New `/news` Discord command: shows recent world events in-character ("Word around the saloon: Winifred Cobb cleaned out the table last Tuesday...")

@@ -491,7 +491,11 @@ class Casino:
         npcs = []
         if self.db is not None:
             try:
-                npcs = [dict(r) for r in self.db.get_all_npcs()]
+                from datetime import datetime
+                def sanitize(row):
+                    return {k: v.isoformat() if isinstance(v, datetime) else v
+                            for k, v in row.items()}
+                npcs = [sanitize(dict(r)) for r in self.db.get_all_npcs()]
             except Exception as e:
                 logging.error(f"Error fetching NPC roster for debug: {e}")
 

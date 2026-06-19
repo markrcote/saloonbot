@@ -667,6 +667,28 @@ class Casino:
                         {'game_id': game_id, 'event_type': 'game_over'}
                     )
                     return
+                if data['event_type'] == 'casino_action' and data.get('action') == 'quit_game':
+                    logging.info(f"Quitting game {game_id} by request — returning unresolved bets")
+                    game = self.games[game_id]
+                    all_players = {p.name: p for p in game.players + game.departed_players}
+                    refunded = []
+                    for player_name, bet_amount in game.bets.items():
+                        player = all_players.get(player_name)
+                        if player is not None:
+                            self.update_wallet(player, bet_amount)
+                            refunded.append(f"{player_name} (${bet_amount:.2f})")
+                            logging.info(f"[{game_id[:8]}] Refunded ${bet_amount:.2f} to {player_name}")
+                    if refunded:
+                        game.output("🛑 Game called early! Returning bets: " + ", ".join(refunded))
+                    else:
+                        game.output("🛑 Game called early. No bets to return.")
+                    self._delete_game(game_id)
+                    del self.games[game_id]
+                    self.publish_event(
+                        f"game_updates_{game_id}",
+                        {'game_id': game_id, 'event_type': 'game_over'}
+                    )
+                    return
                 if data['event_type'] == 'player_action' and data.get('action') == 'join':
                     self._add_pending_bots(game_id)
                 if data['event_type'] == 'npc_action':

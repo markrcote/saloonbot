@@ -548,6 +548,29 @@ class BlackjackCog(commands.Cog):
 
         await interaction.send("🛑 Game stopped by admin.")
 
+    @nextcord.slash_command(name="quitgame", guild_ids=GUILD_IDS,
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def quit_game(self, interaction: nextcord.Interaction):
+        """Terminate the current game and return all unresolved bets (admins only)."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("⚠️ No game currently in progress.", ephemeral=True)
+            return
+
+        message = {
+            "event_type": "casino_action",
+            "action": "quit_game",
+            "game_id": game.game_id,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error: {e}")
+            await interaction.send("⚠️ Failed to quit game.", ephemeral=True)
+            return
+
+        await interaction.send("🛑 Game terminated, bets returned.")
+
     @nextcord.slash_command(name="bet", guild_ids=GUILD_IDS)
     async def place_bet(self, interaction: nextcord.Interaction, amount: int):
         """Place a bet in the current game."""

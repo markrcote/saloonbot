@@ -32,6 +32,7 @@ Slash commands:
 * `/checkwallet <target>` *(admin)* — check any player's or NPC's wallet balance.
 * `/setwallet <target> <amount>` *(admin)* — set a player's or NPC's wallet to an exact amount.
 * `/givechips <target> <amount>` *(admin)* — adjust a player's or NPC's wallet by a delta (negative takes chips away).
+* `/npclimits [min] [max]` *(admin)* — view or set the NPC autofill min/max per table. With `min > 0`, tables stay populated with NPCs even when no humans are present.
 * `/usage` *(admin)* — show a 7-day summary of LLM token usage.
 * `/debug` *(admin)* — dump full internal state for troubleshooting.
 

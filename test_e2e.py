@@ -1006,5 +1006,109 @@ class TestAdminWallet(EndToEndTestCase):
         self.assertAlmostEqual(float(row[0]), 50.0, places=2)
 
 
+class TestNPCLimits(EndToEndTestCase):
+    """E2E tests for NPC autofill min/max (AM3)."""
+
+    def setUp(self):
+        super().setUp()
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npcs")
+        cursor.execute("DELETE FROM settings")
+        self.db.commit()
+        cursor.close()
+
+    def _casino_request(self, action, **kwargs):
+        """Publish a casino action and wait for a matching casino_update response."""
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe("casino_update")
+        pubsub.get_message(timeout=1)
+
+        request_id = f"test-limits-{time.time()}"
+        message = {
+            'event_type': 'casino_action',
+            'action': action,
+            'request_id': request_id,
+            **kwargs,
+        }
+        self.redis.publish("casino", json.dumps(message))
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            msg = pubsub.get_message(timeout=0.5)
+            if msg and msg['type'] == 'message':
+                data = json.loads(msg['data'])
+                if data.get('request_id') == request_id:
+                    pubsub.close()
+                    return data
+        pubsub.close()
+        return None
+
+    def _get_debug(self):
+        """Request and return the full debug_state from the server."""
+        return self._casino_request('get_debug')
+
+    def _npc_count_in_game(self, debug_data, game_id):
+        """Count NPCs across players + players_waiting for a given game."""
+        for g in debug_data.get('games', []):
+            if g['game_id'] == game_id:
+                return sum(1 for p in g['players'] + g.get('players_waiting', [])
+                           if p['is_npc'])
+        return 0
+
+    def test_npc_limits_view_defaults(self):
+        """npc_limits with no args returns the current (default) limits."""
+        resp = self._casino_request('npc_limits')
+        self.assertIsNotNone(resp, "Should receive npc_limits response")
+        self.assertEqual(resp['event_type'], 'npc_limits')
+        self.assertTrue(resp['ok'])
+        self.assertIn('min', resp)
+        self.assertIn('max', resp)
+
+    def test_npc_limits_set_and_view(self):
+        """Setting npc_limits persists and is reflected in the next view."""
+        set_resp = self._casino_request('npc_limits', min=1, max=3)
+        self.assertIsNotNone(set_resp)
+        self.assertTrue(set_resp['ok'], f"Set failed: {set_resp.get('message')}")
+        self.assertEqual(set_resp['min'], 1)
+        self.assertEqual(set_resp['max'], 3)
+
+        # View should now show the updated limits
+        view_resp = self._casino_request('npc_limits')
+        self.assertIsNotNone(view_resp)
+        self.assertEqual(view_resp['min'], 1)
+        self.assertEqual(view_resp['max'], 3)
+
+    def test_npc_limits_invalid_min_gt_max(self):
+        """Setting min > max is rejected."""
+        resp = self._casino_request('npc_limits', min=5, max=2)
+        self.assertIsNotNone(resp)
+        self.assertFalse(resp['ok'])
+
+    def test_autofill_fills_to_min(self):
+        """With npc_min=2, a new game gains 2 NPCs via autofill within ~30s."""
+        # Set min=2 so autofill kicks in
+        set_resp = self._casino_request('npc_limits', min=2, max=4)
+        self.assertIsNotNone(set_resp)
+        self.assertTrue(set_resp['ok'])
+
+        game_id = self.create_game()
+
+        # Poll get_debug until the game has >= 2 NPCs (autofill runs every 15s)
+        deadline = time.time() + 35
+        npc_count = 0
+        while time.time() < deadline:
+            debug = self._get_debug()
+            if debug:
+                npc_count = self._npc_count_in_game(debug, game_id)
+                if npc_count >= 2:
+                    break
+            time.sleep(1)
+
+        self.assertGreaterEqual(
+            npc_count, 2,
+            f"Expected >= 2 NPCs via autofill, got {npc_count}"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

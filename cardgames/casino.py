@@ -22,6 +22,11 @@ NPC_TYPES = {
 
 MIN_NPC_ROSTER = 20
 
+DEFAULT_NPC_AUTOFILL_MIN = 0   # auto-fill off by default
+DEFAULT_NPC_AUTOFILL_MAX = 4
+MAX_NPCS_PER_TABLE = 6         # hard cap regardless of limits
+AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
+
 SALOON_NAME = os.environ.get("SALOON_NAME", "The Rusty Spur")
 SALOON_TOWN = os.environ.get("SALOON_TOWN", "Redemption, Texas")
 SALOON_DETAIL_LEVEL = os.environ.get("SALOON_DETAIL_LEVEL", "medium").lower()
@@ -59,6 +64,9 @@ class Casino:
         self._llm_client = None
         self._llm_client_tried = False
         self._name_generator = WildWestNames()
+        self.npc_min = DEFAULT_NPC_AUTOFILL_MIN
+        self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
+        self._last_autofill = {}  # game_id -> timestamp of last autofill check
 
     @property
     def llm_client(self):
@@ -324,6 +332,25 @@ class Casino:
             return result
         return get_table_context
 
+    def _load_npc_limits(self):
+        """Load npc_autofill_min/max from settings, clamping to valid range."""
+        if self.db is None:
+            return
+        try:
+            raw_min = self.db.get_setting('npc_autofill_min')
+            raw_max = self.db.get_setting('npc_autofill_max')
+            npc_min = int(raw_min) if raw_min is not None else DEFAULT_NPC_AUTOFILL_MIN
+            npc_max = int(raw_max) if raw_max is not None else DEFAULT_NPC_AUTOFILL_MAX
+            npc_min = max(0, min(npc_min, MAX_NPCS_PER_TABLE))
+            npc_max = max(0, min(npc_max, MAX_NPCS_PER_TABLE))
+            if npc_min > npc_max:
+                npc_min = npc_max
+            self.npc_min = npc_min
+            self.npc_max = npc_max
+            logging.info(f"NPC autofill limits loaded: min={npc_min}, max={npc_max}")
+        except Exception as e:
+            logging.warning(f"Failed to load NPC limits from settings: {e}")
+
     def _ensure_npc_roster(self):
         """Fill the NPC roster up to MIN_NPC_ROSTER if it's below that threshold."""
         if self.db is None:
@@ -402,6 +429,9 @@ class Casino:
         except Exception as e:
             logging.error(f"Error ensuring NPC roster: {e}")
 
+        # Load persisted NPC autofill limits
+        self._load_npc_limits()
+
     def _mark_dirty(self, game_id):
         """Mark a game as needing a DB write on the next flush."""
         self._dirty_games.add(game_id)
@@ -432,6 +462,7 @@ class Casino:
     def _delete_game(self, game_id):
         """Delete a game from database."""
         self._dirty_games.discard(game_id)  # no point writing then deleting
+        self._last_autofill.pop(game_id, None)
 
         game = self.games.get(game_id)
         if game is not None:
@@ -475,14 +506,15 @@ class Casino:
 
         return game_id
 
-    def _add_pending_bots(self, game_id):
-        """Add any pending bots to the game when the first human player joins."""
-        num_bots = self._pending_bots.pop(game_id, 0)
-        if num_bots <= 0:
-            return
+    def _spawn_npcs_into_game(self, game_id, count, exclude_personalities=None):
+        """Spawn `count` roster NPCs into a game.
 
+        Draws from the persistent NPC roster (via `_get_or_create_npcs`), builds
+        the appropriate NPC objects, assigns them to the game in the DB, and calls
+        `game.join`. Caller is responsible for marking the game dirty.
+        """
         game = self.games.get(game_id)
-        if game is None:
+        if game is None or count <= 0:
             return
 
         llm_client = self.llm_client
@@ -493,8 +525,10 @@ class Casino:
             for p in all_players
             if getattr(p, 'personality', None) is not None
         }
+        if exclude_personalities:
+            used_personalities |= set(exclude_personalities)
 
-        npc_records = self._get_or_create_npcs(num_bots, used_personalities)
+        npc_records = self._get_or_create_npcs(count, used_personalities)
 
         for npc_record in npc_records:
             used_personalities.add(npc_record['personality_name'])
@@ -533,6 +567,107 @@ class Casino:
             else:
                 npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)
             game.join(npc)
+
+    def _add_pending_bots(self, game_id):
+        """Add any pending bots to the game when the first human player joins."""
+        num_bots = self._pending_bots.pop(game_id, 0)
+        if num_bots <= 0:
+            return
+        if game_id not in self.games:
+            return
+        self._spawn_npcs_into_game(game_id, num_bots)
+
+    def _autofill_npcs(self, game_id, game):
+        """Fill or trim NPCs in a game to stay within npc_min/npc_max.
+
+        Only acts in WAITING or BETWEEN_HANDS states; throttled to at most once
+        per AUTOFILL_INTERVAL seconds per game.
+        """
+        if game.state not in (HandState.WAITING, HandState.BETWEEN_HANDS):
+            return
+
+        now = time.time()
+        if now - self._last_autofill.get(game_id, 0) < AUTOFILL_INTERVAL:
+            return
+        self._last_autofill[game_id] = now
+
+        all_players = game.players + game.players_waiting
+        npc_count = sum(1 for p in all_players if getattr(p, 'is_npc', False))
+        total_count = len(all_players)
+
+        changed = False
+
+        if npc_count < self.npc_min:
+            to_add = min(self.npc_min - npc_count, MAX_NPCS_PER_TABLE - total_count)
+            if to_add > 0:
+                logging.info(f"[{game_id[:8]}] Autofill: adding {to_add} NPC(s) "
+                             f"(have {npc_count}, min={self.npc_min})")
+                self._spawn_npcs_into_game(game_id, to_add)
+                changed = True
+
+        elif npc_count > self.npc_max:
+            to_remove = npc_count - self.npc_max
+            # Prefer removing from players_waiting before players
+            candidates = (
+                [p for p in game.players_waiting if getattr(p, 'is_npc', False)]
+                + [p for p in game.players if getattr(p, 'is_npc', False)]
+            )
+            for npc in candidates[:to_remove]:
+                logging.info(f"[{game_id[:8]}] Autofill: removing NPC {npc.name!r} "
+                             f"(have {npc_count}, max={self.npc_max})")
+                game.leave(npc)
+                npc_db_id = getattr(npc, 'npc_db_id', None)
+                if npc_db_id is not None and self.db is not None:
+                    try:
+                        self.db.clear_npc_game(npc_db_id)
+                    except Exception as e:
+                        logging.error(f"Error clearing NPC game for {npc.name}: {e}")
+                changed = True
+
+        if changed:
+            self._mark_dirty(game_id)
+
+    def _handle_npc_limits(self, request_id, min_val=None, max_val=None):
+        """Handle an npc_limits request: view or update autofill min/max."""
+        ok = True
+        message = ''
+
+        if min_val is not None or max_val is not None:
+            new_min = self.npc_min if min_val is None else min_val
+            new_max = self.npc_max if max_val is None else max_val
+
+            # Clamp to valid range
+            new_min = max(0, min(int(new_min), MAX_NPCS_PER_TABLE))
+            new_max = max(0, min(int(new_max), MAX_NPCS_PER_TABLE))
+            if new_min > new_max:
+                ok = False
+                message = f"min ({new_min}) cannot exceed max ({new_max})."
+            else:
+                self.npc_min = new_min
+                self.npc_max = new_max
+                if self.db is not None:
+                    try:
+                        self.db.set_setting('npc_autofill_min', str(new_min))
+                        self.db.set_setting('npc_autofill_max', str(new_max))
+                    except Exception as e:
+                        logging.error(f"Error persisting NPC limits: {e}")
+                        ok = False
+                        message = "Limits updated in memory but failed to persist to DB."
+                if ok:
+                    message = f"NPC limits set: min={new_min}, max={new_max}."
+                    logging.info(message)
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'npc_limits',
+                'request_id': request_id,
+                'min': self.npc_min,
+                'max': self.npc_max,
+                'ok': ok,
+                'message': message,
+            }
+        )
 
     def _handle_list_games(self, request_id):
         """Handle a list_games request from the bot."""
@@ -773,6 +908,14 @@ class Casino:
                     amount = data.get('amount', 0)
                     if request_id and target:
                         self._handle_set_wallet(request_id, target, mode, amount)
+                elif data['action'] == 'npc_limits':
+                    request_id = data.get('request_id')
+                    if request_id:
+                        self._handle_npc_limits(
+                            request_id,
+                            min_val=data.get('min'),
+                            max_val=data.get('max'),
+                        )
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:
@@ -844,6 +987,8 @@ class Casino:
             if game._dirty:
                 self._mark_dirty(game_id)
                 game._dirty = False
+
+            self._autofill_npcs(game_id, game)
 
             # Remove idle empty games
             if (game.state == HandState.WAITING

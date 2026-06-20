@@ -150,6 +150,7 @@ class BlackjackCog(commands.Cog):
         self._pending_wallet_interactions = {}  # request_id -> interaction
         self._pending_checkwallet_interactions = {}  # request_id -> interaction
         self._pending_setwallet_interactions = {}  # request_id -> interaction (set + adjust)
+        self._pending_npclimits_interactions = {}  # request_id -> interaction
 
     def cog_unload(self):
         self.listen.stop()
@@ -557,6 +558,63 @@ class BlackjackCog(commands.Cog):
             self._pending_wallet_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
 
+    async def _handle_npc_limits_response(self, interaction, data):
+        """Format and send NPC limits response as an ephemeral followup."""
+        ok = data.get('ok', True)
+        npc_min = data.get('min', 0)
+        npc_max = data.get('max', 4)
+        msg = data.get('message', '')
+        if ok:
+            lines = [f"**NPC autofill:** min={npc_min}, max={npc_max}"]
+            if msg:
+                lines.append(msg)
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
+
+    @nextcord.slash_command(name="npclimits", guild_ids=GUILD_IDS,
+                            description="View or set NPC autofill min/max per table (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def npc_limits(
+        self,
+        interaction: nextcord.Interaction,
+        min: int = nextcord.SlashOption(
+            name="min",
+            description="Minimum NPCs to keep at each table (0 = no auto-fill)",
+            required=False,
+            default=None,
+            min_value=0,
+            max_value=6,
+        ),
+        max: int = nextcord.SlashOption(
+            name="max",
+            description="Maximum NPCs allowed at each table",
+            required=False,
+            default=None,
+            min_value=0,
+            max_value=6,
+        ),
+    ):
+        """View current NPC autofill limits (no args) or set new ones."""
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_npclimits_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'npc_limits',
+            'request_id': request_id,
+        }
+        if min is not None:
+            message['min'] = min
+        if max is not None:
+            message['max'] = max
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for npc_limits: {e}")
+            self._pending_npclimits_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
     @nextcord.slash_command(name="help", guild_ids=GUILD_IDS,
                             description="Show all available commands")
     async def show_help(self, interaction: nextcord.Interaction):
@@ -577,6 +635,7 @@ class BlackjackCog(commands.Cog):
             "`/checkwallet <target>` — Check any player's or NPC's balance\n"
             "`/setwallet <target> <amount>` — Set a wallet to an exact amount\n"
             "`/givechips <target> <amount>` — Adjust a wallet by a delta\n"
+            "`/npclimits [min] [max]` — View or set NPC autofill limits per table\n"
             "`/usage` — LLM token usage for the past 7 days\n"
             "`/debug` — Full internal state dump"
         )
@@ -809,6 +868,11 @@ class BlackjackCog(commands.Cog):
                 interaction = self._pending_setwallet_interactions.pop(request_id, None)
                 if interaction:
                     await self._handle_wallet_set_response(interaction, data)
+            elif data.get("event_type") == "npc_limits":
+                request_id = data.get("request_id")
+                interaction = self._pending_npclimits_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_npc_limits_response(interaction, data)
         else:
             for game in self.games:
                 if game.topic() == topic:

@@ -98,6 +98,7 @@ Discord Users
 - `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
 - `lookup_wallet {target}` - Admin wallet lookup by name; searches users first then NPCs (case-insensitive); bot sends with `request_id`, server responds via `wallet_info`
 - `set_wallet {target, mode:'set'|'adjust', amount}` - Admin wallet edit; resolves target via `_resolve_wallet_target`; rejects set < 0 and adjusts that would go negative; responds via `wallet_set`
+- `npc_limits {min?, max?}` - Admin; no args = view current limits; with args = validate, persist via `set_setting`, update `Casino.npc_min/max`, respond via `npc_limits` event
 - `stop_game` - Terminate a game immediately (admin; requires `game_id`); unresolved bets are not returned
 - `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
 
@@ -118,6 +119,7 @@ Discord Users
 - `player_wallet` response - includes `request_id`, `player`, and `balance` (float or null if no record)
 - `wallet_info` response - includes `request_id`, `target`, `kind` (`'player'`|`'npc'`|`None`), and `balance` (float or null)
 - `wallet_set` response - includes `request_id`, `target`, `kind`, `new_balance`, `ok` (bool), and `message`
+- `npc_limits` response - includes `request_id`, `min`, `max`, `ok` (bool), and `message`
 
 ### Key Modules
 
@@ -204,6 +206,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **MySQL deadlock retry**: `database.py` wraps writes in a retry helper that catches InnoDB deadlock errors (errno 1213) and retries automatically; callers don't need retry logic.
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
+- **NPC autofill**: `Casino.npc_min/npc_max` (default 0/4) control per-table NPC counts; `_autofill_npcs` runs on every tick (throttled to `AUTOFILL_INTERVAL=15s` per game), acts only in WAITING/BETWEEN_HANDS states. With `npc_min > 0`, games stay populated and `EMPTY_GAME_TIMEOUT` won't reap them — enabling NPC-only ambient play. Limits are persisted in `settings` as `npc_autofill_min`/`npc_autofill_max` and loaded at startup.
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
 
 ## Testing

@@ -10,7 +10,10 @@ from cardgames.blackjack import (
 )
 from cardgames.npc_player import NPCPlayer
 from cardgames.card_game import Card, CardGame, CardGameError
-from cardgames.casino import NPC_TYPES, Casino
+from cardgames.casino import (
+    NPC_TYPES, Casino,
+    DEFAULT_NPC_AUTOFILL_MIN, DEFAULT_NPC_AUTOFILL_MAX, MAX_NPCS_PER_TABLE,
+)
 from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
@@ -1972,6 +1975,162 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         result = ctx_fn()
         self.assertEqual(result[0]['fame'], None)
         mock_db.get_player_stats.assert_not_called()
+
+
+class TestNPCAutofill(unittest.TestCase):
+    """AM3: NPC autofill limit clamping and _autofill_npcs count logic."""
+
+    def _make_casino(self, npc_min=0, npc_max=4, db=None):
+        """Create a Casino with Redis mocked out and preset limits."""
+        with patch('cardgames.casino.redis.Redis'):
+            casino = Casino(redis_host='localhost', redis_port=6379, db=db)
+        casino.npc_min = npc_min
+        casino.npc_max = npc_max
+        return casino
+
+    def _make_game(self, state, npcs=0, humans=0):
+        """Return a mock game with the given state and player counts."""
+        game = MagicMock()
+        game.state = state
+        npc_players = [MagicMock(is_npc=True) for _ in range(npcs)]
+        human_players = [MagicMock(is_npc=False) for _ in range(humans)]
+        game.players = npc_players + human_players
+        game.players_waiting = []
+        return game
+
+    # --- _load_npc_limits clamping ---
+
+    def test_load_npc_limits_defaults_when_no_settings(self):
+        db = SqliteDatabase(':memory:')
+        casino = self._make_casino(db=db)
+        casino._load_npc_limits()
+        self.assertEqual(casino.npc_min, DEFAULT_NPC_AUTOFILL_MIN)
+        self.assertEqual(casino.npc_max, DEFAULT_NPC_AUTOFILL_MAX)
+        db.close()
+
+    def test_load_npc_limits_reads_persisted_values(self):
+        db = SqliteDatabase(':memory:')
+        db.set_setting('npc_autofill_min', '2')
+        db.set_setting('npc_autofill_max', '5')
+        casino = self._make_casino(db=db)
+        casino._load_npc_limits()
+        self.assertEqual(casino.npc_min, 2)
+        self.assertEqual(casino.npc_max, 5)
+        db.close()
+
+    def test_load_npc_limits_clamps_above_max(self):
+        db = SqliteDatabase(':memory:')
+        db.set_setting('npc_autofill_min', '99')
+        db.set_setting('npc_autofill_max', '99')
+        casino = self._make_casino(db=db)
+        casino._load_npc_limits()
+        self.assertEqual(casino.npc_min, MAX_NPCS_PER_TABLE)
+        self.assertEqual(casino.npc_max, MAX_NPCS_PER_TABLE)
+        db.close()
+
+    def test_load_npc_limits_clamps_below_zero(self):
+        db = SqliteDatabase(':memory:')
+        db.set_setting('npc_autofill_min', '-5')
+        db.set_setting('npc_autofill_max', '-1')
+        casino = self._make_casino(db=db)
+        casino._load_npc_limits()
+        self.assertEqual(casino.npc_min, 0)
+        self.assertEqual(casino.npc_max, 0)
+        db.close()
+
+    def test_load_npc_limits_min_clamped_to_max(self):
+        db = SqliteDatabase(':memory:')
+        db.set_setting('npc_autofill_min', '5')
+        db.set_setting('npc_autofill_max', '2')
+        casino = self._make_casino(db=db)
+        casino._load_npc_limits()
+        # min > max: min is clamped down to max
+        self.assertLessEqual(casino.npc_min, casino.npc_max)
+        db.close()
+
+    # --- _autofill_npcs state guards ---
+
+    def test_autofill_no_op_during_active_hand(self):
+        casino = self._make_casino(npc_min=2)
+        casino._spawn_npcs_into_game = MagicMock()
+        game = self._make_game(HandState.PLAYING, npcs=0)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_not_called()
+
+    def test_autofill_no_op_during_betting(self):
+        casino = self._make_casino(npc_min=2)
+        casino._spawn_npcs_into_game = MagicMock()
+        game = self._make_game(HandState.BETTING, npcs=0)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_not_called()
+
+    # --- _autofill_npcs fill logic ---
+
+    def test_autofill_spawns_when_below_min(self):
+        casino = self._make_casino(npc_min=2)
+        casino._spawn_npcs_into_game = MagicMock()
+        casino._mark_dirty = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=0, humans=1)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_called_once_with('g1', 2)
+        casino._mark_dirty.assert_called()
+
+    def test_autofill_no_op_when_at_min(self):
+        casino = self._make_casino(npc_min=2)
+        casino._spawn_npcs_into_game = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=2)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_not_called()
+
+    def test_autofill_capped_by_max_npcs_per_table(self):
+        """Won't overfill past MAX_NPCS_PER_TABLE even if npc_min demands more."""
+        casino = self._make_casino(npc_min=MAX_NPCS_PER_TABLE)
+        casino._spawn_npcs_into_game = MagicMock()
+        casino._mark_dirty = MagicMock()
+        # 4 humans already at the table, MAX=6, so only 2 NPC slots remain
+        game = self._make_game(HandState.WAITING, npcs=0, humans=4)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_called_once_with('g1', 2)
+
+    # --- _autofill_npcs trim logic ---
+
+    def test_autofill_trims_when_above_max(self):
+        casino = self._make_casino(npc_min=0, npc_max=1)
+        casino._mark_dirty = MagicMock()
+        npc1 = MagicMock(is_npc=True, npc_db_id=None)
+        npc2 = MagicMock(is_npc=True, npc_db_id=None)
+        game = MagicMock()
+        game.state = HandState.WAITING
+        game.players = []
+        game.players_waiting = [npc1, npc2]
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        game.leave.assert_called_once_with(npc1)
+        casino._mark_dirty.assert_called()
+
+    def test_autofill_no_op_when_at_max(self):
+        casino = self._make_casino(npc_min=0, npc_max=2)
+        casino._mark_dirty = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=2)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._mark_dirty.assert_not_called()
+
+    # --- _autofill_npcs throttle ---
+
+    def test_autofill_throttled_within_interval(self):
+        casino = self._make_casino(npc_min=2)
+        casino._spawn_npcs_into_game = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=0)
+        casino.games['g1'] = game
+        casino._last_autofill['g1'] = time.time()  # set recent timestamp
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_not_called()
 
 
 if __name__ == '__main__':

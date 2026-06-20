@@ -334,6 +334,7 @@ class Blackjack(CardGame):
             raise CardGameError("No players")
 
         self.bets = {}
+        self.time_first_player_joined = None
         self.time_betting_started = time.time()
         self.state = HandState.BETTING
         logging.info(f"[{self.game_id[:8]}] Betting opens — {', '.join(_player_label(p) for p in self.players)}")

@@ -202,6 +202,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - `DESIGN-VISION.md` — design decisions and refinements that shaped VISION.md
 - `ROADMAP.md` — milestone-by-milestone implementation plan for achieving VISION.md; includes dependency order and cross-cutting concerns (LLM usage tracking, detail level config)
 - `M1-ARCH.md` — architectural decisions for Milestone 1 (Persistent NPC Roster); records options considered and resolutions for each decision
+- `ADMIN-CONTROLS.md` — milestone roadmap for admin tooling (NPC population control via auto-fill + manual add/remove, and player/NPC wallet inspection/editing); dependency-ordered, not yet implemented
 
 ## Documentation Updates
 When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, ROADMAP.md, M1-ARCH.md (if M1-related), and any other plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.

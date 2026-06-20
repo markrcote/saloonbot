@@ -1213,7 +1213,7 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.assertIn('BotPlayer', game.bets)
         self.assertEqual(game.state, HandState.BETTING)
         self.mock_db.save_game.assert_called_once_with(game_id, game.to_dict())
-        self.assertFalse(game._bets_dirty)
+        self.assertFalse(game._dirty)
 
 
 class TestLLMBlackjackNPC(unittest.TestCase):

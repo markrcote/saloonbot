@@ -223,7 +223,7 @@ class Blackjack(CardGame):
 
         # Betting state
         self.bets = {}  # Player -> bet amount
-        self._bets_dirty = False
+        self._dirty = False
         self.time_betting_started = None
         self.time_first_player_joined = None
 
@@ -262,6 +262,7 @@ class Blackjack(CardGame):
     def join(self, player):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
+        self._dirty = True
 
         if not getattr(player, 'is_npc', False):
             try:
@@ -281,10 +282,12 @@ class Blackjack(CardGame):
     def leave(self, player):
         if player not in self.players:
             if player in self.players_waiting:
+                self._dirty = True
                 self.players_waiting.remove(player)
                 self.output(f"👋 {player} tips their hat and moseys on.")
                 return
             raise CardGameError(f"{player} is not at the table")
+        self._dirty = True
 
         leaving_idx = self.players.index(player)
 
@@ -326,6 +329,7 @@ class Blackjack(CardGame):
 
     def start_betting(self):
         """Transition from WAITING to BETTING state."""
+        self._dirty = True
         # Move waiting players to active players
         self.players.extend(self.players_waiting)
         self.players_waiting = []
@@ -377,7 +381,7 @@ class Blackjack(CardGame):
             raise InsufficientFundsError(player, balance, amount)
 
         self.bets[player.name] = amount
-        self._bets_dirty = True
+        self._dirty = True
         self._update_time_last_event()
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${amount:.2f}")
 
@@ -391,6 +395,7 @@ class Blackjack(CardGame):
     def new_hand(self):
         if not self.players:
             raise CardGameError("No players")
+        self._dirty = True
 
         self.output("🃏 The dealer shuffles and deals...")
         self.output(f"🎲 At the table: {', '.join([_player_label(x) for x in self.players])}")
@@ -474,6 +479,7 @@ class Blackjack(CardGame):
 
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""
+        self._dirty = True
         self.output("✨ ~*~ The dust settles... ~*~ ✨")
         self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
         for player in self.players:
@@ -492,6 +498,7 @@ class Blackjack(CardGame):
     def hit(self, player):
         self._check_playing_state()
         self._check_turn(player)
+        self._dirty = True
         self._update_time_last_event()
         self.deal(player)
         self.output(f"🃏 {player} draws... {player.hand[-1]}")
@@ -513,6 +520,7 @@ class Blackjack(CardGame):
     def stand(self, player):
         self._check_playing_state()
         self._check_turn(player)
+        self._dirty = True
         self._update_time_last_event()
         self.output(f"✋ {player} stands pat.")
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} stands at {self.get_score(player)}")
@@ -530,6 +538,7 @@ class Blackjack(CardGame):
     def next_turn(self):
         if self.state != HandState.PLAYING:
             raise CardGameError("No hand in progress")
+        self._dirty = True
 
         self.current_player_idx += 1
         if self.current_player_idx >= len(self.players):
@@ -561,6 +570,7 @@ class Blackjack(CardGame):
         """Execute dealer's play: hit until 17 or higher."""
         if self.state != HandState.DEALER_TURN:
             raise CardGameError("Not dealer's turn")
+        self._dirty = True
 
         self.output(f"👀 Dealer's showing {self.dealer.hand[0]}.")
         self.output("🔄 Dealer flips the hole card...")
@@ -653,6 +663,7 @@ class Blackjack(CardGame):
         """Handle BETTING state: wait for bets or timeout."""
         if not self.players:
             self.output("🌵 The table's gone quiet... everyone's vamoosed.")
+            self._dirty = True
             self.state = HandState.WAITING
             self.time_first_player_joined = None
             return
@@ -678,6 +689,7 @@ class Blackjack(CardGame):
         for player in broke_npcs:
             self.output(f"💸 {player.name} is tapped out and tips their hat goodbye.")
             logging.info(f"[{self.game_id[:8]}] NPC {player.name} removed — insufficient funds")
+            self._dirty = True
             self.players.remove(player)
 
         # Check if all players have bet
@@ -696,10 +708,12 @@ class Blackjack(CardGame):
                 players_without_bets = [p for p in self.players if p.name not in self.bets]
                 for player in players_without_bets:
                     self.output(f"⏭️ {player} didn't put up any coin. They're sittin' this one out.")
+                self._dirty = True
                 self.players = [p for p in self.players if p.name in self.bets]
 
             if not self.players:
                 self.output("⏸️ Nobody's got skin in the game. Dealer waits...")
+                self._dirty = True
                 self.state = HandState.WAITING
                 return
 
@@ -746,6 +760,7 @@ class Blackjack(CardGame):
     def _tick_between_hands(self):
         """Handle BETWEEN_HANDS state: wait then transition to WAITING."""
         if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
+            self._dirty = True
             self.state = HandState.WAITING
 
     def to_dict(self):

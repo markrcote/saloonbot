@@ -1160,34 +1160,60 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.casino.db = self.mock_db
 
     def test_add_npc_to_game(self):
+        self.casino.db = None  # use ephemeral NPC path (no DB needed)
         game_id = self.casino.new_game()
-        npc = self.casino.add_npc(game_id, "TestNPC", "simple")
-        self.assertTrue(npc.is_npc)
-        self.assertEqual(npc.name, "TestNPC")
+        self.casino.add_npc(game_id, 1)
         game = self.casino.games[game_id]
-        self.assertIn(npc, game.players_waiting)
+        npcs = [p for p in game.players_waiting if p.is_npc]
+        self.assertEqual(len(npcs), 1)
+        self.assertTrue(npcs[0].is_npc)
 
-    def test_add_npc_unknown_type(self):
+    def test_add_npc_capped_at_max(self):
+        """add_npc is a no-op when the game is already at MAX_NPCS_PER_TABLE."""
+        self.casino.db = None
         game_id = self.casino.new_game()
-        with self.assertRaises(CardGameError):
-            self.casino.add_npc(game_id, "TestNPC", "unknown")
+        game = self.casino.games[game_id]
+        # Fill to the hard cap manually
+        for i in range(MAX_NPCS_PER_TABLE):
+            game.join(SimpleBlackjackNPC(f"NPC{i}"))
+        count_before = len(game.players_waiting)
+        self.casino.add_npc(game_id, 2)  # should be no-op
+        self.assertEqual(len(game.players_waiting), count_before)
 
     def test_add_npc_invalid_game(self):
         with self.assertRaises(CardGameError):
-            self.casino.add_npc("nonexistent", "TestNPC")
+            self.casino.add_npc("nonexistent")
 
     def test_remove_npc_from_waiting(self):
+        self.casino.db = None
         game_id = self.casino.new_game()
-        self.casino.add_npc(game_id, "RemoveNPC", "simple")
+        self.casino.add_npc(game_id, 1)
         game = self.casino.games[game_id]
-        self.assertEqual(len(game.players_waiting), 1)
-        self.casino.remove_npc(game_id, "RemoveNPC")
-        self.assertEqual(len(game.players_waiting), 0)
+        npc_name = next(p.name for p in game.players_waiting if p.is_npc)
+        self.assertEqual(len([p for p in game.players_waiting if p.is_npc]), 1)
+        self.casino.remove_npc(game_id, npc_name)
+        self.assertEqual(len([p for p in game.players_waiting if p.is_npc]), 0)
+
+    def test_remove_npc_arbitrary(self):
+        """remove_npc with no name removes any one NPC."""
+        self.casino.db = None
+        game_id = self.casino.new_game()
+        self.casino.add_npc(game_id, 1)
+        game = self.casino.games[game_id]
+        self.assertEqual(len([p for p in game.players_waiting if p.is_npc]), 1)
+        self.casino.remove_npc(game_id)  # no name = remove any
+        self.assertEqual(len([p for p in game.players_waiting if p.is_npc]), 0)
 
     def test_remove_npc_not_found(self):
         game_id = self.casino.new_game()
         with self.assertRaises(CardGameError):
             self.casino.remove_npc(game_id, "Ghost")
+
+    def test_remove_npc_no_npcs(self):
+        """remove_npc with no name raises when no NPCs exist."""
+        game_id = self.casino.new_game()
+        with self.assertRaises(CardGameError):
+            self.casino.remove_npc(game_id)
 
     def test_remove_npc_does_not_remove_human(self):
         """remove_npc should not remove a human player with the same name."""

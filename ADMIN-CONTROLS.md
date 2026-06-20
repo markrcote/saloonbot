@@ -144,7 +144,7 @@ game and poll (`games` table / `get_debug`) until NPC count reaches min.
 
 ---
 
-## AM4: Manual NPC Add/Remove Commands
+## AM4: Manual NPC Add/Remove Commands ✓ Done
 
 **Depends on:** AM3 (shares `_spawn_npcs_into_game`).
 

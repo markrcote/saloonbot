@@ -615,6 +615,78 @@ class BlackjackCog(commands.Cog):
             self._pending_npclimits_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
 
+    @nextcord.slash_command(name="addnpc", guild_ids=GUILD_IDS,
+                            description="Add NPC(s) to the current game (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def add_npc(
+        self,
+        interaction: nextcord.Interaction,
+        count: int = nextcord.SlashOption(
+            name="count",
+            description="Number of NPCs to add (default: 1)",
+            required=False,
+            default=1,
+            min_value=1,
+            max_value=6,
+        ),
+    ):
+        """Add one or more roster NPCs to the current channel's game."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("⚠️ No game currently in progress.", ephemeral=True)
+            return
+
+        message = {
+            "event_type": "npc_action",
+            "action": "add_npc",
+            "game_id": game.game_id,
+            "count": count,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for addnpc: {e}")
+            await interaction.send("❌ Could not reach game server.", ephemeral=True)
+            return
+
+        await interaction.send(f"🤠 Adding {count} NPC(s) to the game.", ephemeral=True)
+
+    @nextcord.slash_command(name="removenpc", guild_ids=GUILD_IDS,
+                            description="Remove an NPC from the current game (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def remove_npc(
+        self,
+        interaction: nextcord.Interaction,
+        name: str = nextcord.SlashOption(
+            name="name",
+            description="NPC name to remove (omit to remove any NPC)",
+            required=False,
+            default=None,
+        ),
+    ):
+        """Remove an NPC from the current channel's game (by name or any)."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("⚠️ No game currently in progress.", ephemeral=True)
+            return
+
+        message = {
+            "event_type": "npc_action",
+            "action": "remove_npc",
+            "game_id": game.game_id,
+        }
+        if name is not None:
+            message["npc_name"] = name
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for removenpc: {e}")
+            await interaction.send("❌ Could not reach game server.", ephemeral=True)
+            return
+
+        target = f"**{name}**" if name else "an NPC"
+        await interaction.send(f"🤠 Removing {target} from the game.", ephemeral=True)
+
     @nextcord.slash_command(name="help", guild_ids=GUILD_IDS,
                             description="Show all available commands")
     async def show_help(self, interaction: nextcord.Interaction):
@@ -636,6 +708,8 @@ class BlackjackCog(commands.Cog):
             "`/setwallet <target> <amount>` — Set a wallet to an exact amount\n"
             "`/givechips <target> <amount>` — Adjust a wallet by a delta\n"
             "`/npclimits [min] [max]` — View or set NPC autofill limits per table\n"
+            "`/addnpc [count]` — Add NPC(s) to the current game\n"
+            "`/removenpc [name]` — Remove an NPC from the current game\n"
             "`/usage` — LLM token usage for the past 7 days\n"
             "`/debug` — Full internal state dump"
         )

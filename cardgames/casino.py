@@ -771,72 +771,61 @@ class Casino:
             }
         )
 
-    def add_npc(self, game_id, npc_name, npc_type='simple'):
-        """Add an NPC player to a game.
-
-        Args:
-            game_id: The game to add the NPC to.
-            npc_name: Name for the NPC player.
-            npc_type: NPC strategy type (key in NPC_TYPES).
-
-        Returns:
-            The created NPCPlayer instance.
+    def add_npc(self, game_id, count=1):
+        """Add `count` roster NPCs to a game, respecting MAX_NPCS_PER_TABLE.
 
         Raises:
-            CardGameError: If game_id is invalid or npc_type is unknown.
+            CardGameError: If game_id is invalid.
         """
         if game_id not in self.games:
             raise CardGameError(f"Game {game_id} not found")
 
-        if npc_type not in NPC_TYPES:
-            available = ', '.join(NPC_TYPES.keys())
-            raise CardGameError(f"Unknown NPC type '{npc_type}'. Available: {available}")
-
-        if npc_type == 'llm':
-            llm_client = self.llm_client
-            if llm_client is None:
-                logging.warning("LLM client not available; using simple NPC strategy for %s", npc_name)
-                npc = SimpleBlackjackNPC(npc_name)
-            else:
-                personality = get_random_personality()
-                npc = LLMBlackjackNPC(npc_name, personality, llm_client)
-        else:
-            npc = NPC_TYPES[npc_type](npc_name)
         game = self.games[game_id]
-        game.join(npc)
-        return npc
+        total = len(game.players) + len(game.players_waiting)
+        available = max(0, MAX_NPCS_PER_TABLE - total)
+        to_add = min(count, available)
+        if to_add <= 0:
+            return
+        self._spawn_npcs_into_game(game_id, to_add)
+        self._dirty_games.add(game_id)
 
-    def remove_npc(self, game_id, npc_name):
-        """Remove an NPC player from a game.
+    def remove_npc(self, game_id, npc_name=None):
+        """Remove an NPC from a game.
 
-        Args:
-            game_id: The game to remove the NPC from.
-            npc_name: Name of the NPC to remove.
-
+        If npc_name is None, removes one NPC preferring players_waiting.
         Raises:
-            CardGameError: If game_id is invalid or NPC not found.
+            CardGameError: If game_id is invalid or no matching NPC found.
         """
         if game_id not in self.games:
             raise CardGameError(f"Game {game_id} not found")
 
         game = self.games[game_id]
         npc = None
-        for player in game.players + game.players_waiting:
-            if player.name == npc_name and player.is_npc:
-                npc = player
-                break
-
-        if npc is None:
-            raise CardGameError(f"NPC '{npc_name}' not found in game")
+        if npc_name is None:
+            # Prefer waiting players so we don't disrupt an active hand
+            for player in game.players_waiting + game.players:
+                if player.is_npc:
+                    npc = player
+                    break
+            if npc is None:
+                raise CardGameError("No NPC found in game")
+        else:
+            for player in game.players + game.players_waiting:
+                if player.name == npc_name and player.is_npc:
+                    npc = player
+                    break
+            if npc is None:
+                raise CardGameError(f"NPC '{npc_name}' not found in game")
 
         game.leave(npc)
+        self._dirty_games.add(game_id)
 
         npc_db_id = getattr(npc, 'npc_db_id', None)
         if npc_db_id is not None and self.db is not None:
             try:
                 self.db.clear_npc_game(npc_db_id)
             except Exception as e:
-                logging.error(f"Error clearing NPC game for {npc_name}: {e}")
+                logging.error(f"Error clearing NPC game for {npc.name}: {e}")
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")
@@ -955,13 +944,11 @@ class Casino:
                 if data['event_type'] == 'npc_action':
                     action = data['action']
                     if action == 'add_npc':
-                        npc_name = data.get('npc_name', f"NPC-{uuid.uuid4().hex[:6]}")
-                        npc_type = data.get('npc_type', 'simple')
-                        self.add_npc(game_id, npc_name, npc_type)
+                        count = int(data.get('count', 1))
+                        self.add_npc(game_id, count)
                     elif action == 'remove_npc':
-                        npc_name = data.get('npc_name')
-                        if npc_name:
-                            self.remove_npc(game_id, npc_name)
+                        npc_name = data.get('npc_name')  # None = remove any NPC
+                        self.remove_npc(game_id, npc_name)
                 else:
                     self.games[game_id].action(data)
                     if (data['event_type'] == 'player_action'

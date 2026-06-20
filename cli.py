@@ -22,8 +22,8 @@ Commands:
   hit               - Draw another card
   stand             - Hold your current hand
   leave             - Leave the game
-  addnpc <name> [simple|llm]  - Add a bot player (default: simple)
-  removenpc <name>  - Remove a bot player
+  addnpc [count]    - Add roster NPC(s) to the game (default: 1)
+  removenpc [name]  - Remove an NPC (by name, or any if omitted)
   help              - Show this message
   quit              - Exit the CLI
 """
@@ -61,27 +61,26 @@ class CasinoCli:
             elif cmd == "help":
                 print(HELP_TEXT)
             elif cmd == "addnpc":
-                npc_name = args[1] if len(args) > 1 else None
-                npc_type = args[2] if len(args) > 2 else "simple"
-                message = {
-                    "event_type": "npc_action",
-                    "game_id": self.game_id,
-                    "action": "add_npc",
-                    "npc_type": npc_type,
-                }
-                if npc_name:
-                    message["npc_name"] = npc_name
-                await self.redis.publish("casino", json.dumps(message))
-            elif cmd == "removenpc":
-                if len(args) < 2:
-                    logging.error("Usage: removenpc <npc_name>")
+                try:
+                    count = int(args[1]) if len(args) > 1 else 1
+                except ValueError:
+                    logging.error("Usage: addnpc [count]")
                     continue
                 message = {
                     "event_type": "npc_action",
                     "game_id": self.game_id,
-                    "action": "remove_npc",
-                    "npc_name": args[1],
+                    "action": "add_npc",
+                    "count": count,
                 }
+                await self.redis.publish("casino", json.dumps(message))
+            elif cmd == "removenpc":
+                message = {
+                    "event_type": "npc_action",
+                    "game_id": self.game_id,
+                    "action": "remove_npc",
+                }
+                if len(args) > 1:
+                    message["npc_name"] = args[1]
                 await self.redis.publish("casino", json.dumps(message))
             elif cmd == "bet":
                 if len(args) < 2:

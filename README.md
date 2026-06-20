@@ -33,6 +33,8 @@ Slash commands:
 * `/setwallet <target> <amount>` *(admin)* — set a player's or NPC's wallet to an exact amount.
 * `/givechips <target> <amount>` *(admin)* — adjust a player's or NPC's wallet by a delta (negative takes chips away).
 * `/npclimits [min] [max]` *(admin)* — view or set the NPC autofill min/max per table. With `min > 0`, tables stay populated with NPCs even when no humans are present.
+* `/addnpc [count]` *(admin)* — add one or more roster NPCs to the current game (default: 1).
+* `/removenpc [name]` *(admin)* — remove an NPC from the current game; omit name to remove any NPC.
 * `/usage` *(admin)* — show a 7-day summary of LLM token usage.
 * `/debug` *(admin)* — dump full internal state for troubleshooting.
 
@@ -92,8 +94,8 @@ Available commands:
 | `hit` | Draw another card |
 | `stand` | Hold your current hand |
 | `leave` | Leave the game |
-| `addnpc <name> [simple\|llm]` | Add a bot player |
-| `removenpc <name>` | Remove a bot player |
+| `addnpc [count]` | Add roster NPC(s) to the current game |
+| `removenpc [name]` | Remove an NPC (by name, or any if omitted) |
 | `help` | Show command list |
 | `quit` | Exit |
 

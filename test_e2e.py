@@ -1110,5 +1110,135 @@ class TestNPCLimits(EndToEndTestCase):
         )
 
 
+class TestManualNPC(EndToEndTestCase):
+    """E2E tests for manual NPC add/remove commands (AM4)."""
+
+    def setUp(self):
+        super().setUp()
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npcs")
+        cursor.execute("DELETE FROM settings")
+        self.db.commit()
+        cursor.close()
+
+    def _npc_action(self, action, game_id, **kwargs):
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'npc_action',
+            'action': action,
+            'game_id': game_id,
+            **kwargs,
+        }))
+
+    def _get_debug(self):
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe("casino_update")
+        pubsub.get_message(timeout=1)
+        request_id = f"test-debug-{time.time()}"
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'casino_action',
+            'action': 'get_debug',
+            'request_id': request_id,
+        }))
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            msg = pubsub.get_message(timeout=0.5)
+            if msg and msg['type'] == 'message':
+                data = json.loads(msg['data'])
+                if data.get('request_id') == request_id:
+                    pubsub.close()
+                    return data
+        pubsub.close()
+        return None
+
+    def _npc_count_in_game(self, debug_data, game_id):
+        for g in debug_data.get('games', []):
+            if g['game_id'] == game_id:
+                return sum(1 for p in g['players'] + g.get('players_waiting', [])
+                           if p['is_npc'])
+        return 0
+
+    def _npc_names_in_game(self, debug_data, game_id):
+        for g in debug_data.get('games', []):
+            if g['game_id'] == game_id:
+                return [p['name'] for p in g['players'] + g.get('players_waiting', [])
+                        if p['is_npc']]
+        return []
+
+    def test_addnpc_increases_npc_count(self):
+        """add_npc action adds an NPC from the roster to the game."""
+        game_id = self.create_game()
+        time.sleep(1)
+
+        debug_before = self._get_debug()
+        count_before = self._npc_count_in_game(debug_before, game_id)
+
+        self._npc_action('add_npc', game_id, count=1)
+        time.sleep(2)
+
+        debug_after = self._get_debug()
+        count_after = self._npc_count_in_game(debug_after, game_id)
+
+        self.assertEqual(count_after, count_before + 1,
+                         f"Expected NPC count to increase by 1, was {count_before} → {count_after}")
+
+    def test_addnpc_multiple(self):
+        """add_npc with count=2 adds two NPCs."""
+        game_id = self.create_game()
+        time.sleep(1)
+
+        debug_before = self._get_debug()
+        count_before = self._npc_count_in_game(debug_before, game_id)
+
+        self._npc_action('add_npc', game_id, count=2)
+        time.sleep(2)
+
+        debug_after = self._get_debug()
+        count_after = self._npc_count_in_game(debug_after, game_id)
+
+        self.assertEqual(count_after, count_before + 2,
+                         f"Expected NPC count to increase by 2, was {count_before} → {count_after}")
+
+    def test_removenpc_by_name(self):
+        """remove_npc with a name removes exactly that NPC."""
+        game_id = self.create_game()
+        time.sleep(1)
+
+        self._npc_action('add_npc', game_id, count=1)
+        time.sleep(2)
+
+        debug_after_add = self._get_debug()
+        names = self._npc_names_in_game(debug_after_add, game_id)
+        self.assertGreater(len(names), 0, "Expected at least one NPC after add_npc")
+
+        target = names[0]
+        self._npc_action('remove_npc', game_id, npc_name=target)
+        time.sleep(2)
+
+        debug_after_remove = self._get_debug()
+        names_after = self._npc_names_in_game(debug_after_remove, game_id)
+        self.assertNotIn(target, names_after,
+                         f"NPC '{target}' should have been removed, remaining: {names_after}")
+
+    def test_removenpc_arbitrary(self):
+        """remove_npc with no name removes one NPC."""
+        game_id = self.create_game()
+        time.sleep(1)
+
+        self._npc_action('add_npc', game_id, count=1)
+        time.sleep(2)
+
+        debug_before = self._get_debug()
+        count_before = self._npc_count_in_game(debug_before, game_id)
+        self.assertGreater(count_before, 0, "Expected at least one NPC after add_npc")
+
+        self._npc_action('remove_npc', game_id)
+        time.sleep(2)
+
+        debug_after = self._get_debug()
+        count_after = self._npc_count_in_game(debug_after, game_id)
+        self.assertEqual(count_after, count_before - 1,
+                         f"Expected NPC count to decrease by 1, was {count_before} → {count_after}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -106,8 +106,8 @@ Discord Users
 - `join`, `leave`, `bet` (with `amount`), `hit`, `stand` (see `Action` in `blackjack.py`; double-down and split are not implemented)
 
 **NPC actions** (`event_type: "npc_action"`, requires `game_id`):
-- `add_npc` - Add an NPC player to a game (`npc_name`, optional `npc_type` of `simple`/`llm`)
-- `remove_npc` - Remove a named NPC (`npc_name`) from a game
+- `add_npc` - Add roster NPC(s) to a game; optional `count` (default 1); capped at `MAX_NPCS_PER_TABLE`
+- `remove_npc` - Remove an NPC; optional `npc_name` (omit to remove any NPC, preferring `players_waiting`)
 
 ### Casino Update Protocol (published to "casino_update")
 

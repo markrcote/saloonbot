@@ -62,9 +62,9 @@ python cli.py   # name: Carol, bots: 2
 python cli.py   # name: Dave, bots: 0
 ```
 
-- [ ] After joining: `addnpc "Wyatt" llm` → "🪑 Wyatt pulls up a chair"
-- [ ] Wyatt auto-bets and plays; `quit` after hand resolves
-- [ ] `addnpc "Slim" simple` → Slim joins; `removenpc Slim` → Slim leaves (no crash)
+- [ ] After joining: `addnpc 1` → roster NPC joins and announces in-channel
+- [ ] NPC auto-bets and plays; `quit` after hand resolves
+- [ ] `addnpc 2` → two more NPCs join; `removenpc` (no name) → one NPC leaves (no crash)
 
 ---
 

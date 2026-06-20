@@ -76,6 +76,12 @@ MIGRATIONS = [
         "ALTER TABLE users ADD COLUMN biggest_win DECIMAL(10, 2) NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP NULL",
     ],
+    [   # Migration 5: runtime settings key/value store
+        """CREATE TABLE IF NOT EXISTS settings (
+            setting_key VARCHAR(64) PRIMARY KEY,
+            setting_value TEXT NOT NULL
+        )""",
+    ],
 ]
 
 
@@ -235,6 +241,19 @@ class Database:
             return rows_affected > 0
 
         return self._execute_write(fn, f"update_wallet({username})")
+
+    def set_user_wallet(self, username, amount):
+        """Set a user's wallet to an absolute amount. Returns True on success."""
+        def fn(cursor):
+            cursor.execute(
+                "UPDATE users SET wallet = %s WHERE username = %s", (amount, username)
+            )
+            rows_affected = cursor.rowcount
+            if rows_affected > 0:
+                logging.debug(f"Set wallet for {username} to {amount}")
+            return rows_affected > 0
+
+        return self._execute_write(fn, f"set_user_wallet({username})")
 
     def save_game(self, game_id, game_data):
         """Save game state to database."""
@@ -473,6 +492,21 @@ class Database:
             if cursor:
                 cursor.close()
 
+    def find_npc_by_name(self, name):
+        """Find an NPC by name (case-insensitive). Returns dict or None."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM npcs WHERE LOWER(name) = LOWER(%s)", (name,))
+            return cursor.fetchone()
+        except Error as e:
+            logging.error(f"Error finding NPC by name {name}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance. Returns float or None."""
         self._connect()
@@ -504,6 +538,15 @@ class Database:
                 )
             return cursor.rowcount > 0
         return self._execute_write(fn, f"update_npc_wallet({npc_id})")
+
+    def set_npc_wallet(self, npc_id, amount):
+        """Set an NPC's wallet to an absolute amount. Returns True on success."""
+        def fn(cursor):
+            cursor.execute(
+                "UPDATE npcs SET wallet = %s WHERE id = %s", (int(amount), npc_id)
+            )
+            return cursor.rowcount > 0
+        return self._execute_write(fn, f"set_npc_wallet({npc_id})")
 
     def set_npc_game(self, npc_id, game_id):
         """Assign NPC to a game and update last_played_at."""
@@ -641,6 +684,34 @@ class Database:
         finally:
             if cursor:
                 cursor.close()
+
+    def get_setting(self, key, default=None):
+        """Get a runtime setting value (string), or default if not set."""
+        self._connect()
+        cursor = None
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "SELECT setting_value FROM settings WHERE setting_key = %s", (key,)
+            )
+            result = cursor.fetchone()
+            return result[0] if result else default
+        except Error as e:
+            logging.error(f"Error getting setting {key}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    def set_setting(self, key, value):
+        """Set a runtime setting value (stored as a string), upserting on key."""
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO settings (setting_key, setting_value) VALUES (%s, %s) AS new
+                ON DUPLICATE KEY UPDATE setting_value = new.setting_value
+            """, (key, str(value)))
+            logging.debug(f"Set setting {key} = {value}")
+        return self._execute_write(fn, f"set_setting({key})")
 
     def close(self):
         """Close the database connection."""

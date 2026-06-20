@@ -13,6 +13,7 @@ from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.casino import NPC_TYPES, Casino
 from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
+from cardgames.sqlite_database import SqliteDatabase
 
 from wwnames.wwnames import WildWestNames
 
@@ -342,6 +343,70 @@ class TestDatabaseIntegration(unittest.TestCase):
 
         # Verify player was added to waiting list
         self.assertIn(player, game.players_waiting)
+
+
+class TestSettingsStore(unittest.TestCase):
+    """AM1: settings key/value store on the SQLite backend."""
+
+    def setUp(self):
+        # In-memory DB runs all migrations, including the settings table.
+        self.db = SqliteDatabase(":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_missing_setting_returns_default(self):
+        self.assertIsNone(self.db.get_setting("nope"))
+        self.assertEqual(self.db.get_setting("nope", "fallback"), "fallback")
+
+    def test_set_then_get(self):
+        self.db.set_setting("npc_min", "2")
+        self.assertEqual(self.db.get_setting("npc_min"), "2")
+
+    def test_set_upserts_on_key(self):
+        self.db.set_setting("npc_max", "4")
+        self.db.set_setting("npc_max", "6")
+        self.assertEqual(self.db.get_setting("npc_max"), "6")
+
+    def test_non_string_value_stored_as_string(self):
+        self.db.set_setting("npc_min", 3)
+        self.assertEqual(self.db.get_setting("npc_min"), "3")
+
+
+class TestWalletAdmin(unittest.TestCase):
+    """AM1: absolute wallet sets and case-insensitive NPC lookup."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_set_user_wallet_absolute(self):
+        self.db.add_user("Maverick")
+        self.assertTrue(self.db.set_user_wallet("Maverick", 555.0))
+        self.assertEqual(self.db.get_user_wallet("Maverick"), 555.0)
+
+    def test_set_user_wallet_missing_user_returns_false(self):
+        self.assertFalse(self.db.set_user_wallet("Ghost", 100.0))
+
+    def test_set_npc_wallet_absolute(self):
+        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 200)
+        self.assertTrue(self.db.set_npc_wallet(npc_id, 42))
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 42.0)
+
+    def test_set_npc_wallet_missing_npc_returns_false(self):
+        self.assertFalse(self.db.set_npc_wallet(9999, 50))
+
+    def test_find_npc_by_name_case_insensitive(self):
+        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 200)
+        found = self.db.find_npc_by_name("dusty pete")
+        self.assertIsNotNone(found)
+        self.assertEqual(found["id"], npc_id)
+        self.assertEqual(found["wallet"], 200)
+
+    def test_find_npc_by_name_miss_returns_none(self):
+        self.assertIsNone(self.db.find_npc_by_name("Nobody"))
 
 
 class TestBlackjackBetting(unittest.TestCase):
@@ -1879,8 +1944,8 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         from cardgames.casino import Casino
         mock_db = MagicMock()
         mock_db.get_player_stats.return_value = {'games_played': 20, 'hands_played': 50,
-                                                  'total_won': 200.0, 'total_lost': 100.0,
-                                                  'biggest_win': 75.0, 'last_seen': None}
+                                                 'total_won': 200.0, 'total_lost': 100.0,
+                                                 'biggest_win': 75.0, 'last_seen': None}
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         game = MagicMock()
         human = Player("grace")

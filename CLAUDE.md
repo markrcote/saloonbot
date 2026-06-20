@@ -125,6 +125,7 @@ Discord Users
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
 - `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), wallet, current_game_id
 - `llm_usage` - Per-call LLM token tracking: purpose, model, input/output tokens, npc_id, game_id
+- `settings` - Runtime key/value config store (`setting_key`/`setting_value`); accessed via `get_setting`/`set_setting`
 
 **wwnames/**
 - `wwnames.py` - Random name generator using data files in `names/`

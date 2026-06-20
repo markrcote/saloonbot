@@ -69,6 +69,12 @@ MIGRATIONS = [
         "ALTER TABLE users ADD COLUMN biggest_win REAL NOT NULL DEFAULT 0",
         "ALTER TABLE users ADD COLUMN last_seen TIMESTAMP NULL",
     ],
+    [   # Migration 5: runtime settings key/value store
+        """CREATE TABLE IF NOT EXISTS settings (
+            setting_key TEXT PRIMARY KEY,
+            setting_value TEXT NOT NULL
+        )""",
+    ],
 ]
 
 
@@ -161,6 +167,21 @@ class SqliteDatabase:
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error updating wallet for {username}: {e}")
+            raise
+
+    def set_user_wallet(self, username, amount):
+        """Set a user's wallet to an absolute amount. Returns True on success."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "UPDATE users SET wallet = ? WHERE username = ?", (amount, username)
+            )
+            self.connection.commit()
+            if cursor.rowcount > 0:
+                logging.debug(f"Set wallet for {username} to {amount}")
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Error setting wallet for {username}: {e}")
             raise
 
     def save_game(self, game_id, game_data):
@@ -365,6 +386,19 @@ class SqliteDatabase:
             logging.error(f"Error getting all NPCs: {e}")
             raise
 
+    def find_npc_by_name(self, name):
+        """Find an NPC by name (case-insensitive). Returns dict or None."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT * FROM npcs WHERE LOWER(name) = LOWER(?)", (name,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Error finding NPC by name {name}: {e}")
+            raise
+
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance. Returns float or None."""
         self._connect()
@@ -394,6 +428,19 @@ class SqliteDatabase:
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error updating NPC wallet {npc_id}: {e}")
+            raise
+
+    def set_npc_wallet(self, npc_id, amount):
+        """Set an NPC's wallet to an absolute amount. Returns True on success."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "UPDATE npcs SET wallet = ? WHERE id = ?", (int(amount), npc_id)
+            )
+            self.connection.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Error setting NPC wallet {npc_id}: {e}")
             raise
 
     def set_npc_game(self, npc_id, game_id):
@@ -547,6 +594,33 @@ class SqliteDatabase:
             }
         except sqlite3.Error as e:
             logging.error(f"Error getting player stats for {username}: {e}")
+            raise
+
+    def get_setting(self, key, default=None):
+        """Get a runtime setting value (string), or default if not set."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT setting_value FROM settings WHERE setting_key = ?", (key,)
+            )
+            row = cursor.fetchone()
+            return row['setting_value'] if row else default
+        except sqlite3.Error as e:
+            logging.error(f"Error getting setting {key}: {e}")
+            raise
+
+    def set_setting(self, key, value):
+        """Set a runtime setting value (stored as a string), upserting on key."""
+        self._connect()
+        try:
+            self.connection.execute("""
+                INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)
+                ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value
+            """, (key, str(value)))
+            self.connection.commit()
+            logging.debug(f"Set setting {key} = {value}")
+        except sqlite3.Error as e:
+            logging.error(f"Error setting {key}: {e}")
             raise
 
     def close(self):

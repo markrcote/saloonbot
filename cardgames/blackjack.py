@@ -705,14 +705,7 @@ class Blackjack(CardGame):
             self.new_hand()
 
     def _tick_playing(self):
-        """Handle PLAYING state: check for empty table, auto-play NPCs, remind humans."""
-        if not self.players:
-            self.output("🌵 Table's empty. Everyone's skedaddled.")
-            self.bets = {}
-            self.state = HandState.WAITING
-            self.current_player_idx = None
-            return
-
+        """Handle PLAYING state: auto-play NPCs, remind humans."""
         current_player = self.players[self.current_player_idx]
 
         # Auto-play NPC turns

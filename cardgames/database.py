@@ -203,6 +203,7 @@ class Database:
     def get_user_wallet(self, username):
         """Get the wallet balance for a user."""
         self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor()
@@ -495,6 +496,7 @@ class Database:
     def find_npc_by_name(self, name):
         """Find an NPC by name (case-insensitive). Returns dict or None."""
         self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
@@ -510,6 +512,7 @@ class Database:
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance. Returns float or None."""
         self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor()

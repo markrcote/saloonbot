@@ -155,6 +155,112 @@ class Casino:
         except Exception as e:
             logging.warning(f"Failed to update player stats for {player.name}: {e}")
 
+    def _resolve_wallet_target(self, name):
+        """Resolve a name to (kind, ref) for wallet operations.
+
+        Returns ('player', username), ('npc', npc_id), or (None, None) if not found.
+        Searches users first, then NPCs (case-insensitive).
+        """
+        if self.db is None:
+            return (None, None)
+        try:
+            balance = self.db.get_user_wallet(name)
+            if balance is not None:
+                return ('player', name)
+        except Exception as e:
+            logging.warning(f"Error resolving wallet target {name!r} as player: {e}")
+        try:
+            npc = self.db.find_npc_by_name(name)
+            if npc is not None:
+                return ('npc', npc['id'])
+        except Exception as e:
+            logging.warning(f"Error resolving wallet target {name!r} as NPC: {e}")
+        return (None, None)
+
+    def _handle_lookup_wallet(self, request_id, target):
+        """Handle a lookup_wallet request: search users then NPCs and publish wallet_info."""
+        kind, ref = self._resolve_wallet_target(target)
+        balance = None
+        if kind == 'player':
+            try:
+                balance = self.db.get_user_wallet(ref)
+            except Exception as e:
+                logging.error(f"Error getting player wallet for {target}: {e}")
+        elif kind == 'npc':
+            try:
+                balance = self.db.get_npc_wallet(ref)
+            except Exception as e:
+                logging.error(f"Error getting NPC wallet for {target}: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'wallet_info',
+                'request_id': request_id,
+                'target': target,
+                'kind': kind,
+                'balance': balance,
+            }
+        )
+
+    def _handle_set_wallet(self, request_id, target, mode, amount):
+        """Handle a set_wallet request: resolve target, apply change, publish wallet_set."""
+        kind, ref = self._resolve_wallet_target(target)
+        ok = False
+        message = ''
+        new_balance = None
+
+        if kind is None:
+            message = f"No player or NPC named '{target}' found."
+        elif mode == 'set':
+            if amount < 0:
+                message = "Cannot set wallet to a negative amount."
+            else:
+                try:
+                    if kind == 'player':
+                        ok = self.db.set_user_wallet(ref, amount)
+                    else:
+                        ok = self.db.set_npc_wallet(ref, amount)
+                except Exception as e:
+                    logging.error(f"Error setting wallet for {target}: {e}")
+                if ok:
+                    new_balance = float(amount)
+                    message = f"Wallet set to ${amount:.2f}."
+                else:
+                    message = "Failed to update wallet."
+        elif mode == 'adjust':
+            try:
+                if kind == 'player':
+                    ok = self.db.update_wallet(ref, amount)
+                else:
+                    ok = self.db.update_npc_wallet(ref, amount)
+            except Exception as e:
+                logging.error(f"Error adjusting wallet for {target}: {e}")
+            if ok:
+                try:
+                    new_balance = (self.db.get_user_wallet(ref) if kind == 'player'
+                                   else self.db.get_npc_wallet(ref))
+                except Exception:
+                    pass
+                message = f"Wallet adjusted by ${amount:+.2f}. New balance: ${new_balance:.2f}."
+            else:
+                message = "Adjustment would make balance negative — rejected."
+        else:
+            message = f"Unknown mode '{mode}'."
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'wallet_set',
+                'request_id': request_id,
+                'target': target,
+                'kind': kind,
+                'new_balance': new_balance,
+                'ok': ok,
+                'message': message,
+            }
+        )
+
     def _handle_get_stats(self, request_id, player_name):
         """Handle a get_stats request: query DB and publish player stats."""
         stats = None
@@ -655,6 +761,18 @@ class Casino:
                     player_name = data.get('player')
                     if request_id and player_name:
                         self._handle_get_wallet(request_id, player_name)
+                elif data['action'] == 'lookup_wallet':
+                    request_id = data.get('request_id')
+                    target = data.get('target')
+                    if request_id and target:
+                        self._handle_lookup_wallet(request_id, target)
+                elif data['action'] == 'set_wallet':
+                    request_id = data.get('request_id')
+                    target = data.get('target')
+                    mode = data.get('mode', 'set')
+                    amount = data.get('amount', 0)
+                    if request_id and target:
+                        self._handle_set_wallet(request_id, target, mode, amount)
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:

@@ -96,6 +96,8 @@ Discord Users
 - `get_debug` - Request full internal state dump (admin; bot sends with `request_id`, server responds via `debug_state`)
 - `get_stats` - Request a player's statistics; bot sends with `request_id` and `player`, server responds via `player_stats`
 - `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
+- `lookup_wallet {target}` - Admin wallet lookup by name; searches users first then NPCs (case-insensitive); bot sends with `request_id`, server responds via `wallet_info`
+- `set_wallet {target, mode:'set'|'adjust', amount}` - Admin wallet edit; resolves target via `_resolve_wallet_target`; rejects set < 0 and adjusts that would go negative; responds via `wallet_set`
 - `stop_game` - Terminate a game immediately (admin; requires `game_id`); unresolved bets are not returned
 - `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
 
@@ -114,6 +116,8 @@ Discord Users
 - `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, and the `dirty_games` list (admin diagnostics)
 - `player_stats` response - includes `request_id`, `player`, and `stats` (games/hands played, totals, biggest win, last seen) or null if no record
 - `player_wallet` response - includes `request_id`, `player`, and `balance` (float or null if no record)
+- `wallet_info` response - includes `request_id`, `target`, `kind` (`'player'`|`'npc'`|`None`), and `balance` (float or null)
+- `wallet_set` response - includes `request_id`, `target`, `kind`, `new_balance`, `ok` (bool), and `message`
 
 ### Key Modules
 

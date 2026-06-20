@@ -148,6 +148,8 @@ class BlackjackCog(commands.Cog):
         self._pending_stats_interactions = {}  # request_id -> interaction
         self._pending_debug_interactions = {}  # request_id -> interaction
         self._pending_wallet_interactions = {}  # request_id -> interaction
+        self._pending_checkwallet_interactions = {}  # request_id -> interaction
+        self._pending_setwallet_interactions = {}  # request_id -> interaction (set + adjust)
 
     def cog_unload(self):
         self.listen.stop()
@@ -424,6 +426,97 @@ class BlackjackCog(commands.Cog):
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    async def _handle_wallet_info_response(self, interaction, data):
+        """Format and send wallet info as an ephemeral followup."""
+        target = data.get('target', '?')
+        kind = data.get('kind')
+        balance = data.get('balance')
+
+        if kind is None:
+            await interaction.followup.send(
+                f"⚠️ No player or NPC named **{target}** found.", ephemeral=True
+            )
+            return
+
+        kind_label = "Player" if kind == 'player' else "NPC"
+        await interaction.followup.send(
+            f"💰 **{target}** ({kind_label}): **${balance:.2f}**", ephemeral=True
+        )
+
+    async def _handle_wallet_set_response(self, interaction, data):
+        """Format and send wallet set/adjust result as an ephemeral followup."""
+        ok = data.get('ok', False)
+        msg = data.get('message', 'Unknown error')
+        if ok:
+            await interaction.followup.send(f"✅ {msg}", ephemeral=True)
+        else:
+            await interaction.followup.send(f"❌ {msg}", ephemeral=True)
+
+    @nextcord.slash_command(name="checkwallet", guild_ids=GUILD_IDS,
+                            description="Check any player's or NPC's wallet (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def check_wallet(self, interaction: nextcord.Interaction, target: str):
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_checkwallet_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'lookup_wallet',
+            'request_id': request_id,
+            'target': target,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for lookup_wallet: {e}")
+            self._pending_checkwallet_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
+    @nextcord.slash_command(name="setwallet", guild_ids=GUILD_IDS,
+                            description="Set any player's or NPC's wallet to an exact amount (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def set_wallet(self, interaction: nextcord.Interaction, target: str, amount: int):
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_setwallet_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'set_wallet',
+            'request_id': request_id,
+            'target': target,
+            'mode': 'set',
+            'amount': amount,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for set_wallet: {e}")
+            self._pending_setwallet_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
+    @nextcord.slash_command(name="givechips", guild_ids=GUILD_IDS,
+                            description="Adjust any player's or NPC's wallet by a delta (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def give_chips(self, interaction: nextcord.Interaction, target: str, amount: int):
+        """Positive amount adds chips; negative takes them away."""
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_setwallet_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'set_wallet',
+            'request_id': request_id,
+            'target': target,
+            'mode': 'adjust',
+            'amount': amount,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for givechips: {e}")
+            self._pending_setwallet_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
     @nextcord.slash_command(name="stats", guild_ids=GUILD_IDS,
                             description="View your stats at the saloon")
     async def player_stats(self, interaction: nextcord.Interaction):
@@ -463,6 +556,37 @@ class BlackjackCog(commands.Cog):
             logging.error(f"Redis publish error for get_wallet: {e}")
             self._pending_wallet_interactions.pop(request_id, None)
             await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
+    @nextcord.slash_command(name="help", guild_ids=GUILD_IDS,
+                            description="Show all available commands")
+    async def show_help(self, interaction: nextcord.Interaction):
+        player_cmds = (
+            "`/joingame` — Join the blackjack game in this channel\n"
+            "`/leavegame` — Leave the current game\n"
+            "`/bet <amount>` — Place a bet during the betting phase\n"
+            "Type `hit` or `stand` in chat to play your hand\n"
+            "`/wad` — Check your own wallet balance (private)\n"
+            "`/stats` — View your stats and fame level\n"
+            "`/saloon` — Show saloon info and active tables\n"
+            "`/wwname` — Generate a random Old West name"
+        )
+        admin_cmds = (
+            "`/newgame [num_bots]` — Start a new blackjack game (0–4 bots)\n"
+            "`/stopgame` — Stop the current game (bets not returned)\n"
+            "`/quitgame` — End the game and refund all bets\n"
+            "`/checkwallet <target>` — Check any player's or NPC's balance\n"
+            "`/setwallet <target> <amount>` — Set a wallet to an exact amount\n"
+            "`/givechips <target> <amount>` — Adjust a wallet by a delta\n"
+            "`/usage` — LLM token usage for the past 7 days\n"
+            "`/debug` — Full internal state dump"
+        )
+        embed = nextcord.Embed(
+            title=f"🤠 {SALOON_NAME} — Commands",
+            color=0xc8a96e,
+        )
+        embed.add_field(name="Player commands", value=player_cmds, inline=False)
+        embed.add_field(name="Admin only", value=admin_cmds, inline=False)
+        await interaction.send(embed=embed, ephemeral=True)
 
     @nextcord.slash_command(name="newgame", guild_ids=GUILD_IDS,
                             default_member_permissions=nextcord.Permissions(administrator=True))
@@ -675,6 +799,16 @@ class BlackjackCog(commands.Cog):
                         await interaction.followup.send(
                             f"💰 Your wad: **${balance:.2f}**", ephemeral=True
                         )
+            elif data.get("event_type") == "wallet_info":
+                request_id = data.get("request_id")
+                interaction = self._pending_checkwallet_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_wallet_info_response(interaction, data)
+            elif data.get("event_type") == "wallet_set":
+                request_id = data.get("request_id")
+                interaction = self._pending_setwallet_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_wallet_set_response(interaction, data)
         else:
             for game in self.games:
                 if game.topic() == topic:

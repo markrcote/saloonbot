@@ -877,5 +877,134 @@ class TestNPCBots(EndToEndTestCase):
             pubsub.close()
 
 
+class TestAdminWallet(EndToEndTestCase):
+    """E2E tests for admin wallet inspection and editing (AM2)."""
+
+    def setUp(self):
+        super().setUp()
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npcs")
+        cursor.execute("DELETE FROM settings")
+        self.db.commit()
+        cursor.close()
+
+    def _casino_request(self, action, **kwargs):
+        """Publish a casino action and wait for the matching casino_update response."""
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe("casino_update")
+        pubsub.get_message(timeout=1)  # skip subscribe confirmation
+
+        request_id = f"test-wallet-{time.time()}"
+        message = {
+            'event_type': 'casino_action',
+            'action': action,
+            'request_id': request_id,
+            **kwargs,
+        }
+        self.redis.publish("casino", json.dumps(message))
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            msg = pubsub.get_message(timeout=0.5)
+            if msg and msg['type'] == 'message':
+                data = json.loads(msg['data'])
+                if data.get('request_id') == request_id:
+                    pubsub.close()
+                    return data
+        pubsub.close()
+        return None
+
+    def _seed_player(self, name, wallet=200.0):
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO users (username, wallet) VALUES (%s, %s)", (name, wallet)
+        )
+        self.db.commit()
+        cursor.close()
+
+    def _seed_npc(self, name, wallet=100.0):
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO npcs (name, personality_name, backstory, wallet) VALUES (%s, %s, %s, %s)",
+            (name, 'Grizzled Prospector', '', wallet)
+        )
+        self.db.commit()
+        npc_id = cursor.lastrowid
+        cursor.close()
+        return npc_id
+
+    def test_lookup_wallet_player(self):
+        """lookup_wallet returns correct balance for a seeded player."""
+        self._seed_player('LookupPlayer', wallet=250.0)
+        resp = self._casino_request('lookup_wallet', target='LookupPlayer')
+        self.assertIsNotNone(resp, "Should receive wallet_info response")
+        self.assertEqual(resp['event_type'], 'wallet_info')
+        self.assertEqual(resp['kind'], 'player')
+        self.assertAlmostEqual(resp['balance'], 250.0, places=2)
+
+    def test_lookup_wallet_npc(self):
+        """lookup_wallet finds an NPC by name (case-insensitive)."""
+        self._seed_npc('Jebediah Kane', wallet=75.0)
+        resp = self._casino_request('lookup_wallet', target='jebediah kane')
+        self.assertIsNotNone(resp, "Should receive wallet_info response")
+        self.assertEqual(resp['event_type'], 'wallet_info')
+        self.assertEqual(resp['kind'], 'npc')
+        self.assertAlmostEqual(resp['balance'], 75.0, places=2)
+
+    def test_lookup_wallet_unknown(self):
+        """lookup_wallet returns kind=None for an unknown target."""
+        resp = self._casino_request('lookup_wallet', target='Nobody Atall')
+        self.assertIsNotNone(resp, "Should receive wallet_info response")
+        self.assertEqual(resp['event_type'], 'wallet_info')
+        self.assertIsNone(resp['kind'])
+        self.assertIsNone(resp['balance'])
+
+    def test_set_wallet_player(self):
+        """set_wallet (mode=set) sets a player's wallet to an absolute amount."""
+        self._seed_player('SetPlayer', wallet=200.0)
+        resp = self._casino_request('set_wallet', target='SetPlayer', mode='set', amount=500)
+        self.assertIsNotNone(resp, "Should receive wallet_set response")
+        self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
+        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('SetPlayer',))
+        self.assertIsNotNone(row)
+        self.assertAlmostEqual(float(row[0]), 500.0, places=2)
+
+    def test_adjust_wallet_player(self):
+        """set_wallet (mode=adjust) adds chips to a player's wallet."""
+        self._seed_player('AdjustPlayer', wallet=200.0)
+        resp = self._casino_request('set_wallet', target='AdjustPlayer', mode='adjust', amount=50)
+        self.assertIsNotNone(resp, "Should receive wallet_set response")
+        self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
+        self.assertAlmostEqual(resp['new_balance'], 250.0, places=2)
+        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('AdjustPlayer',))
+        self.assertAlmostEqual(float(row[0]), 250.0, places=2)
+
+    def test_adjust_wallet_npc(self):
+        """set_wallet (mode=adjust) adds chips to an NPC's wallet."""
+        self._seed_npc('RichNPC', wallet=100.0)
+        resp = self._casino_request('set_wallet', target='RichNPC', mode='adjust', amount=25)
+        self.assertIsNotNone(resp, "Should receive wallet_set response")
+        self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
+        self.assertAlmostEqual(resp['new_balance'], 125.0, places=2)
+
+    def test_set_wallet_negative_rejected(self):
+        """set_wallet (mode=set, amount<0) is rejected without touching the wallet."""
+        self._seed_player('NegPlayer', wallet=200.0)
+        resp = self._casino_request('set_wallet', target='NegPlayer', mode='set', amount=-50)
+        self.assertIsNotNone(resp, "Should receive wallet_set response")
+        self.assertFalse(resp['ok'])
+        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('NegPlayer',))
+        self.assertAlmostEqual(float(row[0]), 200.0, places=2)
+
+    def test_adjust_wallet_would_go_negative(self):
+        """set_wallet (mode=adjust) that would make balance negative is rejected."""
+        self._seed_player('PoorPlayer', wallet=50.0)
+        resp = self._casino_request('set_wallet', target='PoorPlayer', mode='adjust', amount=-100)
+        self.assertIsNotNone(resp, "Should receive wallet_set response")
+        self.assertFalse(resp['ok'])
+        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('PoorPlayer',))
+        self.assertAlmostEqual(float(row[0]), 50.0, places=2)
+
+
 if __name__ == "__main__":
     unittest.main()

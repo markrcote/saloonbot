@@ -20,6 +20,7 @@ Table management uses slash commands, but **gameplay actions during a hand are t
 
 Slash commands:
 
+* `/help` — show all available commands.
 * `/newgame [num_bots]` *(admin)* — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy.
 * `/joingame` — sit down at the table.
 * `/leavegame` — leave the current game.
@@ -28,6 +29,9 @@ Slash commands:
 * `/saloon` — show the saloon's name, town, and active tables.
 * `/stopgame` *(admin)* — end the current game (unresolved bets are not returned).
 * `/quitgame` *(admin)* — end the current game and return all unresolved bets to players.
+* `/checkwallet <target>` *(admin)* — check any player's or NPC's wallet balance.
+* `/setwallet <target> <amount>` *(admin)* — set a player's or NPC's wallet to an exact amount.
+* `/givechips <target> <amount>` *(admin)* — adjust a player's or NPC's wallet by a delta (negative takes chips away).
 * `/usage` *(admin)* — show a 7-day summary of LLM token usage.
 * `/debug` *(admin)* — dump full internal state for troubleshooting.
 

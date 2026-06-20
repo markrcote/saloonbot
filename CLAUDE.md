@@ -100,7 +100,7 @@ Discord Users
 - `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
 
 **Player actions** (`event_type: "player_action"`):
-- `join`, `bet` (with `amount`), `hit`, `stand`, `double_down`, `split`
+- `join`, `leave`, `bet` (with `amount`), `hit`, `stand` (see `Action` in `blackjack.py`; double-down and split are not implemented)
 
 **NPC actions** (`event_type: "npc_action"`, requires `game_id`):
 - `add_npc` - Add an NPC player to a game (`npc_name`, optional `npc_type` of `simple`/`llm`)

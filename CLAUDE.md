@@ -93,30 +93,40 @@ Discord Users
 - `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 - `get_usage` - Request 7-day LLM usage summary (admin; bot sends with `request_id`, server responds via `usage_stats`)
+- `get_debug` - Request full internal state dump (admin; bot sends with `request_id`, server responds via `debug_state`)
+- `get_stats` - Request a player's statistics; bot sends with `request_id` and `player`, server responds via `player_stats`
 - `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
+- `stop_game` - Terminate a game immediately (admin; requires `game_id`); unresolved bets are not returned
+- `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
 
 **Player actions** (`event_type: "player_action"`):
 - `join`, `bet` (with `amount`), `hit`, `stand`, `double_down`, `split`
+
+**NPC actions** (`event_type: "npc_action"`, requires `game_id`):
+- `add_npc` - Add an NPC player to a game (`npc_name`, optional `npc_type` of `simple`/`llm`)
+- `remove_npc` - Remove a named NPC (`npc_name`) from a game
 
 ### Casino Update Protocol (published to "casino_update")
 
 - `new_game` response - includes `game_id`, `request_id`, and optional channel info
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
 - `usage_stats` response - includes `request_id` and `rows` list (each entry: `purpose`, `model`, `total_input`, `total_output`, `call_count`)
+- `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, and the `dirty_games` list (admin diagnostics)
+- `player_stats` response - includes `request_id`, `player`, and `stats` (games/hands played, totals, biggest win, last seen) or null if no record
 - `player_wallet` response - includes `request_id`, `player`, and `balance` (float or null if no record)
 
 ### Key Modules
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles `list_games` and `get_usage` for bot recovery/admin; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`, `quit_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
 - `llm_client.py` - LLM provider abstraction (Claude / OpenAI); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
-- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list
-- `sqlite_database.py` - SQLite alternative to `database.py`; same interface, used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
+- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive) and a `get_setting`/`set_setting` runtime config store
+- `sqlite_database.py` - SQLite alternative to `database.py`; same interface (including the wallet/settings helpers above), used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
 
 **Database tables:**
 - `schema_version` - Single-row table tracking the last applied migration index
@@ -186,7 +196,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
 - Blackjack `tick()` handles auto-advance between hands and player turn reminders
 - **Schema migrations**: `_init_database()` runs on startup and applies any pending migrations from the `MIGRATIONS` list in order, each committed atomically; `schema_version` tracks the last applied index. To add a schema change, append a new entry to `MIGRATIONS` — never edit existing entries. Migrations run automatically on server restart, so no manual SQL is needed for staging/production deployments.
-- **Dirty-flag write-behind**: Casino tracks game IDs in `_dirty_games`; DB writes are batched and flushed only when the dirty set is non-empty, reducing unnecessary writes on each tick.
+- **Dirty-flag write-behind**: Each `Blackjack` instance sets its own `_dirty` flag when its state changes; on each tick the Casino moves dirty games into `_dirty_games`, then batches and flushes DB writes only when that set is non-empty, reducing unnecessary writes on each tick.
 - **MySQL deadlock retry**: `database.py` wraps writes in a retry helper that catches InnoDB deadlock errors (errno 1213) and retries automatically; callers don't need retry logic.
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)

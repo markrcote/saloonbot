@@ -1,5 +1,5 @@
 anthropic>=0.111.0
-pytest>=9.0.3
+pytest>=9.1.1
 pytest-timeout>=2.4.0
 openai>=2.41.1
 aioconsole==0.8.2

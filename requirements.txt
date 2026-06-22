@@ -9,7 +9,7 @@ aiosignal==1.4.0
 async-timeout==5.0.1
 attrs==26.1.0
 audioop-lts==0.2.2
-certifi==2026.5.20
+certifi==2026.6.17
 charset-normalizer==3.4.7
 flake8==7.3.0
 frozenlist==1.8.0

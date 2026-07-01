@@ -75,10 +75,37 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 - On new NPC creation: probabilistically generate 1–3 relationships to existing roster NPCs; for each, call LLM with both personalities to produce a 1-sentence relationship note; store in DB
 - When two related NPCs share a table, inject their relationship summary into both their LLM contexts
 - Relationship `strength` nudges up after shared sessions (regardless of outcome); rival relationships can form from repeated big wins/losses against each other
-- Periodic relationship evolution pass (run during `tick()` or server idle loop): update `notes` summaries via LLM if strength has changed significantly
+- Periodic relationship evolution pass: update `notes` summaries when strength has changed significantly, triggered by session-end condensation (see M4.5) rather than a separate polling pass
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/llm_npc.py`
 
 **Verification:** Seed two NPCs with a "rival" relationship; confirm their LLM prompts include the relationship context; play a session and check that relationship strength updates.
+
+---
+
+## Milestone 4.5: NPC Memory & Context Window
+
+**Goal:** NPCs stop making stateless, one-shot LLM calls. Each NPC accumulates a running memory of what happens while it's seated at a table, and condenses that into a persistent memory when it leaves — feeding future prompts and supplying the raw material for M4/M5's relationship notes.
+
+**Changes:**
+- Session = one NPC's table tenure: from the moment it joins a table (creation, `add_npc`, or autofill) until it leaves (`leave`, `remove_npc`, or the game itself ending). Each NPC's session is tracked independently — two NPCs sharing a table each build their own memory of it.
+- In-session event buffer: `LLMBlackjackNPC` accumulates a bounded, structured log of session events (hand outcomes, its own quips, other players' quips, notable bet swings) — a capped buffer, not raw LLM message history, to bound token growth on long-running sessions (VISION.md describes games running many hours).
+- Recent-window continuity: `_build_context_block()` includes a short recap of the last few buffered events so mid-session decisions react to what just happened at the table (runtime-only, not persisted separately from the buffer itself).
+- Condensation on departure: when an NPC leaves a table, one LLM summarization call runs over its full session event buffer, producing a short first-person "memory" of the session (2–4 sentences: what happened, backstory reveals, standout interactions with named PCs/NPCs). Stored in a new `npc_memories` table (`id`, `npc_id`, `game_id`, `session_summary`, `created_at`).
+- PCs have no chat/quip channel today (only NPCs speak via LLM); "interactions with PCs" in the buffer are the mechanical kind already tracked elsewhere — bets, wins/losses, fame level. No new data source needed.
+- Memory feeds M4/M5: the condensation step also emits/updates the relevant `npc_relationships.notes` and `pc_npc_relationships.npc_notes_on_player` rows for everyone who shared the table that session (exact call structure is an open question below). This becomes the trigger M4/M5 describe as "regenerate notes on milestone/strength change" — regeneration happens on session end.
+- Memory recall in future prompts: `_build_context_block()` gains a "recent memories" section (most recent `npc_memories` rows for that NPC), gated by `SALOON_DETAIL_LEVEL` (`low` = feature off entirely, `medium` = 1 short summary, `high` = up to 3).
+- Detail-level gating covers the whole feature, not just recall: at `low`, skip event buffering and condensation calls outright (mirrors how `low` already skips backstory generation).
+- New `llm_usage` purpose tag: `session_memory`.
+- Files: `cardgames/llm_npc.py`, `cardgames/casino.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`
+
+**Open questions (resolve before implementing, same pattern as M4's questions doc):**
+1. Does condensation write M4/M5 relationship notes directly in the same LLM call, or produce a generic session summary that a separate M4/M5-specific pass reads later?
+2. Event buffer cap — by event count or token budget?
+3. Does the in-session event buffer survive a server restart (persisted via `to_dict()`/`from_dict()`), or is losing a partial session's buffer on restart an acceptable trade-off?
+4. Blocking or fire-and-forget for the condensation LLM call on departure — a player leaving shouldn't stall the table.
+5. Retention: do `npc_memories` rows accumulate forever per NPC, or is there a cap/pruning policy?
+
+**Verification:** Seat an NPC, play a few hands with quips and a human player, remove the NPC, confirm an `npc_memories` row is created summarizing the session; seat it again later and confirm the next session's prompt references the prior memory.
 
 ---
 
@@ -88,7 +115,7 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 
 **Changes:**
 - New `pc_npc_relationships` table (migration): `player_id`, `npc_id`, `times_met`, `sessions_played`, `npc_notes_on_player` (text, LLM-generated summary)
-- After each game where a human and NPC shared a table: increment `times_met`, update `sessions_played`; if `times_met` is a milestone (1st, 3rd, 10th…), regenerate `npc_notes_on_player` via LLM (based on outcome history)
+- After each game where a human and NPC shared a table: increment `times_met`, update `sessions_played`; `npc_notes_on_player` is regenerated via the M4.5 session-condensation step (based on outcome history and the NPC's own session memory), not a standalone milestone-triggered call
 - LLM context in `llm_npc.py`: if relationship record exists, inject NPC's notes on this player alongside fame context
 - NPCs greet returning players differently ("Back again, partner?" on 2nd meeting; more familiar tone on 5th+)
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/llm_npc.py`
@@ -123,7 +150,7 @@ These concerns apply across all milestones and should be introduced in **M1** an
 
 **Goal:** Know how many tokens/credits are being consumed and by what.
 
-- New `llm_usage` table (migration): `id`, `occurred_at`, `purpose` (enum: `npc_action`, `npc_bet`, `backstory_gen`, `relationship_gen`, `relationship_update`, `pc_npc_summary`, `world_event`), `model`, `input_tokens`, `output_tokens`, `npc_id` (nullable), `game_id` (nullable)
+- New `llm_usage` table (migration): `id`, `occurred_at`, `purpose` (enum: `npc_action`, `npc_bet`, `backstory_gen`, `session_memory`, `relationship_gen`, `relationship_update`, `pc_npc_summary`, `world_event`), `model`, `input_tokens`, `output_tokens`, `npc_id` (nullable), `game_id` (nullable)
 - `llm_client.py`: capture token counts from API responses (Claude returns `usage.input_tokens` / `usage.output_tokens`; OpenAI returns `usage.prompt_tokens` / `usage.completion_tokens`); return alongside the response
 - Each call site passes a `purpose` tag and persists a record asynchronously (fire-and-forget; never block gameplay on a usage write)
 - New `/usage` Discord command (admin-only): shows token totals by purpose for the past 7 days, estimated cost (configurable per-token rate via `LLM_COST_PER_1K_INPUT` / `LLM_COST_PER_1K_OUTPUT` env vars)
@@ -154,11 +181,12 @@ These concerns apply across all milestones and should be introduced in **M1** an
 
 ```
 M1 (Persistent NPCs)
-├── M2 (Saloon Identity + Context)   ← can start after M1
-├── M3 (Player Fame)                  ← can start after M1
-├── M4 (NPC–NPC Relationships)       ← requires M1
-│   └── M6 (Autonomous World)        ← requires M1 + M4
-└── M5 (PC–NPC Relationships)        ← requires M1 + M3
+├── M2 (Saloon Identity + Context)       ← can start after M1
+├── M3 (Player Fame)                      ← can start after M1
+├── M4.5 (NPC Memory & Context Window)   ← requires M1
+│   ├── M4 (NPC–NPC Relationships)       ← requires M1 + M4.5
+│   │   └── M6 (Autonomous World)        ← requires M1 + M4
+│   └── M5 (PC–NPC Relationships)        ← requires M1 + M3 + M4.5
 ```
 
-M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4 can start after M1, M5 after M1+M3. M6 is last and benefits from all prior milestones.
+M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4.5 can start after M1 and is a prerequisite for both M4 and M5 (it supplies the session-condensation mechanism their relationship notes are generated from). M4 can start after M1+M4.5, M5 after M1+M3+M4.5. M6 is last and benefits from all prior milestones.

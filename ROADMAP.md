@@ -82,6 +82,21 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 
 ---
 
+## Milestone 4.4: Unified NPC Departure Hook
+
+**Goal:** Every way an NPC can leave a table flows through one shared "NPC left a table" hook, so later features (M4.5's session condensation) can reliably observe departures. Pure refactor — zero behavior change.
+
+**Changes:**
+- Today NPC departure happens via at least four independent paths: `blackjack.py`'s `_tick_betting` drops any NPC whose wallet is below `MIN_BET` with an in-character message ("tapped out and tips their hat goodbye") by manipulating `self.players` directly rather than calling `game.leave()`; the other paths are `remove_npc`, the `_autofill_npcs` trim, and normal `leave`
+- Introduce a single shared departure hook and route all four paths through it; the broke-NPC path switches from direct `self.players` manipulation to the same code path as a normal leave
+- The hook body adds nothing new yet — M4.5 attaches condensation to it later
+- This is also where the related state-machine tech-debt items get cleaned up (direct `self.players` manipulation, NPC save gap), since they live on the same code paths
+- Files: `cardgames/blackjack.py`, `cardgames/casino.py`
+
+**Verification:** Existing unit + e2e tests pass unchanged; add unit tests asserting each departure path (broke, `remove_npc`, autofill trim, `leave`) fires the shared hook exactly once.
+
+---
+
 ## Milestone 4.5: NPC Memory & Context Window
 
 **Goal:** NPCs stop making stateless, one-shot LLM calls. Each NPC accumulates a running memory of what happens while it's seated at a table, and condenses that into a persistent memory when it leaves — feeding future prompts and supplying the raw material for M4/M5's relationship notes.
@@ -92,7 +107,7 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 - No PC free-text banter for now: building a chat/quip input for PCs would also open a prompt-injection surface (arbitrary player text feeding straight into other NPCs' LLM prompts) — deliberately out of scope here. Revisit once this mechanism is proven out.
 - Recent-window continuity: `_build_context_block()` includes a short recap of the last few buffered events so mid-session decisions react to what just happened at the table (runtime-only, not persisted separately from the buffer itself).
 - **Growing departure chance:** because the buffer covers every player's turns (not just the NPC's own), it grows faster on a busy table. On each `BETWEEN_HANDS` tick (mirroring where `_autofill_npcs`'s trim check already runs), roll `P = 0.02 + 0.28 * (len(buffer) / 40)` — a linear ramp from a 2% baseline "ambient turnover" chance at an empty buffer up to ~30% per hand once the buffer is full. Linear-on-fill-fraction rather than a step function or token-based curve: it needs no new estimation machinery (consistent with the event-count cap above), and a smooth ramp avoids a visible "cliff" where NPCs abruptly leave in unison at some threshold, which would read as mechanical rather than natural. The ramp is deliberately steep enough that buffer overflow (oldest events silently evicted) should be rare in practice, not the norm — framed in-character as the NPC "calling it a night."
-- Broke NPCs already leave automatically today — `blackjack.py`'s `_tick_betting` drops any NPC whose wallet is below `MIN_BET` with an in-character message ("tapped out and tips their hat goodbye"), but it does so by manipulating `self.players` directly rather than calling `game.leave()`. Implementation must route this (and every other departure path — `remove_npc`, the `_autofill_npcs` trim, and normal `leave`) through one shared "NPC left a table" hook, or condensation will silently never fire for broke departures.
+- All departure paths flow through the shared "NPC left a table" hook delivered by M4.4 — condensation attaches there, so it fires for broke departures, `remove_npc`, autofill trims, and normal `leave` alike. (Without that unification, condensation would silently never fire for broke departures.)
 - Condensation on departure: when an NPC leaves a table (via the shared hook above), submit one LLM summarization call — **fire-and-forget**, submitted to the NPC's own single-worker `ThreadPoolExecutor` (the same executor `decide_action`/`decide_bet` already use) — over its full session event buffer, producing a short first-person "memory" of the session (2–4 sentences: what happened, backstory reveals, standout interactions with named PCs/NPCs). Blocking is the wrong call here: unlike an action/bet decision, which the game loop must wait on because play literally can't proceed without it, nothing needs this NPC's summary to exist immediately after it leaves — the seat should free up right away for autofill/join regardless of whether the write has finished. (Backstory generation is the one existing blocking LLM call in the codebase, but that's justified by rarity — it only fires when the roster is thin — and by the fact the *same* NPC's very next prompt needs it immediately; departure has no such immediate dependency.) Stored in a new `npc_memories` table (`id`, `npc_id`, `game_id`, `session_summary`, `created_at`).
 - Retention: cap at the **20 most recent** `npc_memories` rows per NPC, pruning older ones on insert. Unbounded accumulation would be pure technical debt in a continuously-running saloon (VISION.md) — only the most recent rows are ever read back (recall surfaces at most 3, at `high` detail level), so anything beyond a modest cap is waste with no product upside. 20 gives headroom over the max ever surfaced today without unbounded growth, and is a tunable constant, not a schema decision.
 - Restart durability: the in-session event buffer does **not** get persisted in `to_dict()`/`from_dict()` — losing a partial buffer on server restart is an accepted trade-off. It's inherently transient (it exists only to be condensed and discarded at session end), a restart mid-session only thins that one session's eventual memory rather than corrupting anything, and already-condensed `npc_memories` rows are ordinary persisted DB rows unaffected by this. Persisting it would mean growing the payload of every dirty-flag write-behind flush for games with LLM NPCs, for a value whose entire purpose is to be thrown away — not worth it for a rare, self-healing failure mode.
@@ -136,21 +151,34 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 
 ---
 
-## Milestone 6: Autonomous World (The Saloon Never Closes)
+## Milestone 6a: Ambient World Loop & Pacing (The Saloon Never Closes)
 
-**Goal:** The saloon runs between sessions. NPCs come and go, play each other, and accumulate history without any human present.
+**Goal:** The saloon runs between sessions. NPCs come and go and play each other without any human present, at a pace that reads as background ambience.
 
 **Changes:**
-- Background world loop in `server.py` (or new `world.py`): runs on a configurable interval (e.g., every 5–15 minutes real time); spawns NPC-only games when no human games are active; lets them play out a few hands; updates all relationship data
+- **Scope check first:** NPC autofill (`npc_min > 0`) already keeps existing tables populated and un-reaped, enabling NPC-only ambient play — part of this milestone's original scope has been absorbed. Re-verify the remaining gap before implementing: it's the spawning/scheduling of NPC-only games and the availability model, not "NPCs playing without humans" per se.
+- Background world loop in `server.py` (or new `world.py`): runs on a configurable interval (e.g., every 5–15 minutes real time); spawns NPC-only games when no human games are active; lets them play out a few hands. Relationship/memory updates happen automatically via the M4/M4.5 machinery — no separate update pass needed here.
 - NPC "availability" model: each NPC has a `next_available_at` timestamp; world loop picks available NPCs and seats them together, simulating a night at the saloon
 - **NPC-only pacing**: when no human players are at the table, the game runs at a slower, ambient pace — longer delays between hands and actions, so it reads like background conversation rather than active play. New env var `SALOON_NPC_PACE_MULTIPLIER` (default `3.0`) scales `BLACKJACK_TIME_BETWEEN_HANDS` and inter-action delays; the channel stream becomes something players can ignore or tune into for entertainment. Pace returns to normal the moment a human joins.
-- Random world events (small set): NPC goes on winning/losing streak (adjust wallet), NPC gets "restless" (plays more often), NPC has a falling-out with another (relationship type changes)
-- World event log: lightweight `world_events` table (npc_id, event_type, description, occurred_at); last 20 events queryable
-- New `/news` Discord command: shows recent world events in-character ("Word around the saloon: Winifred Cobb cleaned out the table last Tuesday...")
-- Files: `server.py`, new `cardgames/world.py`, `cardgames/casino.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`, `bot.py`
+- Files: `server.py`, new `cardgames/world.py`, `cardgames/casino.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`
 - Config: `SALOON_WORLD_TICK_MINUTES` (default 10), `SALOON_WORLD_ENABLED` (default true)
 
-**Verification:** Disable human games; let world loop run for a few ticks; confirm NPC wallets change, relationships update, and `/news` returns in-character events.
+**Verification:** Disable human games; let world loop run for a few ticks; confirm NPC-only games spawn, play at the slower pace, and wind down; confirm pace returns to normal the moment a human joins.
+
+---
+
+## Milestone 6b: World Events & /news
+
+**Goal:** The world accumulates visible history. Players can catch up on what happened at the saloon while they were away.
+
+**Changes:**
+- Random world events (small set): NPC goes on winning/losing streak (adjust wallet), NPC gets "restless" (plays more often), NPC has a falling-out with another (relationship type changes)
+- Event generation runs as a throttled pass inside `Casino._tick_games()` (same shape as M4.6's replenishment pass), so it does **not** depend on M6a's world loop — M6b can ship before or after M6a. Caveat: the "restless" event's mechanical effect (plays more often) requires M6a's availability model; if M6b lands first, that event is flavor-only until M6a exists.
+- World event log: lightweight `world_events` table (npc_id, event_type, description, occurred_at); last 20 events queryable
+- New `/news` Discord command: shows recent world events in-character ("Word around the saloon: Winifred Cobb cleaned out the table last Tuesday...")
+- Files: `cardgames/casino.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`, `bot.py`
+
+**Verification:** Let the event pass run (or fast-forward its throttle in a test); confirm `world_events` rows appear, relationship-changing events update `npc_relationships`, and `/news` returns in-character events.
 
 ---
 
@@ -196,10 +224,12 @@ M1 (Persistent NPCs)
 ├── M2 (Saloon Identity + Context)       ← can start after M1
 ├── M3 (Player Fame)                      ← can start after M1
 ├── M4.6 (NPC Wallet Replenishment)      ← requires M1, independent otherwise
-├── M4.5 (NPC Memory & Context Window)   ← requires M1
-│   ├── M4 (NPC–NPC Relationships)       ← requires M1 + M4.5
-│   │   └── M6 (Autonomous World)        ← requires M1 + M4
-│   └── M5 (PC–NPC Relationships)        ← requires M1 + M3 + M4.5
+├── M4.4 (Unified NPC Departure Hook)    ← pure refactor; no deps beyond M1
+│   └── M4.5 (NPC Memory & Context Window) ← requires M1 + M4.4
+│       ├── M4 (NPC–NPC Relationships)   ← requires M1 + M4.5
+│       │   ├── M6a (Ambient World Loop & Pacing) ← requires M1 + M4
+│       │   └── M6b (World Events & /news)        ← requires M1 + M4; independent of M6a
+│       └── M5 (PC–NPC Relationships)    ← requires M1 + M3 + M4.5
 ```
 
-M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4.6 is independent — it can be picked up any time after M1 with no other dependencies. M4.5 can start after M1 and is a prerequisite for both M4 and M5 (it supplies the session-condensation mechanism their relationship notes are generated from). M4 can start after M1+M4.5, M5 after M1+M3+M4.5. M6 is last and benefits from all prior milestones.
+M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4.6 is independent — it can be picked up any time after M1 with no other dependencies. M4.4 is a small standalone refactor that must land before M4.5 (it supplies the departure hook condensation attaches to). M4.5 is a prerequisite for both M4 and M5 (it supplies the session-condensation mechanism their relationship notes are generated from). M4 can start after M1+M4.4+M4.5, M5 after M1+M3+M4.4+M4.5. M6a and M6b both follow M4 and are independent of each other — M6b's event pass piggybacks on the existing tick rather than M6a's world loop, though the "restless" event only gains mechanical effect once M6a's availability model exists.

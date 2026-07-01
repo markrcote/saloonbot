@@ -219,18 +219,18 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - `VISION.md` — high-level product vision: the atmospheric frontier casino simulator and its goals
 - `DESIGN-VISION.md` — design decisions and refinements that shaped VISION.md
 - `ROADMAP.md` — milestone-by-milestone implementation plan for achieving VISION.md; includes dependency order and cross-cutting concerns (LLM usage tracking, detail level config)
-- `M1-ARCH.md` — architectural decisions for Milestone 1 (Persistent NPC Roster); records options considered and resolutions for each decision
-- `ADMIN-CONTROLS.md` — milestone roadmap for admin tooling (NPC population control via auto-fill + manual add/remove, and player/NPC wallet inspection/editing); dependency-ordered, not yet implemented
+
+Completed milestone/review docs (architecture decisions, admin-controls roadmap, code review findings) are deleted once fully implemented/fixed rather than kept around as historical records — git history retains them if ever needed.
 
 ## Documentation Updates
-When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, ROADMAP.md, M1-ARCH.md (if M1-related), and any other plan/REVIEW.md files. Do a final grep for the changed concept across `*.md` before declaring done.
+When implementing a feature or fix, update ALL relevant docs in the same change: README.md, CLAUDE.md, QA.md, ROADMAP.md, and any other active plan docs. Do a final grep for the changed concept across `*.md` before declaring done.
 
 ## Commits
 - Make small, focused commits — one logical change per commit
 - Run tests before every commit; do not commit failing code
 
 ## Bug Triage Workflow
-When working from REVIEW.md / tech debt lists: (1) check if the issue is already fixed before making changes, (2) fix one issue per commit unless explicitly told otherwise, (3) update REVIEW.md status after each fix.
+When working from a review doc / tech debt list: (1) check if the issue is already fixed before making changes, (2) fix one issue per commit unless explicitly told otherwise, (3) update that doc's status after each fix, (4) delete the doc once every issue is resolved.
 
 Before starting work, restate the exact scope back to me as a numbered list. Do not add adjacent improvements unless I explicitly approve. If you spot something extra worth doing, note it at the end as a 'follow-ups' suggestion.
 

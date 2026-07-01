@@ -15,20 +15,18 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 
 ---
 
-## Milestone 1: Persistent NPC Roster
+## Milestone 1: Persistent NPC Roster ✓ DONE
 
 **Goal:** NPCs persist between games. The same "Grizzled Prospector" Winifred Cobb can show up again next session.
 
-**Changes:**
+**Changes (implemented):**
 - New `npcs` table (via DB migration): `id`, `name`, `personality_name`, `backstory` (text), `wallet`, `created_at`, `last_played_at`
 - On NPC creation in `casino.py`: query `npcs` table for existing NPCs with the requested personality (or any personality if random); create a new DB record if roster is thin (<10 NPCs)
 - Backstory generation: on first creation, call LLM with personality system prompt + a "generate your backstory in 2 sentences" prompt; store result in `npcs.backstory`; fall back to empty string on failure
-- NPC names drawn from `wwnames.py` (currently unused for this purpose)
+- NPC names drawn from `wwnames.py`
 - Serialize NPCs with their `npc_db_id`; on deserialization, load from DB by ID
 - NPC wallet tracked in `npcs` table (mirroring how human wallets work in `users`)
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/npc_player.py`, `cardgames/llm_npc.py`
-
-See `M1-ARCH.md` for detailed architectural decisions.
 
 **Verification:** Start a game with bots, let it end, start another — confirm the same NPC names reappear with the same backstory. Check DB `npcs` table directly.
 

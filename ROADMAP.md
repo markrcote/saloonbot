@@ -88,15 +88,17 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 
 **Changes:**
 - Session = one NPC's table tenure: from the moment it joins a table (creation, `add_npc`, or autofill) until it leaves (`leave`, `remove_npc`, or the game itself ending). Each NPC's session is tracked independently — two NPCs sharing a table each build their own memory of it.
-- In-session event buffer: `LLMBlackjackNPC` accumulates a bounded, structured log of session events (hand outcomes, its own quips, other players' quips, notable bet swings) — a capped buffer, not raw LLM message history, to bound token growth on long-running sessions (VISION.md describes games running many hours).
+- In-session event buffer: `LLMBlackjackNPC` accumulates a bounded, structured log of **every player's** turns at the table for the duration of its session — every PC's and NPC's bets/hits/stands and outcomes, plus quips/banter from NPCs (PCs have no free-text channel today; their turns are logged as structured events — see decision below, not raw text). A capped buffer, not raw LLM message history, to bound token growth on long-running sessions (VISION.md describes games running many hours).
+- No PC free-text banter for now: building a chat/quip input for PCs would also open a prompt-injection surface (arbitrary player text feeding straight into other NPCs' LLM prompts) — deliberately out of scope here. Revisit once this mechanism is proven out.
 - Recent-window continuity: `_build_context_block()` includes a short recap of the last few buffered events so mid-session decisions react to what just happened at the table (runtime-only, not persisted separately from the buffer itself).
+- **Growing departure chance:** because the buffer covers every player's turns (not just the NPC's own), it grows faster on a busy table and could otherwise run up token cost indefinitely on a long session. On each opportunity to leave (e.g. the `BETWEEN_HANDS` tick, mirroring the existing `_autofill_npcs` trim check), roll a departure probability that increases with buffer size — framed in-character (the NPC "calls it a night"), functionally a cost-control valve. Exact curve is an open question below.
+- Broke NPCs already leave automatically today — `blackjack.py`'s `_tick_betting` drops any NPC whose wallet is below `MIN_BET` with an in-character message ("tapped out and tips their hat goodbye"). No new work needed here; M4.5 should just make sure that departure also triggers session condensation like any other leave.
 - Condensation on departure: when an NPC leaves a table, one LLM summarization call runs over its full session event buffer, producing a short first-person "memory" of the session (2–4 sentences: what happened, backstory reveals, standout interactions with named PCs/NPCs). Stored in a new `npc_memories` table (`id`, `npc_id`, `game_id`, `session_summary`, `created_at`).
-- PCs have no chat/quip channel today (only NPCs speak via LLM); "interactions with PCs" in the buffer are the mechanical kind already tracked elsewhere — bets, wins/losses, fame level. No new data source needed.
 - Memory feeds M4/M5: the condensation step also emits/updates the relevant `npc_relationships.notes` and `pc_npc_relationships.npc_notes_on_player` rows for everyone who shared the table that session (exact call structure is an open question below). This becomes the trigger M4/M5 describe as "regenerate notes on milestone/strength change" — regeneration happens on session end.
 - Memory recall in future prompts: `_build_context_block()` gains a "recent memories" section (most recent `npc_memories` rows for that NPC), gated by `SALOON_DETAIL_LEVEL` (`low` = feature off entirely, `medium` = 1 short summary, `high` = up to 3).
 - Detail-level gating covers the whole feature, not just recall: at `low`, skip event buffering and condensation calls outright (mirrors how `low` already skips backstory generation).
 - New `llm_usage` purpose tag: `session_memory`.
-- Files: `cardgames/llm_npc.py`, `cardgames/casino.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`
+- Files: `cardgames/llm_npc.py`, `cardgames/casino.py`, `cardgames/blackjack.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`
 
 **Open questions (resolve before implementing, same pattern as M4's questions doc):**
 1. Does condensation write M4/M5 relationship notes directly in the same LLM call, or produce a generic session summary that a separate M4/M5-specific pass reads later?
@@ -104,8 +106,28 @@ VISION.md describes an atmospheric, continuously-running frontier casino simulat
 3. Does the in-session event buffer survive a server restart (persisted via `to_dict()`/`from_dict()`), or is losing a partial session's buffer on restart an acceptable trade-off?
 4. Blocking or fire-and-forget for the condensation LLM call on departure — a player leaving shouldn't stall the table.
 5. Retention: do `npc_memories` rows accumulate forever per NPC, or is there a cap/pruning policy?
+6. Departure-probability curve: linear in buffer size, a step function past a threshold, or based on estimated token count rather than event count?
 
-**Verification:** Seat an NPC, play a few hands with quips and a human player, remove the NPC, confirm an `npc_memories` row is created summarizing the session; seat it again later and confirm the next session's prompt references the prior memory.
+**Verification:** Seat an NPC, play a few hands with quips and a human player, remove the NPC, confirm an `npc_memories` row is created summarizing the session; seat it again later and confirm the next session's prompt references the prior memory. Separately, seat an NPC at a busy table and confirm its departure probability measurably increases as the buffer grows over many hands.
+
+---
+
+## Milestone 4.6: NPC Wallet Replenishment
+
+**Goal:** NPCs who go broke and leave a table aren't stuck poor forever — idle NPCs slowly rebuild their stake between sessions, at a rate that reflects who they are.
+
+**Changes:**
+- Periodic replenishment pass (new lightweight tick, independent of any single game's loop — e.g. run from the server's main loop every few minutes): for every NPC currently **not** seated at any table (`npcs.current_game_id IS NULL` — `get_available_npcs()` already selects exactly this set), roll a probability weighted by the NPC's wealth signal; on success, nudge `wallet` upward toward a target (e.g. its `personality.starting_wallet`), never past it.
+- Only idle NPCs replenish. NPCs actively seated at a table are governed purely by game outcomes — no passive top-up while playing, so wins/losses still matter at the table.
+- Wealth signal: reuse `Personality.starting_wallet` (already ranges ~75–300 across archetypes, e.g. a "drifter" archetype starts poor, a "rancher" starts comfortable) as the probability/rate driver, rather than introducing a new column — it's already a per-personality wealth proxy. Open question: is this granular enough, or does backstory-level variance (two NPCs with the same personality but different fortunes) warrant its own `npcs.wealth` column set at creation?
+- Files: `cardgames/casino.py` (new periodic pass, called from the server tick loop), `cardgames/database.py`, `cardgames/sqlite_database.py` (if a dedicated `wealth` column is added)
+
+**Open questions:**
+1. Replenishment cadence and per-tick amount/probability — needs concrete tuning (e.g. every 5 min, 5–10% chance, nudge 10% of the gap to target)?
+2. Reuse `personality.starting_wallet` as the wealth signal, or add a dedicated `npcs.wealth` attribute derived from backstory at creation time?
+3. Does this pass live in `Casino.tick()` (runs whenever any game ticks) or need its own independent scheduler, since it must run even when no games are active?
+
+**Verification:** Drive an NPC's wallet to zero (or set it manually), remove it from all tables, let the replenishment pass run several cycles, confirm wallet trends upward toward its personality's `starting_wallet` and stops there.
 
 ---
 
@@ -183,10 +205,11 @@ These concerns apply across all milestones and should be introduced in **M1** an
 M1 (Persistent NPCs)
 ├── M2 (Saloon Identity + Context)       ← can start after M1
 ├── M3 (Player Fame)                      ← can start after M1
+├── M4.6 (NPC Wallet Replenishment)      ← requires M1, independent otherwise
 ├── M4.5 (NPC Memory & Context Window)   ← requires M1
 │   ├── M4 (NPC–NPC Relationships)       ← requires M1 + M4.5
 │   │   └── M6 (Autonomous World)        ← requires M1 + M4
 │   └── M5 (PC–NPC Relationships)        ← requires M1 + M3 + M4.5
 ```
 
-M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4.5 can start after M1 and is a prerequisite for both M4 and M5 (it supplies the session-condensation mechanism their relationship notes are generated from). M4 can start after M1+M4.5, M5 after M1+M3+M4.5. M6 is last and benefits from all prior milestones.
+M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M4.6 is independent — it can be picked up any time after M1 with no other dependencies. M4.5 can start after M1 and is a prerequisite for both M4 and M5 (it supplies the session-condensation mechanism their relationship notes are generated from). M4 can start after M1+M4.5, M5 after M1+M3+M4.5. M6 is last and benefits from all prior milestones.

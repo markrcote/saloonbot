@@ -4,14 +4,15 @@
 
 [VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
-**Current state:** The foundation is solid (LLM-backed NPCs with personalities, game persistence, Redis pub/sub, DB migrations), but NPCs are ephemeral (created fresh per game, deleted on end), the saloon has no identity, there is no relationship system, and the world is inert when no humans are present.
+**Current state:** M1–M3 and M4.4 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, and every NPC-departure path routes through one shared hook. Still missing: NPCs have no memory of individual sessions and no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play).
 
 **What exists that can be reused:**
 - `personalities.py` — 19 rich personality definitions with system prompts
 - `LLMBlackjackNPC` / `llm_client.py` — LLM abstraction with timeout fallback
 - DB migration system (`MIGRATIONS` list in `database.py` / `sqlite_database.py`) — append-only, auto-applied on startup
-- `casino.py` `_dirty_games` write-behind pattern — model for any new dirty-flag persistence
-- `wwnames/wwnames.py` — Old West name generator (currently unused by NPCs)
+- `casino.py` `_dirty_games` write-behind pattern (game-level) and `Blackjack._dirty` flag (per-instance) — model for any new dirty-flag persistence
+- `wwnames/wwnames.py` — Old West name generator, used for NPC names since M1
+- `Blackjack.leave()` / `on_npc_departed` hook (M4.4) — the single point to observe any NPC leaving a table; M4.5 attaches session condensation here
 
 ---
 

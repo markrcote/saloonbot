@@ -2,7 +2,7 @@
 
 ## Context
 
-VISION.md describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
+[VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
 **Current state:** The foundation is solid (LLM-backed NPCs with personalities, game persistence, Redis pub/sub, DB migrations), but NPCs are ephemeral (created fresh per game, deleted on end), the saloon has no identity, there is no relationship system, and the world is inert when no humans are present.
 

@@ -1231,6 +1231,21 @@ class TestCasinoNPCManagement(unittest.TestCase):
         self.assertEqual(len(npcs), 1)
         self.assertTrue(npcs[0].is_npc)
 
+    def test_add_npc_batch_gets_combined_intro_message(self):
+        """Adding NPCs together produces one combined 'New arrivals' intro
+        message instead of a per-NPC 'pulls up a chair' line."""
+        self.casino.db = None
+        game_id = self.casino.new_game()
+        self.casino.game_output = MagicMock()
+        self.casino.add_npc(game_id, 2)
+        messages = [call.args[1] for call in self.casino.game_output.call_args_list]
+        arrival_msgs = [m for m in messages if "New arrivals" in m]
+        self.assertEqual(len(arrival_msgs), 1)
+        self.assertEqual(len([m for m in messages if "pulls up a chair" in m]), 0)
+        game = self.casino.games[game_id]
+        for npc in (p for p in game.players_waiting if p.is_npc):
+            self.assertIn(npc.name, arrival_msgs[0])
+
     def test_add_npc_capped_at_max(self):
         """add_npc is a no-op when the game is already at MAX_NPCS_PER_TABLE."""
         self.casino.db = None

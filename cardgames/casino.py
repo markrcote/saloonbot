@@ -541,6 +541,7 @@ class Casino:
             used_personalities |= set(exclude_personalities)
 
         npc_records = self._get_or_create_npcs(count, used_personalities)
+        arrivals = []
 
         for npc_record in npc_records:
             used_personalities.add(npc_record['personality_name'])
@@ -578,7 +579,14 @@ class Casino:
                 )
             else:
                 npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)
-            game.join(npc)
+            game.join(npc, announce=False)
+            arrivals.append(f"{personality.emoji} {name}")
+
+        if arrivals:
+            if game.state == HandState.BETTING:
+                game.output(f"🎭 New arrivals: {', '.join(arrivals)}. They're in for this round!")
+            else:
+                game.output(f"🎭 New arrivals: {', '.join(arrivals)}. They'll join the next hand.")
 
     def _add_pending_bots(self, game_id):
         """Add any pending bots to the game when the first human player joins."""

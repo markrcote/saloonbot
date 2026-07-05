@@ -38,7 +38,7 @@ python cli.py   # name: Alice, bots: 0
 python cli.py   # name: Bob, bots: 1
 ```
 
-- [ ] Bot personality name logged in server; "🪑 \<Name\> pulls up a chair" in CLI
+- [ ] Bot personality name logged in server; "🎭 New arrivals: \<emoji\> \<Name\>" in CLI
 - [ ] Betting phase opens for both Bob and the bot
 - [ ] Wait ~10 s — bot auto-bets ("💵 \<Name\> throws $X on the table") with optional quip
 - [ ] `bet 10` → cards dealt

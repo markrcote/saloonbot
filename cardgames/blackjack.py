@@ -262,7 +262,7 @@ class Blackjack(CardGame):
     def _update_time_last_event(self):
         self.time_last_event = time.time()
 
-    def join(self, player):
+    def join(self, player, announce=True):
         if player in self.players or player in self.players_waiting:
             raise CardGameError(f"{player} is already sitting down")
         self._dirty = True
@@ -274,11 +274,13 @@ class Blackjack(CardGame):
                 logging.error(f"Failed to add user to database: {e}")
 
         if self.state == HandState.BETTING:
-            self.output(f"🪑 {_player_label(player)} pulls up a chair. They're in for this round!")
+            if announce:
+                self.output(f"🪑 {_player_label(player)} pulls up a chair. They're in for this round!")
             self.players.append(player)
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)} joins mid-hand")
         else:
-            self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
+            if announce:
+                self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
             self.players_waiting.append(player)
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)} joins (next hand)")
 

@@ -85,18 +85,18 @@
 
 ---
 
-## Milestone 4.4: Unified NPC Departure Hook
+## Milestone 4.4: Unified NPC Departure Hook ✓ DONE
 
 **Goal:** Every way an NPC can leave a table flows through one shared "NPC left a table" hook, so later features (M4.5's session condensation) can reliably observe departures. Pure refactor — zero behavior change.
 
-**Changes:**
-- Today NPC departure happens via at least four independent paths: `blackjack.py`'s `_tick_betting` drops any NPC whose wallet is below `MIN_BET` with an in-character message ("tapped out and tips their hat goodbye") by manipulating `self.players` directly rather than calling `game.leave()`; the other paths are `remove_npc`, the `_autofill_npcs` trim, and normal `leave`
-- Introduce a single shared departure hook and route all four paths through it; the broke-NPC path switches from direct `self.players` manipulation to the same code path as a normal leave
-- The hook body adds nothing new yet — M4.5 attaches condensation to it later
-- This is also where the related state-machine tech-debt items get cleaned up (direct `self.players` manipulation, NPC save gap), since they live on the same code paths
+**Changes (implemented):**
+- `Blackjack.__init__` takes an optional `on_npc_departed(game, player)` callback; `Blackjack.leave()` calls it (via a new `_fire_departure_hook()` helper) from both of its exit points whenever the departing player `is_npc`, regardless of which state branch removed them
+- `Casino._on_npc_departed(game, player)` is the concrete hook: it clears the NPC's `current_game_id` in the DB (`clear_npc_game`). It's wired in at both `Blackjack` construction sites (`Casino.new_game()` and `Blackjack.from_dict()`)
+- All four paths now route through `leave()`: the broke-NPC drop in `_tick_betting` switched from direct `self.players` manipulation to `self.leave(player, reason='broke')` (the `reason` param preserves the "tapped out and tips their hat goodbye" flavor message); `remove_npc` and the `_autofill_npcs` trim already called `game.leave()` but had their own duplicated `clear_npc_game` calls removed, since the hook now does it once, centrally
+- This closed the NPC save gap: the broke-NPC path previously never cleared `current_game_id`, leaving broke NPCs permanently stuck as "in a game" in the DB
 - Files: `cardgames/blackjack.py`, `cardgames/casino.py`
 
-**Verification:** Existing unit + e2e tests pass unchanged; add unit tests asserting each departure path (broke, `remove_npc`, autofill trim, `leave`) fires the shared hook exactly once.
+**Verification:** Existing unit (187) + e2e (29) tests pass unchanged; added unit tests asserting each departure path (broke, `remove_npc`, autofill trim, normal `leave`, and leaving from `players_waiting`) fires the shared hook exactly once, that human departures never fire it, and that the broke-NPC flavor message is preserved.
 
 ---
 

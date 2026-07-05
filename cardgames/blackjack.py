@@ -199,15 +199,18 @@ class Blackjack(CardGame):
         HandState.BETWEEN_HANDS: {Action.JOIN, Action.LEAVE},
     }
 
-    def __init__(self, game_id, casino, initial_deck=None):
+    def __init__(self, game_id, casino, initial_deck=None, on_npc_departed=None):
         """ Initialize a new Blackjack game.
         :param game_id: Unique identifier for the game.
         :param casino: The casino managing this game (required).
         :param initial_deck: Optional pre-ordered list of Card objects; skips shuffle.
+        :param on_npc_departed: Optional callback(game, player) invoked whenever an
+            NPC leaves the table, regardless of which path triggered the departure.
         """
         super().__init__(initial_deck=initial_deck)
         self.game_id = game_id
         self.casino = casino
+        self.on_npc_departed = on_npc_departed
         self.dealer = Dealer()
         self.players_waiting = []
 
@@ -279,12 +282,13 @@ class Blackjack(CardGame):
             self.players_waiting.append(player)
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)} joins (next hand)")
 
-    def leave(self, player):
+    def leave(self, player, reason=None):
         if player not in self.players:
             if player in self.players_waiting:
                 self._dirty = True
                 self.players_waiting.remove(player)
                 self.output(f"👋 {player} tips their hat and moseys on.")
+                self._fire_departure_hook(player)
                 return
             raise CardGameError(f"{player} is not at the table")
         self._dirty = True
@@ -309,11 +313,14 @@ class Blackjack(CardGame):
                 # Haven't played yet (or it's their turn now): bet forfeited
                 del self.bets[player.name]
                 self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} stays with the house.")
+        elif reason == 'broke':
+            self.output(f"💸 {player} is tapped out and tips their hat goodbye.")
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
         self.players.remove(player)
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} leaves (state: {self.state.value})")
+        self._fire_departure_hook(player)
 
         # Handle current player leaving during PLAYING state
         if self.state == HandState.PLAYING and self.current_player_idx is not None:
@@ -326,6 +333,12 @@ class Blackjack(CardGame):
                 else:
                     self.state = HandState.DEALER_TURN
                 self.current_player_idx = None
+
+    def _fire_departure_hook(self, player):
+        """Shared hook: fires whenever an NPC leaves the table, regardless of
+        which path triggered it (broke, remove_npc, autofill trim, or a normal leave)."""
+        if getattr(player, 'is_npc', False) and self.on_npc_departed is not None:
+            self.on_npc_departed(self, player)
 
     def start_betting(self):
         """Transition from WAITING to BETTING state."""
@@ -687,10 +700,8 @@ class Blackjack(CardGame):
                 amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
                 self.bet(player, amount)
         for player in broke_npcs:
-            self.output(f"💸 {player.name} is tapped out and tips their hat goodbye.")
             logging.info(f"[{self.game_id[:8]}] NPC {player.name} removed — insufficient funds")
-            self._dirty = True
-            self.players.remove(player)
+            self.leave(player, reason='broke')
 
         # Check if all players have bet
         all_bet = all(player.name in self.bets for player in self.players)
@@ -783,9 +794,9 @@ class Blackjack(CardGame):
         }
 
     @classmethod
-    def from_dict(cls, data, casino):
+    def from_dict(cls, data, casino, on_npc_departed=None):
         """Restore game from serialized state."""
-        game = cls(data['game_id'], casino)
+        game = cls(data['game_id'], casino, on_npc_departed=on_npc_departed)
 
         # Restore state
         game.state = HandState(data['state'])

@@ -411,7 +411,7 @@ class Casino:
             game_data_list = self.db.load_all_active_games()
             for game_data in game_data_list:
                 game_id = game_data['game_id']
-                game = Blackjack.from_dict(game_data, self)
+                game = Blackjack.from_dict(game_data, self, on_npc_departed=self._on_npc_departed)
                 self.games[game_id] = game
                 logging.info(f"Restored game {game_id} in state {game.state.value}")
         except Exception as e:
@@ -431,6 +431,16 @@ class Casino:
 
         # Load persisted NPC autofill limits
         self._load_npc_limits()
+
+    def _on_npc_departed(self, game, player):
+        """Shared hook, fired by Blackjack.leave() whenever an NPC leaves a table —
+        via a broke departure, remove_npc, autofill trim, or a normal leave alike."""
+        npc_db_id = getattr(player, 'npc_db_id', None)
+        if npc_db_id is not None and self.db is not None:
+            try:
+                self.db.clear_npc_game(npc_db_id)
+            except Exception as e:
+                logging.error(f"Error clearing NPC game for {player.name}: {e}")
 
     def _mark_dirty(self, game_id):
         """Mark a game as needing a DB write on the next flush."""
@@ -490,7 +500,9 @@ class Casino:
             game_id = str(uuid.uuid4())
             if game_id not in self.games.keys():
                 break
-        self.games[game_id] = Blackjack(game_id, self, initial_deck=initial_deck)
+        self.games[game_id] = Blackjack(
+            game_id, self, initial_deck=initial_deck, on_npc_departed=self._on_npc_departed
+        )
         logging.info(f"New game {game_id[:8]} created (bots: {num_bots})")
 
         if num_bots > 0:
@@ -616,12 +628,6 @@ class Casino:
                 logging.info(f"[{game_id[:8]}] Autofill: removing NPC {npc.name!r} "
                              f"(have {npc_count}, max={self.npc_max})")
                 game.leave(npc)
-                npc_db_id = getattr(npc, 'npc_db_id', None)
-                if npc_db_id is not None and self.db is not None:
-                    try:
-                        self.db.clear_npc_game(npc_db_id)
-                    except Exception as e:
-                        logging.error(f"Error clearing NPC game for {npc.name}: {e}")
                 changed = True
 
         if changed:
@@ -819,13 +825,6 @@ class Casino:
 
         game.leave(npc)
         self._dirty_games.add(game_id)
-
-        npc_db_id = getattr(npc, 'npc_db_id', None)
-        if npc_db_id is not None and self.db is not None:
-            try:
-                self.db.clear_npc_game(npc_db_id)
-            except Exception as e:
-                logging.error(f"Error clearing NPC game for {npc.name}: {e}")
 
     def publish_event(self, event_type, data):
         logging.debug(f"Publishing event {event_type}: {data}")

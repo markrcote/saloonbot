@@ -720,6 +720,69 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.casino.update_wallet.assert_any_call(alice, alice_bet * 2)
 
 
+class TestNPCDepartureHook(unittest.TestCase):
+    """M4.4: Blackjack.leave() fires the shared on_npc_departed hook exactly
+    once per NPC departure, regardless of path, and never fires it for humans."""
+
+    def _make_game(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.update_wallet.return_value = True
+        mock_casino.game_output = MagicMock()
+        hook = MagicMock()
+        game = Blackjack(game_id="test", casino=mock_casino, on_npc_departed=hook)
+        return game, hook
+
+    def test_leave_fires_hook_for_npc(self):
+        game, hook = self._make_game()
+        npc = SimpleBlackjackNPC("Deuces Wilder")
+        game.join(npc)
+        game.tick()  # WAITING -> BETTING, npc promoted to players
+        game.leave(npc)
+        hook.assert_called_once_with(game, npc)
+
+    def test_leave_does_not_fire_hook_for_human(self):
+        game, hook = self._make_game()
+        human = Player("Player 1")
+        game.join(human)
+        game.tick()  # WAITING -> BETTING
+        game.leave(human)
+        hook.assert_not_called()
+
+    def test_leave_from_players_waiting_fires_hook_for_npc(self):
+        """NPC removed before its first hand (still in players_waiting) still fires the hook."""
+        game, hook = self._make_game()
+        npc = SimpleBlackjackNPC("Widow Maker")
+        game.join(npc)  # WAITING state -> goes to players_waiting
+        self.assertIn(npc, game.players_waiting)
+        game.leave(npc)
+        hook.assert_called_once_with(game, npc)
+
+    def test_broke_npc_removal_routes_through_leave_and_fires_hook(self):
+        """The broke-NPC auto-drop in _tick_betting goes through leave(), not
+        direct self.players manipulation, and fires the shared hook."""
+        game, hook = self._make_game()
+        game.casino.get_wallet.return_value = 0.0  # below MIN_BET
+        npc = SimpleBlackjackNPC("Broke Betty")
+        game.join(npc)
+        game.tick()  # WAITING -> BETTING
+        game.tick()  # _tick_betting drops the broke NPC
+        self.assertNotIn(npc, game.players)
+        hook.assert_called_once_with(game, npc)
+
+    def test_broke_npc_gets_tapped_out_message(self):
+        """Flavor text is preserved even though the removal now routes through leave()."""
+        game, hook = self._make_game()
+        game.casino.get_wallet.return_value = 0.0
+        npc = SimpleBlackjackNPC("Broke Betty")
+        game.join(npc)
+        game.tick()
+        game.tick()
+        messages = [call.args[1] for call in game.casino.game_output.call_args_list]
+        self.assertTrue(any("tapped out" in m for m in messages))
+
+
 class TestCasinoErrorHandling(unittest.TestCase):
     def setUp(self):
         self.mock_redis = MagicMock()
@@ -1224,6 +1287,16 @@ class TestCasinoNPCManagement(unittest.TestCase):
         with self.assertRaises(CardGameError):
             self.casino.remove_npc(game_id, "SameName")
         self.assertIn(human, game.players_waiting)
+
+    def test_remove_npc_fires_shared_hook_exactly_once(self):
+        """M4.4: remove_npc no longer clears npc_game itself — it relies on the
+        shared on_npc_departed hook fired from within Blackjack.leave()."""
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+        npc = SimpleBlackjackNPC("Deuces Wilder", npc_db_id=42)
+        game.join(npc)
+        self.casino.remove_npc(game_id, "Deuces Wilder")
+        self.mock_db.clear_npc_game.assert_called_once_with(42)
 
     def test_npc_types_registry(self):
         self.assertIn('simple', NPC_TYPES)
@@ -2138,6 +2211,20 @@ class TestNPCAutofill(unittest.TestCase):
         casino._autofill_npcs('g1', game)
         game.leave.assert_called_once_with(npc1)
         casino._mark_dirty.assert_called()
+
+    def test_autofill_trim_fires_shared_hook_exactly_once(self):
+        """M4.4: autofill's trim no longer clears npc_game itself — it relies on
+        the shared on_npc_departed hook fired from within Blackjack.leave()."""
+        db = MagicMock()
+        casino = self._make_casino(npc_min=0, npc_max=1, db=db)
+        game_id = casino.new_game()
+        game = casino.games[game_id]
+        npc1 = SimpleBlackjackNPC("NPC1", npc_db_id=1)
+        npc2 = SimpleBlackjackNPC("NPC2", npc_db_id=2)
+        game.join(npc1)
+        game.join(npc2)
+        casino._autofill_npcs(game_id, game)
+        db.clear_npc_game.assert_called_once_with(1)
 
     def test_autofill_no_op_when_at_max(self):
         casino = self._make_casino(npc_min=0, npc_max=2)

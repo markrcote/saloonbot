@@ -16,7 +16,7 @@ Names were scraped from [Mithril and Mages](https://www.mithrilandmages.com/util
 
 ### Cards
 
-Table management uses slash commands, but **gameplay actions during a hand are typed as plain messages in the game's channel** (no slash prefix).
+All gameplay actions have slash commands. As a convenience, `join`, `leave`, `bet <amount>`, `hit`, and `stand` also work typed as plain messages in the game's channel (no slash prefix).
 
 Slash commands:
 
@@ -24,6 +24,9 @@ Slash commands:
 * `/newgame [num_bots]` *(admin)* — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy.
 * `/joingame` — sit down at the table.
 * `/leavegame` — leave the current game.
+* `/bet <amount>` — place a bet during the betting phase.
+* `/hit` — draw another card on your turn.
+* `/stand` — hold your hand on your turn.
 * `/wad` — privately check your current balance (only visible to you).
 * `/stats` — view your saloon record (hands played, winnings, etc.; only visible to you).
 * `/saloon` — show the saloon's name, town, and active tables.
@@ -37,12 +40,6 @@ Slash commands:
 * `/removenpc [name]` *(admin)* — remove an NPC from the current game; omit name to remove any NPC.
 * `/usage` *(admin)* — show a 7-day summary of LLM token usage.
 * `/debug` *(admin)* — dump full internal state for troubleshooting.
-
-In-channel gameplay actions (type the word, no slash):
-
-* `bet <amount>` — place a bet during the betting phase.
-* `hit` — draw another card on your turn.
-* `stand` — hold your hand on your turn.
 
 ### Metadata
 

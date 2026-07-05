@@ -694,7 +694,9 @@ class BlackjackCog(commands.Cog):
             "`/joingame` — Join the blackjack game in this channel\n"
             "`/leavegame` — Leave the current game\n"
             "`/bet <amount>` — Place a bet during the betting phase\n"
-            "Type `hit` or `stand` in chat to play your hand\n"
+            "`/hit` — Take another card\n"
+            "`/stand` — End your turn and hold your hand\n"
+            "(`join`, `leave`, `bet`, `hit`, `stand` also work typed directly in chat)\n"
             "`/wad` — Check your own wallet balance (private)\n"
             "`/stats` — View your stats and fame level\n"
             "`/saloon` — Show saloon info and active tables\n"
@@ -842,6 +844,36 @@ class BlackjackCog(commands.Cog):
 
         await self.send_command(sanitize_username(interaction.user.name), game, "bet", amount=amount)
         await interaction.send(f"💵 Placing bet of ${amount}...")
+
+    @nextcord.slash_command(name="hit", guild_ids=GUILD_IDS)
+    async def hit(self, interaction: nextcord.Interaction):
+        """Take another card."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("⚠️ No game currently in progress.")
+            return
+
+        if game.state != GameState.ACTIVE:
+            await interaction.send("⚠️ Game is not active.")
+            return
+
+        await self.send_command(sanitize_username(interaction.user.name), game, "hit")
+        await interaction.send("🃏 Hitting...")
+
+    @nextcord.slash_command(name="stand", guild_ids=GUILD_IDS)
+    async def stand(self, interaction: nextcord.Interaction):
+        """End your turn and hold your hand."""
+        game = self.find_game_by_interaction(interaction)
+        if not game:
+            await interaction.send("⚠️ No game currently in progress.")
+            return
+
+        if game.state != GameState.ACTIVE:
+            await interaction.send("⚠️ Game is not active.")
+            return
+
+        await self.send_command(sanitize_username(interaction.user.name), game, "stand")
+        await interaction.send("✋ Standing...")
 
     @tasks.loop(seconds=0.5)
     async def listen(self):

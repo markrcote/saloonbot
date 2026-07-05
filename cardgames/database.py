@@ -333,12 +333,12 @@ class Database:
                 cursor.close()
 
     def load_all_active_games(self):
-        """Load all active games from database."""
+        """Load all persisted games from database, regardless of state."""
         self._connect()
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM games WHERE state != 'waiting'")
+            cursor.execute("SELECT * FROM games")
             results = cursor.fetchall()
             games = []
             for result in results:

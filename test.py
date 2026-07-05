@@ -347,6 +347,24 @@ class TestDatabaseIntegration(unittest.TestCase):
         # Verify player was added to waiting list
         self.assertIn(player, game.players_waiting)
 
+    def test_load_all_active_games_includes_waiting_games(self):
+        """A freshly created, empty (WAITING) game must survive a server
+        restart just like any other game — deploys shouldn't drop it."""
+        db = SqliteDatabase(":memory:")
+        try:
+            mock_casino = MagicMock()
+            mock_casino.db = db
+
+            game = Blackjack(game_id="fresh_empty_game", casino=mock_casino)
+            self.assertEqual(game.state, HandState.WAITING)
+            db.save_game(game.game_id, game.to_dict())
+
+            loaded = db.load_all_active_games()
+            loaded_ids = {g['game_id'] for g in loaded}
+            self.assertIn("fresh_empty_game", loaded_ids)
+        finally:
+            db.close()
+
 
 class TestSettingsStore(unittest.TestCase):
     """AM1: settings key/value store on the SQLite backend."""

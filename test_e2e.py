@@ -523,6 +523,58 @@ class TestServerRestart(EndToEndTestCase):
         finally:
             pubsub.close()
 
+    def test_empty_waiting_game_persists_across_server_restart(self):
+        """A game with no players yet (WAITING state) must survive a
+        restart too, not just games already in progress."""
+        game_id = self.create_game(deck=self.DETERMINISTIC_DECK)
+
+        self.assertIsNotNone(
+            self.poll_db("SELECT state FROM games WHERE game_id = %s", (game_id,),
+                         predicate=lambda row: row[0] == 'waiting', timeout=5),
+            "Game should be persisted in waiting state before restart"
+        )
+
+        # Restart server
+        self._stop_server()
+        self._start_server()
+
+        # The row must still be there after restart...
+        result = self.poll_db(
+            "SELECT state FROM games WHERE game_id = %s", (game_id,), timeout=5
+        )
+        self.assertIsNotNone(result, "Empty game should still be persisted after restart")
+        self.assertEqual(result[0], 'waiting')
+
+        # ...and the server must have reloaded it into memory, not just left
+        # an orphaned DB row: list_games should still report it.
+        pubsub = self.redis.pubsub()
+        try:
+            pubsub.subscribe("casino_update")
+            pubsub.get_message(timeout=1)  # Skip subscribe confirmation
+
+            list_request_id = f"list-request-{time.time()}"
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'casino_action',
+                'action': 'list_games',
+                'request_id': list_request_id,
+            }))
+
+            games_response = None
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    if response.get('event_type') == 'list_games' and \
+                       response.get('request_id') == list_request_id:
+                        games_response = response
+                        break
+
+            self.assertIsNotNone(games_response, "Should receive list_games response")
+            game_ids = [g['game_id'] for g in games_response['games']]
+            self.assertIn(game_id, game_ids, "Empty game should be reloaded into memory after restart")
+        finally:
+            pubsub.close()
+
     def test_bet_preserved_after_restart(self):
         """Test that player bets are preserved after server restart."""
         game_id = self.create_game(deck=self.DETERMINISTIC_DECK)

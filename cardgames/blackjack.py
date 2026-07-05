@@ -717,12 +717,15 @@ class Blackjack(CardGame):
             if time_expired and not all_bet:
                 self.output("⏰ Time's up! The clock don't wait for nobody.")
                 logging.info(f"[{self.game_id[:8]}] Betting timeout — {len(self.bets)}/{len(self.players)} players bet")
-                # Remove players who didn't bet
+                # Players who didn't bet sit out this hand but stay at the table —
+                # park them in players_waiting so they're picked up again next hand
+                # without having to rejoin.
                 players_without_bets = [p for p in self.players if p.name not in self.bets]
                 for player in players_without_bets:
                     self.output(f"⏭️ {player} didn't put up any coin. They're sittin' this one out.")
                 self._dirty = True
                 self.players = [p for p in self.players if p.name in self.bets]
+                self.players_waiting.extend(players_without_bets)
 
             if not self.players:
                 self.output("⏸️ Nobody's got skin in the game. Dealer waits...")

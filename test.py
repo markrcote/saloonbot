@@ -482,7 +482,7 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.tick()  # All bet -> PLAYING
         self.assertEqual(self.game.state, HandState.PLAYING)
 
-    def test_timeout_removes_non_betting_players(self):
+    def test_timeout_benches_non_betting_players(self):
         self.game.join(Player("Player 1"))
         self.game.join(Player("Player 2"))
         self.game.tick()  # WAITING -> BETTING
@@ -490,10 +490,31 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.bet(player1, 10)
         # Simulate timeout
         self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 1
-        self.game.tick()  # Timeout -> remove non-betting player -> PLAYING
+        self.game.tick()  # Timeout -> bench non-betting player -> PLAYING
         self.assertEqual(self.game.state, HandState.PLAYING)
         self.assertEqual(len(self.game.players), 1)
         self.assertEqual(self.game.players[0].name, "Player 1")
+        # The non-bettor stays seated for next hand instead of being dropped
+        self.assertEqual([p.name for p in self.game.players_waiting], ["Player 2"])
+
+    def test_timeout_with_no_bets_benches_everyone_and_reopens_automatically(self):
+        self.game.join(Player("Player 1"))
+        self.game.join(Player("Player 2"))
+        self.game.tick()  # WAITING -> BETTING
+        # Nobody bets before the timer expires
+        self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 1
+        self.game.tick()  # Timeout -> nobody bet -> back to WAITING
+        self.assertEqual(self.game.state, HandState.WAITING)
+        self.assertEqual(self.game.players, [])
+        self.assertEqual([p.name for p in self.game.players_waiting], ["Player 1", "Player 2"])
+
+        # Betting reopens on its own once the wait-for-players window elapses,
+        # with no need for anyone to rejoin.
+        self.game.time_first_player_joined = time.time() - self.game.TIME_WAIT_FOR_PLAYERS - 1
+        self.game.tick()
+        self.assertEqual(self.game.state, HandState.BETTING)
+        self.assertEqual({p.name for p in self.game.players}, {"Player 1", "Player 2"})
+        self.assertEqual(self.game.players_waiting, [])
 
     def test_double_bet_rejected(self):
         self.game.join(Player("Player 1"))

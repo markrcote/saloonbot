@@ -4,6 +4,7 @@ import time
 from enum import Enum
 
 from .card_game import Card, CardGame, CardGameError
+from .money import format_cents
 from .player import Player
 
 
@@ -149,16 +150,18 @@ class InvalidActionError(CardGameError):
 
 
 class InsufficientFundsError(CardGameError):
-    def __init__(self, player, balance, bet_amount):
+    def __init__(self, player, balance_cents, bet_amount_cents):
         self.player = player
-        self.balance = balance
-        self.bet_amount = bet_amount
+        self.balance_cents = balance_cents
+        self.bet_amount_cents = bet_amount_cents
 
     def __str__(self):
-        return f"{self.player} has insufficient funds (${self.balance:.2f}) for bet of ${self.bet_amount:.2f}"
+        return (f"{self.player} has insufficient funds (${format_cents(self.balance_cents)}) "
+                f"for bet of ${format_cents(self.bet_amount_cents)}")
 
     def user_message(self):
-        return f"You don't have enough funds for that bet. Your balance is ${self.balance:.2f}."
+        return (f"You don't have enough funds for that bet. "
+                f"Your balance is ${format_cents(self.balance_cents)}.")
 
 
 class InvalidBetError(CardGameError):
@@ -182,8 +185,8 @@ class Blackjack(CardGame):
     PERIOD_REMINDER_PLAYER_TURN = int(os.getenv('BLACKJACK_REMINDER_PERIOD', '30'))
     TIME_BETWEEN_HANDS = int(os.getenv('BLACKJACK_TIME_BETWEEN_HANDS', '10'))
     TIME_WAIT_FOR_PLAYERS = int(os.getenv('BLACKJACK_TIME_WAIT_FOR_PLAYERS', '5'))
-    MIN_BET = int(os.getenv('BLACKJACK_MIN_BET', '5'))
-    MAX_BET = int(os.getenv('BLACKJACK_MAX_BET', '100'))
+    MIN_BET = int(os.getenv('BLACKJACK_MIN_BET', '500'))
+    MAX_BET = int(os.getenv('BLACKJACK_MAX_BET', '10000'))
     TIME_FOR_BETTING = int(os.getenv('BLACKJACK_TIME_FOR_BETTING', '30'))
     DRAMATIC_PAUSE = float(os.getenv('BLACKJACK_DRAMATIC_PAUSE', '1.5'))
     DEALER_CARD_PAUSE = float(os.getenv('BLACKJACK_DEALER_CARD_PAUSE', '1.0'))
@@ -242,7 +245,7 @@ class Blackjack(CardGame):
             self.output(f"{player} {result}")
         else:
             balance = self.casino.get_wallet(player)
-            self.output(f"{player} {result} 💰 Wad: ${balance:.2f}")
+            self.output(f"{player} {result} 💰 Wad: ${format_cents(balance)}")
 
     def _check_turn(self, player):
         if self.players[self.current_player_idx] != player:
@@ -306,7 +309,9 @@ class Blackjack(CardGame):
                 # Cards not yet dealt; bet is unlocked and returned
                 self.casino.update_wallet(player, bet_amount)
                 del self.bets[player.name]
-                self.output(f"💨 {player} hightails it before the deal! Their ${bet_amount:.2f} bet is returned.")
+                self.output(
+                    f"💨 {player} hightails it before the deal! Their ${format_cents(bet_amount)} bet is returned."
+                )
             elif already_played or self.state in (HandState.DEALER_TURN, HandState.RESOLVING):
                 # Already acted or waiting on dealer: hand resolves at end_hand()
                 self.departed_players.append(player)
@@ -314,7 +319,9 @@ class Blackjack(CardGame):
             else:
                 # Haven't played yet (or it's their turn now): bet forfeited
                 del self.bets[player.name]
-                self.output(f"💨 {player} hightails it outta here! Their ${bet_amount:.2f} stays with the house.")
+                self.output(
+                    f"💨 {player} hightails it outta here! Their ${format_cents(bet_amount)} stays with the house."
+                )
         elif reason == 'broke':
             self.output(f"💸 {player} is tapped out and tips their hat goodbye.")
         else:
@@ -359,7 +366,7 @@ class Blackjack(CardGame):
         logging.info(f"[{self.game_id[:8]}] Betting opens — {', '.join(_player_label(p) for p in self.players)}")
 
         self.output("💰 Ante up, folks! Place your bets!")
-        self.output(f"🎰 Table limits: ${self.MIN_BET} to ${self.MAX_BET}")
+        self.output(f"🎰 Table limits: ${format_cents(self.MIN_BET)} to ${format_cents(self.MAX_BET)}")
         self.output(f"⏱️ You've got {self.TIME_FOR_BETTING} seconds before the cards fly.")
 
         # Output all players' wallets before betting (NPC balances hidden)
@@ -369,11 +376,11 @@ class Blackjack(CardGame):
                 wallet_lines.append(f"{p}: ???")
             else:
                 balance = self.casino.get_wallet(p)
-                wallet_lines.append(f"{p}: ${balance:.2f}")
+                wallet_lines.append(f"{p}: ${format_cents(balance)}")
         self.output("💰 Wads: " + ", ".join(wallet_lines))
 
-    def bet(self, player, amount):
-        """Place a bet for a player."""
+    def bet(self, player, amount_cents):
+        """Place a bet for a player. amount_cents is in cents."""
         if self.state != HandState.BETTING:
             raise CardGameError("Betting is not open")
 
@@ -384,28 +391,31 @@ class Blackjack(CardGame):
             raise CardGameError(f"{player} has already placed a bet")
 
         # Validate bet amount
-        if amount < self.MIN_BET:
-            raise InvalidBetError(f"Minimum bet is ${self.MIN_BET}")
+        if amount_cents < self.MIN_BET:
+            raise InvalidBetError(f"Minimum bet is ${format_cents(self.MIN_BET)}")
 
-        if amount > self.MAX_BET:
-            raise InvalidBetError(f"Maximum bet is ${self.MAX_BET}")
+        if amount_cents > self.MAX_BET:
+            raise InvalidBetError(f"Maximum bet is ${format_cents(self.MAX_BET)}")
 
         # Atomically deduct bet; returns False if wallet has insufficient funds
-        if not self.casino.update_wallet(player, -amount):
+        if not self.casino.update_wallet(player, -amount_cents):
             balance = self.casino.get_wallet(player)
-            raise InsufficientFundsError(player, balance, amount)
+            raise InsufficientFundsError(player, balance, amount_cents)
 
-        self.bets[player.name] = amount
+        self.bets[player.name] = amount_cents
         self._dirty = True
         self._update_time_last_event()
-        logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${amount:.2f}")
+        logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${format_cents(amount_cents)}")
 
         # Output bet (NPC balance hidden)
         if player.is_npc:
-            self.output(f"💵 {player} throws ${amount:.2f} on the table.")
+            self.output(f"💵 {player} throws ${format_cents(amount_cents)} on the table.")
         else:
             new_balance = self.casino.get_wallet(player)
-            self.output(f"💵 {player} throws ${amount:.2f} on the table. 💰 Wad: ${new_balance:.2f}")
+            self.output(
+                f"💵 {player} throws ${format_cents(amount_cents)} on the table. "
+                f"💰 Wad: ${format_cents(new_balance)}"
+            )
 
     def new_hand(self):
         if not self.players:
@@ -464,29 +474,31 @@ class Blackjack(CardGame):
             logging.error(f"Player {player.name} has no bet at resolution time")
             bet_amount = 0
 
-        won = lost = 0.0
+        won = lost = 0
         if self.get_score(player) > 21:
-            self._output_player_result(player, f"💥 {tag}went bust! ${bet_amount:.2f} lost to the house.")
-            logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: bust — loses ${bet_amount:.2f}")
+            self._output_player_result(player, f"💥 {tag}went bust! ${format_cents(bet_amount)} lost to the house.")
+            logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: bust — loses ${format_cents(bet_amount)}")
             lost = bet_amount
         else:
             if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
                 winnings = bet_amount * 2
                 self.casino.update_wallet(player, winnings)
-                self._output_player_result(player, f"🏆 {tag}strikes gold! Payout: ${winnings:.2f}")
+                self._output_player_result(player, f"🏆 {tag}strikes gold! Payout: ${format_cents(winnings)}")
                 logging.info(
-                    f"[{self.game_id[:8]}] {_player_label(player)}: wins ${winnings:.2f}"
+                    f"[{self.game_id[:8]}] {_player_label(player)}: wins ${format_cents(winnings)}"
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
                 won = bet_amount
             elif self.get_score(player) == self.get_score(self.dealer):
                 self.casino.update_wallet(player, bet_amount)
-                self._output_player_result(player, f"🤝 {tag}pushes with the dealer. ${bet_amount:.2f} returned.")
+                self._output_player_result(
+                    player, f"🤝 {tag}pushes with the dealer. ${format_cents(bet_amount)} returned."
+                )
                 logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: push at {self.get_score(player)}")
             else:
-                self._output_player_result(player, f"❌ {tag}loses to the house. ${bet_amount:.2f} gone.")
+                self._output_player_result(player, f"❌ {tag}loses to the house. ${format_cents(bet_amount)} gone.")
                 logging.info(
-                    f"[{self.game_id[:8]}] {_player_label(player)}: loses ${bet_amount:.2f}"
+                    f"[{self.game_id[:8]}] {_player_label(player)}: loses ${format_cents(bet_amount)}"
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
                 lost = bet_amount

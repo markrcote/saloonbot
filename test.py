@@ -14,6 +14,7 @@ from cardgames.casino import (
     NPC_TYPES, Casino,
     DEFAULT_NPC_AUTOFILL_MIN, DEFAULT_NPC_AUTOFILL_MAX, MAX_NPCS_PER_TABLE,
 )
+from cardgames.money import dollars_to_cents, format_cents
 from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
@@ -26,6 +27,28 @@ Blackjack.TIME_WAIT_FOR_PLAYERS = 0
 Blackjack.DRAMATIC_PAUSE = 0
 Blackjack.DEALER_CARD_PAUSE = 0
 Blackjack.RESULT_PAUSE = 0
+
+
+class TestMoney(unittest.TestCase):
+
+    def test_dollars_to_cents_int(self):
+        self.assertEqual(dollars_to_cents(5), 500)
+
+    def test_dollars_to_cents_float(self):
+        self.assertEqual(dollars_to_cents(19.99), 1999)
+
+    def test_dollars_to_cents_rounds_to_nearest(self):
+        self.assertEqual(dollars_to_cents(1.005), 100)
+        self.assertEqual(dollars_to_cents(1.006), 101)
+
+    def test_format_cents(self):
+        self.assertEqual(format_cents(12345), "123.45")
+
+    def test_format_cents_zero(self):
+        self.assertEqual(format_cents(0), "0.00")
+
+    def test_format_cents_pads_single_digit_cents(self):
+        self.assertEqual(format_cents(500), "5.00")
 
 
 class TestWildWestNames(unittest.TestCase):

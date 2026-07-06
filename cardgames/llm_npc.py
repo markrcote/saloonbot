@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .llm_client import LLMClient, LLMError
+from .money import cents_to_dollars, dollars_to_cents
 from .npc_player import NPCPlayer
 from .personalities import Personality
 from .simple_npc import SimpleBlackjackNPC
@@ -55,6 +56,7 @@ class LLMBlackjackNPC(NPCPlayer):
         return result["action"]
 
     def decide_bet(self, min_bet, max_bet, wallet):
+        """min_bet, max_bet, wallet, and the returned amount are all in cents."""
         if self._pending_bet_future is None:
             logger.info("LLM bet call submitted for %s", self.name)
             self._pending_bet_future = self._executor.submit(
@@ -168,11 +170,12 @@ class LLMBlackjackNPC(NPCPlayer):
             return {"action": action, "quip": None}
 
     def _llm_decide_bet(self, min_bet, max_bet, wallet) -> dict:
+        """min_bet, max_bet, and wallet are all in cents; the LLM reasons in whole dollars."""
         timeout = float(os.environ.get("LLM_TIMEOUT", "5"))
         system = self._build_betting_system_prompt()
         user_msg = (
-            f"You have ${wallet:.0f} in your wallet. "
-            f"The bet range is ${min_bet}–${max_bet}. "
+            f"You have ${cents_to_dollars(wallet)} in your wallet. "
+            f"The bet range is ${cents_to_dollars(min_bet)}–${cents_to_dollars(max_bet)}. "
             "How much do you bet?"
         )
         t0 = time.time()
@@ -183,10 +186,10 @@ class LLMBlackjackNPC(NPCPlayer):
                 timeout=timeout,
             )
             result = json.loads(raw)
-            amount = int(result["amount"])
-            logger.info("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, amount)
+            amount_cents = dollars_to_cents(int(result["amount"]))
+            logger.info("LLM bet for %s: %.1fs → $%d", self.name, time.time() - t0, result["amount"])
             self._record_usage('npc_bet', in_tok, out_tok)
-            return {"amount": max(min_bet, min(max_bet, amount)), "quip": result.get("quip")}
+            return {"amount": max(min_bet, min(max_bet, amount_cents)), "quip": result.get("quip")}
         except (LLMError, json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("LLM bet fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
             return {"amount": min_bet, "quip": None}

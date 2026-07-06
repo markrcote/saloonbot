@@ -894,6 +894,24 @@ class TestCasinoErrorHandling(unittest.TestCase):
         self.assertIsNotNone(game_over_call, "game_over event was not published")
         self.assertEqual(game_over_call['game_id'], game_id)
 
+    def test_tick_error_in_one_game_does_not_crash_others(self):
+        """A CardGameError raised while ticking one game must not stop other games from ticking."""
+        broken_game_id = self.casino.new_game()
+        broken_game = self.casino.games[broken_game_id]
+        broken_game.tick = MagicMock(side_effect=CardGameError("boom"))
+
+        healthy_game_id = self.casino.new_game()
+        healthy_game = self.casino.games[healthy_game_id]
+        healthy_game.join(Player("TestPlayer"))
+
+        self.casino._tick_games()  # must not raise
+
+        broken_game.tick.assert_called_once()
+        # The healthy game's own tick() ran and advanced it out of WAITING.
+        self.assertEqual(healthy_game.state, HandState.BETTING)
+        # The broken game is left in place for the next tick to retry, not deleted.
+        self.assertIn(broken_game_id, self.casino.games)
+
 
 class TestSerialization(unittest.TestCase):
     """Tests for game state serialization/deserialization."""

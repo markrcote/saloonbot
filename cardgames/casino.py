@@ -976,7 +976,11 @@ class Casino:
 
     def _tick_games(self):
         for game_id, game in list(self.games.items()):
-            game.tick()
+            try:
+                game.tick()
+            except CardGameError as e:
+                logging.error(f"[{game_id[:8]}] Error ticking game, skipping this cycle: {e}")
+                continue
 
             if game._dirty:
                 self._mark_dirty(game_id)

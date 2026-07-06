@@ -1167,11 +1167,38 @@ class TestManualNPC(EndToEndTestCase):
 
     def setUp(self):
         super().setUp()
+        self.game_id = None
         cursor = self.db.cursor()
         cursor.execute("DELETE FROM npcs")
         cursor.execute("DELETE FROM settings")
         self.db.commit()
         cursor.close()
+
+    def tearDown(self):
+        # Stop the game created by the test and wait for confirmation, so no
+        # live game (still holding references to this test's NPCs) survives
+        # into the next test's setUp(), which deletes the npcs table.
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def _stop_game(self, game_id):
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'casino_action',
+                'action': 'stop_game',
+                'game_id': game_id,
+            }))
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                msg = pubsub.get_message(timeout=0.5)
+                if msg and msg['type'] == 'message':
+                    data = json.loads(msg['data'])
+                    if data.get('event_type') == 'game_over':
+                        return
+        finally:
+            pubsub.close()
 
     def _npc_action(self, action, game_id, **kwargs):
         self.redis.publish("casino", json.dumps({
@@ -1219,6 +1246,7 @@ class TestManualNPC(EndToEndTestCase):
     def test_addnpc_increases_npc_count(self):
         """add_npc action adds an NPC from the roster to the game."""
         game_id = self.create_game()
+        self.game_id = game_id
         time.sleep(1)
 
         debug_before = self._get_debug()
@@ -1236,6 +1264,7 @@ class TestManualNPC(EndToEndTestCase):
     def test_addnpc_multiple(self):
         """add_npc with count=2 adds two NPCs."""
         game_id = self.create_game()
+        self.game_id = game_id
         time.sleep(1)
 
         debug_before = self._get_debug()
@@ -1253,6 +1282,7 @@ class TestManualNPC(EndToEndTestCase):
     def test_removenpc_by_name(self):
         """remove_npc with a name removes exactly that NPC."""
         game_id = self.create_game()
+        self.game_id = game_id
         time.sleep(1)
 
         self._npc_action('add_npc', game_id, count=1)
@@ -1274,6 +1304,7 @@ class TestManualNPC(EndToEndTestCase):
     def test_removenpc_arbitrary(self):
         """remove_npc with no name removes one NPC."""
         game_id = self.create_game()
+        self.game_id = game_id
         time.sleep(1)
 
         self._npc_action('add_npc', game_id, count=1)

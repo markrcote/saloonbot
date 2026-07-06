@@ -82,6 +82,23 @@ MIGRATIONS = [
             setting_value TEXT NOT NULL
         )""",
     ],
+    [   # Migration 6: convert wallet/stats columns from dollars to integer cents
+        "ALTER TABLE users ADD COLUMN wallet_cents INT NOT NULL DEFAULT 20000",
+        "UPDATE users SET wallet_cents = ROUND(wallet * 100)",
+        "ALTER TABLE users DROP COLUMN wallet",
+        "ALTER TABLE users ADD COLUMN total_won_cents INT NOT NULL DEFAULT 0",
+        "UPDATE users SET total_won_cents = ROUND(total_won * 100)",
+        "ALTER TABLE users DROP COLUMN total_won",
+        "ALTER TABLE users ADD COLUMN total_lost_cents INT NOT NULL DEFAULT 0",
+        "UPDATE users SET total_lost_cents = ROUND(total_lost * 100)",
+        "ALTER TABLE users DROP COLUMN total_lost",
+        "ALTER TABLE users ADD COLUMN biggest_win_cents INT NOT NULL DEFAULT 0",
+        "UPDATE users SET biggest_win_cents = ROUND(biggest_win * 100)",
+        "ALTER TABLE users DROP COLUMN biggest_win",
+        "ALTER TABLE npcs ADD COLUMN wallet_cents INT NOT NULL DEFAULT 20000",
+        "UPDATE npcs SET wallet_cents = wallet * 100",
+        "ALTER TABLE npcs DROP COLUMN wallet",
+    ],
 ]
 
 
@@ -201,19 +218,19 @@ class Database:
                 cursor.close()
 
     def get_user_wallet(self, username):
-        """Get the wallet balance for a user."""
+        """Get the wallet balance for a user, in cents."""
         self._connect()
         self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
-                SELECT wallet FROM users WHERE username = %s
+                SELECT wallet_cents FROM users WHERE username = %s
             """, (username,))
             result = cursor.fetchone()
             if result is None:
                 return None
-            return float(result[0])
+            return int(result[0])
         except Error as e:
             logging.error(f"Error getting wallet for {username}: {e}")
             raise
@@ -221,37 +238,39 @@ class Database:
             if cursor:
                 cursor.close()
 
-    def update_wallet(self, username, amount):
-        """Update a user's wallet by adding or subtracting an amount.
+    def update_wallet(self, username, amount_cents):
+        """Update a user's wallet by adding or subtracting an amount, in cents.
 
         Returns True on success, False if the update would make the wallet negative.
         """
         def fn(cursor):
-            if amount < 0:
+            amount_cents_int = int(amount_cents)
+            if amount_cents_int < 0:
                 cursor.execute("""
-                    UPDATE users SET wallet = wallet + %s
-                    WHERE username = %s AND wallet + %s >= 0
-                """, (amount, username, amount))
+                    UPDATE users SET wallet_cents = wallet_cents + %s
+                    WHERE username = %s AND wallet_cents + %s >= 0
+                """, (amount_cents_int, username, amount_cents_int))
             else:
                 cursor.execute("""
-                    UPDATE users SET wallet = wallet + %s WHERE username = %s
-                """, (amount, username))
+                    UPDATE users SET wallet_cents = wallet_cents + %s WHERE username = %s
+                """, (amount_cents_int, username))
             rows_affected = cursor.rowcount
             if rows_affected > 0:
-                logging.debug(f"Updated wallet for {username} by {amount}")
+                logging.debug(f"Updated wallet for {username} by {amount_cents_int}")
             return rows_affected > 0
 
         return self._execute_write(fn, f"update_wallet({username})")
 
-    def set_user_wallet(self, username, amount):
-        """Set a user's wallet to an absolute amount. Returns True on success."""
+    def set_user_wallet(self, username, amount_cents):
+        """Set a user's wallet to an absolute amount, in cents. Returns True on success."""
         def fn(cursor):
             cursor.execute(
-                "UPDATE users SET wallet = %s WHERE username = %s", (amount, username)
+                "UPDATE users SET wallet_cents = %s WHERE username = %s",
+                (int(amount_cents), username)
             )
             rows_affected = cursor.rowcount
             if rows_affected > 0:
-                logging.debug(f"Set wallet for {username} to {amount}")
+                logging.debug(f"Set wallet for {username} to {amount_cents}")
             return rows_affected > 0
 
         return self._execute_write(fn, f"set_user_wallet({username})")
@@ -426,12 +445,12 @@ class Database:
 
         return self._execute_write(fn, f"delete_game_channel({game_id})")
 
-    def create_npc(self, name, personality_name, wallet):
+    def create_npc(self, name, personality_name, wallet_cents):
         """Create a new NPC record. Returns the new npc id."""
         def fn(cursor):
             cursor.execute("""
-                INSERT INTO npcs (name, personality_name, backstory, wallet) VALUES (%s, %s, '', %s)
-            """, (name, personality_name, int(wallet)))
+                INSERT INTO npcs (name, personality_name, backstory, wallet_cents) VALUES (%s, %s, '', %s)
+            """, (name, personality_name, int(wallet_cents)))
             return cursor.lastrowid
         return self._execute_write(fn, f"create_npc({name})")
 
@@ -510,15 +529,15 @@ class Database:
                 cursor.close()
 
     def get_npc_wallet(self, npc_id):
-        """Get NPC wallet balance. Returns float or None."""
+        """Get NPC wallet balance in cents. Returns int or None."""
         self._connect()
         self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor()
-            cursor.execute("SELECT wallet FROM npcs WHERE id = %s", (npc_id,))
+            cursor.execute("SELECT wallet_cents FROM npcs WHERE id = %s", (npc_id,))
             result = cursor.fetchone()
-            return float(result[0]) if result else None
+            return int(result[0]) if result else None
         except Error as e:
             logging.error(f"Error getting NPC wallet {npc_id}: {e}")
             raise
@@ -526,27 +545,28 @@ class Database:
             if cursor:
                 cursor.close()
 
-    def update_npc_wallet(self, npc_id, amount):
-        """Add amount to NPC wallet. Returns True on success, False if would go negative."""
+    def update_npc_wallet(self, npc_id, amount_cents):
+        """Add amount_cents to NPC wallet. Returns True on success, False if would go negative."""
         def fn(cursor):
-            if amount < 0:
+            amount_cents_int = int(amount_cents)
+            if amount_cents_int < 0:
                 cursor.execute("""
-                    UPDATE npcs SET wallet = wallet + %s
-                    WHERE id = %s AND wallet + %s >= 0
-                """, (amount, npc_id, amount))
+                    UPDATE npcs SET wallet_cents = wallet_cents + %s
+                    WHERE id = %s AND wallet_cents + %s >= 0
+                """, (amount_cents_int, npc_id, amount_cents_int))
             else:
                 cursor.execute(
-                    "UPDATE npcs SET wallet = wallet + %s WHERE id = %s",
-                    (amount, npc_id)
+                    "UPDATE npcs SET wallet_cents = wallet_cents + %s WHERE id = %s",
+                    (amount_cents_int, npc_id)
                 )
             return cursor.rowcount > 0
         return self._execute_write(fn, f"update_npc_wallet({npc_id})")
 
-    def set_npc_wallet(self, npc_id, amount):
-        """Set an NPC's wallet to an absolute amount. Returns True on success."""
+    def set_npc_wallet(self, npc_id, amount_cents):
+        """Set an NPC's wallet to an absolute amount in cents. Returns True on success."""
         def fn(cursor):
             cursor.execute(
-                "UPDATE npcs SET wallet = %s WHERE id = %s", (int(amount), npc_id)
+                "UPDATE npcs SET wallet_cents = %s WHERE id = %s", (int(amount_cents), npc_id)
             )
             return cursor.rowcount > 0
         return self._execute_write(fn, f"set_npc_wallet({npc_id})")
@@ -646,28 +666,29 @@ class Database:
             """, (username,))
         return self._execute_write(fn, f"increment_games_played({username})")
 
-    def update_player_stats(self, username, won=0.0, lost=0.0):
-        """Record the outcome of a hand for a human player."""
+    def update_player_stats(self, username, won_cents=0, lost_cents=0):
+        """Record the outcome of a hand for a human player. Amounts are in cents."""
         def fn(cursor):
             cursor.execute("""
                 UPDATE users SET
                     hands_played = hands_played + 1,
-                    total_won = total_won + %s,
-                    total_lost = total_lost + %s,
-                    biggest_win = GREATEST(biggest_win, %s),
+                    total_won_cents = total_won_cents + %s,
+                    total_lost_cents = total_lost_cents + %s,
+                    biggest_win_cents = GREATEST(biggest_win_cents, %s),
                     last_seen = NOW()
                 WHERE username = %s
-            """, (won, lost, won, username))
+            """, (won_cents, lost_cents, won_cents, username))
         return self._execute_write(fn, f"update_player_stats({username})")
 
     def get_player_stats(self, username):
-        """Return stats dict for a player, or None if not found."""
+        """Return stats dict for a player, or None if not found. Money fields are in cents."""
         self._connect()
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute("""
-                SELECT games_played, hands_played, total_won, total_lost, biggest_win, last_seen
+                SELECT games_played, hands_played,
+                       total_won_cents, total_lost_cents, biggest_win_cents, last_seen
                 FROM users WHERE username = %s
             """, (username,))
             row = cursor.fetchone()
@@ -676,9 +697,9 @@ class Database:
             return {
                 'games_played': int(row['games_played']),
                 'hands_played': int(row['hands_played']),
-                'total_won': float(row['total_won']),
-                'total_lost': float(row['total_lost']),
-                'biggest_win': float(row['biggest_win']),
+                'total_won_cents': int(row['total_won_cents']),
+                'total_lost_cents': int(row['total_lost_cents']),
+                'biggest_win_cents': int(row['biggest_win_cents']),
                 'last_seen': str(row['last_seen']) if row['last_seen'] else None,
             }
         except Error as e:

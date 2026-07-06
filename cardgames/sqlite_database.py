@@ -75,6 +75,23 @@ MIGRATIONS = [
             setting_value TEXT NOT NULL
         )""",
     ],
+    [   # Migration 6: convert wallet/stats columns from dollars to integer cents
+        "ALTER TABLE users ADD COLUMN wallet_cents INTEGER NOT NULL DEFAULT 20000",
+        "UPDATE users SET wallet_cents = CAST(ROUND(wallet * 100) AS INTEGER)",
+        "ALTER TABLE users DROP COLUMN wallet",
+        "ALTER TABLE users ADD COLUMN total_won_cents INTEGER NOT NULL DEFAULT 0",
+        "UPDATE users SET total_won_cents = CAST(ROUND(total_won * 100) AS INTEGER)",
+        "ALTER TABLE users DROP COLUMN total_won",
+        "ALTER TABLE users ADD COLUMN total_lost_cents INTEGER NOT NULL DEFAULT 0",
+        "UPDATE users SET total_lost_cents = CAST(ROUND(total_lost * 100) AS INTEGER)",
+        "ALTER TABLE users DROP COLUMN total_lost",
+        "ALTER TABLE users ADD COLUMN biggest_win_cents INTEGER NOT NULL DEFAULT 0",
+        "UPDATE users SET biggest_win_cents = CAST(ROUND(biggest_win * 100) AS INTEGER)",
+        "ALTER TABLE users DROP COLUMN biggest_win",
+        "ALTER TABLE npcs ADD COLUMN wallet_cents INTEGER NOT NULL DEFAULT 20000",
+        "UPDATE npcs SET wallet_cents = wallet * 100",
+        "ALTER TABLE npcs DROP COLUMN wallet",
+    ],
 ]
 
 
@@ -135,50 +152,55 @@ class SqliteDatabase:
             raise
 
     def get_user_wallet(self, username):
+        """Get the wallet balance for a user, in cents."""
         self._connect()
         try:
             cursor = self.connection.execute(
-                "SELECT wallet FROM users WHERE username = ?", (username,)
+                "SELECT wallet_cents FROM users WHERE username = ?", (username,)
             )
             result = cursor.fetchone()
             if result is None:
                 return None
-            return float(result['wallet'])
+            return int(result['wallet_cents'])
         except sqlite3.Error as e:
             logging.error(f"Error getting wallet for {username}: {e}")
             raise
 
-    def update_wallet(self, username, amount):
-        """Update a user's wallet. Returns True on success, False if update would go negative."""
+    def update_wallet(self, username, amount_cents):
+        """Update a user's wallet by an amount in cents. Returns True on success, False if update would go negative."""
         self._connect()
         try:
-            if amount < 0:
+            amount_cents_int = int(amount_cents)
+            if amount_cents_int < 0:
                 cursor = self.connection.execute(
-                    "UPDATE users SET wallet = wallet + ? WHERE username = ? AND wallet + ? >= 0",
-                    (amount, username, amount)
+                    "UPDATE users SET wallet_cents = wallet_cents + ? "
+                    "WHERE username = ? AND wallet_cents + ? >= 0",
+                    (amount_cents_int, username, amount_cents_int)
                 )
             else:
                 cursor = self.connection.execute(
-                    "UPDATE users SET wallet = wallet + ? WHERE username = ?", (amount, username)
+                    "UPDATE users SET wallet_cents = wallet_cents + ? WHERE username = ?",
+                    (amount_cents_int, username)
                 )
             self.connection.commit()
             if cursor.rowcount > 0:
-                logging.debug(f"Updated wallet for {username} by {amount}")
+                logging.debug(f"Updated wallet for {username} by {amount_cents_int}")
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error updating wallet for {username}: {e}")
             raise
 
-    def set_user_wallet(self, username, amount):
-        """Set a user's wallet to an absolute amount. Returns True on success."""
+    def set_user_wallet(self, username, amount_cents):
+        """Set a user's wallet to an absolute amount in cents. Returns True on success."""
         self._connect()
         try:
             cursor = self.connection.execute(
-                "UPDATE users SET wallet = ? WHERE username = ?", (amount, username)
+                "UPDATE users SET wallet_cents = ? WHERE username = ?",
+                (int(amount_cents), username)
             )
             self.connection.commit()
             if cursor.rowcount > 0:
-                logging.debug(f"Set wallet for {username} to {amount}")
+                logging.debug(f"Set wallet for {username} to {amount_cents}")
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error setting wallet for {username}: {e}")
@@ -329,13 +351,13 @@ class SqliteDatabase:
             logging.error(f"Error deleting game channel {game_id}: {e}")
             raise
 
-    def create_npc(self, name, personality_name, wallet):
+    def create_npc(self, name, personality_name, wallet_cents):
         """Create a new NPC record. Returns the new npc id."""
         self._connect()
         try:
             cursor = self.connection.execute(
-                "INSERT INTO npcs (name, personality_name, wallet) VALUES (?, ?, ?)",
-                (name, personality_name, int(wallet))
+                "INSERT INTO npcs (name, personality_name, wallet_cents) VALUES (?, ?, ?)",
+                (name, personality_name, int(wallet_cents))
             )
             self.connection.commit()
             return cursor.lastrowid
@@ -401,29 +423,33 @@ class SqliteDatabase:
             raise
 
     def get_npc_wallet(self, npc_id):
-        """Get NPC wallet balance. Returns float or None."""
+        """Get NPC wallet balance in cents. Returns int or None."""
         self._connect()
         try:
-            cursor = self.connection.execute("SELECT wallet FROM npcs WHERE id = ?", (npc_id,))
+            cursor = self.connection.execute(
+                "SELECT wallet_cents FROM npcs WHERE id = ?", (npc_id,)
+            )
             row = cursor.fetchone()
-            return float(row[0]) if row else None
+            return int(row[0]) if row else None
         except sqlite3.Error as e:
             logging.error(f"Error getting NPC wallet {npc_id}: {e}")
             raise
 
-    def update_npc_wallet(self, npc_id, amount):
-        """Add amount to NPC wallet. Returns True on success, False if would go negative."""
+    def update_npc_wallet(self, npc_id, amount_cents):
+        """Add amount_cents to NPC wallet. Returns True on success, False if would go negative."""
         self._connect()
         try:
-            if amount < 0:
+            amount_cents_int = int(amount_cents)
+            if amount_cents_int < 0:
                 cursor = self.connection.execute(
-                    "UPDATE npcs SET wallet = wallet + ? WHERE id = ? AND wallet + ? >= 0",
-                    (amount, npc_id, amount)
+                    "UPDATE npcs SET wallet_cents = wallet_cents + ? "
+                    "WHERE id = ? AND wallet_cents + ? >= 0",
+                    (amount_cents_int, npc_id, amount_cents_int)
                 )
             else:
                 cursor = self.connection.execute(
-                    "UPDATE npcs SET wallet = wallet + ? WHERE id = ?",
-                    (amount, npc_id)
+                    "UPDATE npcs SET wallet_cents = wallet_cents + ? WHERE id = ?",
+                    (amount_cents_int, npc_id)
                 )
             self.connection.commit()
             return cursor.rowcount > 0
@@ -431,12 +457,12 @@ class SqliteDatabase:
             logging.error(f"Error updating NPC wallet {npc_id}: {e}")
             raise
 
-    def set_npc_wallet(self, npc_id, amount):
-        """Set an NPC's wallet to an absolute amount. Returns True on success."""
+    def set_npc_wallet(self, npc_id, amount_cents):
+        """Set an NPC's wallet to an absolute amount in cents. Returns True on success."""
         self._connect()
         try:
             cursor = self.connection.execute(
-                "UPDATE npcs SET wallet = ? WHERE id = ?", (int(amount), npc_id)
+                "UPDATE npcs SET wallet_cents = ? WHERE id = ?", (int(amount_cents), npc_id)
             )
             self.connection.commit()
             return cursor.rowcount > 0
@@ -556,30 +582,31 @@ class SqliteDatabase:
             logging.error(f"Error in increment_games_played({username}): {e}")
             raise
 
-    def update_player_stats(self, username, won=0.0, lost=0.0):
-        """Record the outcome of a hand for a human player."""
+    def update_player_stats(self, username, won_cents=0, lost_cents=0):
+        """Record the outcome of a hand for a human player. Amounts are in cents."""
         self._connect()
         try:
             self.connection.execute("""
                 UPDATE users SET
                     hands_played = hands_played + 1,
-                    total_won = total_won + ?,
-                    total_lost = total_lost + ?,
-                    biggest_win = CASE WHEN ? > biggest_win THEN ? ELSE biggest_win END,
+                    total_won_cents = total_won_cents + ?,
+                    total_lost_cents = total_lost_cents + ?,
+                    biggest_win_cents = CASE WHEN ? > biggest_win_cents THEN ? ELSE biggest_win_cents END,
                     last_seen = CURRENT_TIMESTAMP
                 WHERE username = ?
-            """, (won, lost, won, won, username))
+            """, (won_cents, lost_cents, won_cents, won_cents, username))
             self.connection.commit()
         except sqlite3.Error as e:
             logging.error(f"Error in update_player_stats({username}): {e}")
             raise
 
     def get_player_stats(self, username):
-        """Return stats dict for a player, or None if not found."""
+        """Return stats dict for a player, or None if not found. Money fields are in cents."""
         self._connect()
         try:
             cursor = self.connection.execute("""
-                SELECT games_played, hands_played, total_won, total_lost, biggest_win, last_seen
+                SELECT games_played, hands_played,
+                       total_won_cents, total_lost_cents, biggest_win_cents, last_seen
                 FROM users WHERE username = ?
             """, (username,))
             row = cursor.fetchone()
@@ -588,9 +615,9 @@ class SqliteDatabase:
             return {
                 'games_played': int(row['games_played']),
                 'hands_played': int(row['hands_played']),
-                'total_won': float(row['total_won']),
-                'total_lost': float(row['total_lost']),
-                'biggest_win': float(row['biggest_win']),
+                'total_won_cents': int(row['total_won_cents']),
+                'total_lost_cents': int(row['total_lost_cents']),
+                'biggest_win_cents': int(row['biggest_win_cents']),
                 'last_seen': str(row['last_seen']) if row['last_seen'] else None,
             }
         except sqlite3.Error as e:

@@ -13,7 +13,7 @@ class Personality:
     system_prompt: str
     emoji: str
     betting_style: BettingStyle
-    starting_wallet: int = 200
+    starting_wallet_cents: int = 20000
 
 
 _ARCHETYPES: list[Personality] = [
@@ -22,7 +22,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="⛏️",
         betting_style="conservative",
-        starting_wallet=150,
+        starting_wallet_cents=15000,
         system_prompt=(
             "You are a grizzled old prospector who's spent decades panning for gold "
             "in the Sierra Nevada. You're paranoid, suspicious of everyone at the table, "
@@ -41,7 +41,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🍺",
         betting_style="reckless",
-        starting_wallet=75,
+        starting_wallet_cents=7500,
         system_prompt=(
             "You are a cowboy who has had far too much whiskey tonight. You slur your "
             "words, make grandiose bets you can't back up, and occasionally forget what "
@@ -60,7 +60,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🪙",
         betting_style="moderate",
-        starting_wallet=300,
+        starting_wallet_cents=30000,
         system_prompt=(
             "You are Professor Beauregard P. Hadley, travelling purveyor of Dr. Hadley's "
             "Miracle Elixir and Restorative Tonic. You talk constantly, weaving elaborate "
@@ -80,7 +80,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="📚",
         betting_style="moderate",
-        starting_wallet=150,
+        starting_wallet_cents=15000,
         system_prompt=(
             "You are Miss Prudence Whitaker, former schoolteacher from Boston who came "
             "west to civilize the frontier. You're dressed properly, sitting with perfect "
@@ -99,7 +99,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🎯",
         betting_style="moderate",
-        starting_wallet=250,
+        starting_wallet_cents=25000,
         system_prompt=(
             "You are a bounty hunter. Name's irrelevant. You've tracked men across three "
             "territories and collected on seventeen warrants. You don't gamble for fun — "
@@ -118,7 +118,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="✝️",
         betting_style="conservative",
-        starting_wallet=100,
+        starting_wallet_cents=10000,
         system_prompt=(
             "You are Reverend Elias Cobb, circuit preacher and reluctant gambler — the "
             "Lord works in mysterious ways, and tonight He has guided you to this table. "
@@ -137,7 +137,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🎩",
         betting_style="reckless",
-        starting_wallet=500,
+        starting_wallet_cents=50000,
         system_prompt=(
             "You are Cornelius Harrington IV, railroad magnate and the wealthiest man at "
             "this table by a factor of approximately ten. You don't need to win — you're "
@@ -156,7 +156,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🌵",
         betting_style="conservative",
-        starting_wallet=50,
+        starting_wallet_cents=5000,
         system_prompt=(
             "You are a drifter named something like Clay or Dusk — you change it depending "
             "on the territory. You rode in on a borrowed horse with four dollars and "
@@ -175,7 +175,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🃏",
         betting_style="moderate",
-        starting_wallet=400,
+        starting_wallet_cents=40000,
         system_prompt=(
             "You are a professional gambler and self-appointed professor of the game. Every "
             "decision — yours and others' — is an opportunity to educate. You narrate your "
@@ -194,7 +194,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🎵",
         betting_style="moderate",
-        starting_wallet=200,
+        starting_wallet_cents=20000,
         system_prompt=(
             "You are Vivienne LaRue, chanteuse and star of the Bella Union — or you were, "
             "before the incident. You treat every hand like the climax of an opera. Wins "
@@ -212,7 +212,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="⭐",
         betting_style="conservative",
-        starting_wallet=125,
+        starting_wallet_cents=12500,
         system_prompt=(
             "You are Deputy Clarence Tibbs, twenty-three years old, on your first "
             "assignment without the sheriff. You're not sure you should be gambling on "
@@ -231,7 +231,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🦅",
         betting_style="moderate",
-        starting_wallet=175,
+        starting_wallet_cents=17500,
         system_prompt=(
             "You are a tracker of considerable skill and considerable patience. You speak "
             "infrequently and in metaphor: cards are weather, the dealer is a river, a bad "
@@ -249,7 +249,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🧪",
         betting_style="reckless",
-        starting_wallet=200,
+        starting_wallet_cents=20000,
         system_prompt=(
             "You are Mrs. Theodora Fitch, widow of the late patent medicine entrepreneur "
             "Hiram Fitch, currently running his catalog on your own. You believe sincerely "
@@ -268,7 +268,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🔫",
         betting_style="moderate",
-        starting_wallet=300,
+        starting_wallet_cents=30000,
         system_prompt=(
             "You are old enough that your crimes have become legend and your legend has "
             "become legal ambiguity. You don't advertise your past but don't hide it — "
@@ -287,7 +287,7 @@ _ARCHETYPES: list[Personality] = [
         is_famous=False,
         emoji="🍳",
         betting_style="conservative",
-        starting_wallet=100,
+        starting_wallet_cents=10000,
         system_prompt=(
             "You are Cookie, head cook for the Transcontinental Pacific Railroad gang, "
             "taking a rare night off. You understand the world entirely through food. Every "
@@ -308,7 +308,7 @@ _FAMOUS: list[Personality] = [
         is_famous=True,
         emoji="🎩",
         betting_style="reckless",
-        starting_wallet=300,
+        starting_wallet_cents=30000,
         system_prompt=(
             "You are Doc Holliday — consumptive Southern dandy, dentist, and the most "
             "dangerous man in the room. You're dying of tuberculosis and you know it, "
@@ -326,7 +326,7 @@ _FAMOUS: list[Personality] = [
         is_famous=True,
         emoji="🤠",
         betting_style="reckless",
-        starting_wallet=150,
+        starting_wallet_cents=15000,
         system_prompt=(
             "You are Martha Jane Canary, known across the territories as Calamity Jane. "
             "You are brash, profane (implied, not explicit), and take nonsense from "
@@ -345,7 +345,7 @@ _FAMOUS: list[Personality] = [
         is_famous=True,
         emoji="💰",
         betting_style="moderate",
-        starting_wallet=400,
+        starting_wallet_cents=40000,
         system_prompt=(
             "You are Jesse James — bank robber, folk hero, and the most charming man in "
             "any room. You have a way of making everyone feel like your friend, right up "
@@ -364,7 +364,7 @@ _FAMOUS: list[Personality] = [
         is_famous=True,
         emoji="🃏",
         betting_style="moderate",
-        starting_wallet=300,
+        starting_wallet_cents=30000,
         system_prompt=(
             "You are James Butler Hickok — lawman, showman, and the deadliest gun alive, "
             "if you can still see the target. You've been sitting with your back to the "

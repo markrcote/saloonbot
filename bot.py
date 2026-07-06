@@ -13,6 +13,7 @@ import redis.asyncio
 import redis.exceptions
 from nextcord.ext import commands, tasks
 
+from cardgames.money import dollars_to_cents, format_cents
 from wwnames.wwnames import WildWestNames
 
 _wwnames = WildWestNames()
@@ -279,7 +280,10 @@ class BlackjackCog(commands.Cog):
                 if amount <= 0:
                     await message.channel.send("⚠️ Bet amount must be positive.")
                     return
-                await self.send_command(sanitize_username(message.author.name), game, command, amount=amount)
+                await self.send_command(
+                    sanitize_username(message.author.name), game, command,
+                    amount=dollars_to_cents(amount)
+                )
             except ValueError:
                 await message.channel.send("⚠️ Invalid bet amount. Usage: bet <amount>")
         else:
@@ -374,7 +378,7 @@ class BlackjackCog(commands.Cog):
             for p in g['players']:
                 npc_tag = f" ({p['npc_type']}/{p['personality']})" if p['is_npc'] else ""
                 hand_str = ' '.join(p['hand']) if p['hand'] else '—'
-                desc_lines.append(f"**{p['name']}**{npc_tag} | {hand_str} | Bet: ${p['bet']}")
+                desc_lines.append(f"**{p['name']}**{npc_tag} | {hand_str} | Bet: ${format_cents(p['bet_cents'])}")
             if g.get('players_waiting'):
                 waiting = ', '.join(p['name'] for p in g['players_waiting'])
                 desc_lines.append(f"Waiting: {waiting}")
@@ -392,7 +396,7 @@ class BlackjackCog(commands.Cog):
         for npc in data.get('npcs', []):
             status = f"in game `{str(npc['current_game_id'])[:8]}`" if npc.get('current_game_id') else "idle"
             npc_lines.append(
-                f"**{npc['name']}** ({npc['personality_name']}) | ${npc['wallet']:.0f} | {status}"
+                f"**{npc['name']}** ({npc['personality_name']}) | ${format_cents(npc['wallet_cents'])} | {status}"
             )
         embeds.append(nextcord.Embed(
             title="NPC Roster",
@@ -416,9 +420,9 @@ class BlackjackCog(commands.Cog):
             f"**Fame:** {fame}",
             f"**Games joined:** {games_played}",
             f"**Hands played:** {stats.get('hands_played', 0)}",
-            f"**Total won:** ${stats.get('total_won', 0):.2f}",
-            f"**Total lost:** ${stats.get('total_lost', 0):.2f}",
-            f"**Biggest win:** ${stats.get('biggest_win', 0):.2f}",
+            f"**Total won:** ${format_cents(stats.get('total_won_cents', 0))}",
+            f"**Total lost:** ${format_cents(stats.get('total_lost_cents', 0))}",
+            f"**Biggest win:** ${format_cents(stats.get('biggest_win_cents', 0))}",
         ]
         embed = nextcord.Embed(
             title=f"🌟 {player_name}'s Saloon Record",
@@ -431,7 +435,7 @@ class BlackjackCog(commands.Cog):
         """Format and send wallet info as an ephemeral followup."""
         target = data.get('target', '?')
         kind = data.get('kind')
-        balance = data.get('balance')
+        balance = data.get('balance_cents')
 
         if kind is None:
             await interaction.followup.send(
@@ -441,7 +445,7 @@ class BlackjackCog(commands.Cog):
 
         kind_label = "Player" if kind == 'player' else "NPC"
         await interaction.followup.send(
-            f"💰 **{target}** ({kind_label}): **${balance:.2f}**", ephemeral=True
+            f"💰 **{target}** ({kind_label}): **${format_cents(balance)}**", ephemeral=True
         )
 
     async def _handle_wallet_set_response(self, interaction, data):
@@ -477,6 +481,7 @@ class BlackjackCog(commands.Cog):
                             description="Set any player's or NPC's wallet to an exact amount (admin only)",
                             default_member_permissions=nextcord.Permissions(administrator=True))
     async def set_wallet(self, interaction: nextcord.Interaction, target: str, amount: int):
+        """amount is entered in dollars; converted to cents before publishing."""
         await interaction.response.defer(ephemeral=True)
         request_id = str(uuid.uuid4())
         self._pending_setwallet_interactions[request_id] = interaction
@@ -486,7 +491,7 @@ class BlackjackCog(commands.Cog):
             'request_id': request_id,
             'target': target,
             'mode': 'set',
-            'amount': amount,
+            'amount': dollars_to_cents(amount),
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -499,7 +504,7 @@ class BlackjackCog(commands.Cog):
                             description="Adjust any player's or NPC's wallet by a delta (admin only)",
                             default_member_permissions=nextcord.Permissions(administrator=True))
     async def give_chips(self, interaction: nextcord.Interaction, target: str, amount: int):
-        """Positive amount adds chips; negative takes them away."""
+        """Positive amount adds chips; negative takes them away. amount is in dollars."""
         await interaction.response.defer(ephemeral=True)
         request_id = str(uuid.uuid4())
         self._pending_setwallet_interactions[request_id] = interaction
@@ -509,7 +514,7 @@ class BlackjackCog(commands.Cog):
             'request_id': request_id,
             'target': target,
             'mode': 'adjust',
-            'amount': amount,
+            'amount': dollars_to_cents(amount),
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -832,7 +837,7 @@ class BlackjackCog(commands.Cog):
 
     @nextcord.slash_command(name="bet", guild_ids=GUILD_IDS)
     async def place_bet(self, interaction: nextcord.Interaction, amount: int):
-        """Place a bet in the current game."""
+        """Place a bet in the current game. amount is entered in dollars."""
         game = self.find_game_by_interaction(interaction)
         if not game:
             await interaction.send("⚠️ No game currently in progress.")
@@ -842,7 +847,9 @@ class BlackjackCog(commands.Cog):
             await interaction.send("⚠️ Game is not active.")
             return
 
-        await self.send_command(sanitize_username(interaction.user.name), game, "bet", amount=amount)
+        await self.send_command(
+            sanitize_username(interaction.user.name), game, "bet", amount=dollars_to_cents(amount)
+        )
         await interaction.send(f"💵 Placing bet of ${amount}...")
 
     @nextcord.slash_command(name="hit", guild_ids=GUILD_IDS)
@@ -955,14 +962,14 @@ class BlackjackCog(commands.Cog):
                 request_id = data.get("request_id")
                 interaction = self._pending_wallet_interactions.pop(request_id, None)
                 if interaction:
-                    balance = data.get("balance")
+                    balance = data.get("balance_cents")
                     if balance is None:
                         await interaction.followup.send(
                             "No record found. Join a game and place a bet first!", ephemeral=True
                         )
                     else:
                         await interaction.followup.send(
-                            f"💰 Your wad: **${balance:.2f}**", ephemeral=True
+                            f"💰 Your wad: **${format_cents(balance)}**", ephemeral=True
                         )
             elif data.get("event_type") == "wallet_info":
                 request_id = data.get("request_id")
@@ -1042,7 +1049,7 @@ class BlackjackCog(commands.Cog):
                 logging.debug(f"Got unknown message from channel {message['channel']}: {message}")
 
     async def send_command(self, player_name, game, cmd, **kwargs):
-        extra = f" ${kwargs['amount']}" if 'amount' in kwargs else ""
+        extra = f" ${format_cents(kwargs['amount'])}" if 'amount' in kwargs else ""
         logging.info(f"[{game.game_id[:8]}] Player {player_name!r}: {cmd}{extra}")
         message = {
             "player": player_name,

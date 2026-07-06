@@ -10,6 +10,7 @@ from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
 from .llm_client import create_llm_client, LLMError
 from .llm_npc import LLMBlackjackNPC
+from .money import format_cents
 from .personalities import get_personality, get_random as get_random_personality
 from .simple_npc import SimpleBlackjackNPC
 from wwnames.wwnames import WildWestNames
@@ -85,7 +86,7 @@ class Casino:
         return self._llm_client
 
     def get_wallet(self, player):
-        """Get a player's wallet balance (routes to users or npcs table)."""
+        """Get a player's wallet balance in cents (routes to users or npcs table)."""
         if self.db is None:
             return 0
         npc_db_id = getattr(player, 'npc_db_id', None)
@@ -93,8 +94,8 @@ class Casino:
             return self.db.get_npc_wallet(npc_db_id) or 0
         return self.db.get_user_wallet(player.name) or 0
 
-    def update_wallet(self, player, amount):
-        """Update a player's wallet (routes to users or npcs table).
+    def update_wallet(self, player, amount_cents):
+        """Update a player's wallet by an amount in cents (routes to users or npcs table).
 
         Returns True on success, False if the update would make the wallet negative.
         """
@@ -102,8 +103,8 @@ class Casino:
             return True
         npc_db_id = getattr(player, 'npc_db_id', None)
         if getattr(player, 'is_npc', False) and npc_db_id is not None:
-            return self.db.update_npc_wallet(npc_db_id, amount)
-        return self.db.update_wallet(player.name, amount)
+            return self.db.update_npc_wallet(npc_db_id, amount_cents)
+        return self.db.update_wallet(player.name, amount_cents)
 
     def _log_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
         """Write an LLM usage record to DB. Silently ignores failures."""
@@ -154,12 +155,12 @@ class Casino:
         parts = raw.split(' ', 1)
         return parts[1] if len(parts) > 1 else raw
 
-    def record_hand_result(self, player, won, lost):
-        """Record a hand outcome for a human player. Fire-and-forget; ignores failures."""
+    def record_hand_result(self, player, won_cents, lost_cents):
+        """Record a hand outcome (in cents) for a human player. Fire-and-forget; ignores failures."""
         if getattr(player, 'is_npc', False) or self.db is None:
             return
         try:
-            self.db.update_player_stats(player.name, won=won, lost=lost)
+            self.db.update_player_stats(player.name, won_cents=won_cents, lost_cents=lost_cents)
         except Exception as e:
             logging.warning(f"Failed to update player stats for {player.name}: {e}")
 
@@ -207,12 +208,15 @@ class Casino:
                 'request_id': request_id,
                 'target': target,
                 'kind': kind,
-                'balance': balance,
+                'balance_cents': balance,
             }
         )
 
-    def _handle_set_wallet(self, request_id, target, mode, amount):
-        """Handle a set_wallet request: resolve target, apply change, publish wallet_set."""
+    def _handle_set_wallet(self, request_id, target, mode, amount_cents):
+        """Handle a set_wallet request: resolve target, apply change, publish wallet_set.
+
+        amount_cents is in cents.
+        """
         kind, ref = self._resolve_wallet_target(target)
         ok = False
         message = ''
@@ -221,27 +225,27 @@ class Casino:
         if kind is None:
             message = f"No player or NPC named '{target}' found."
         elif mode == 'set':
-            if amount < 0:
+            if amount_cents < 0:
                 message = "Cannot set wallet to a negative amount."
             else:
                 try:
                     if kind == 'player':
-                        ok = self.db.set_user_wallet(ref, amount)
+                        ok = self.db.set_user_wallet(ref, amount_cents)
                     else:
-                        ok = self.db.set_npc_wallet(ref, amount)
+                        ok = self.db.set_npc_wallet(ref, amount_cents)
                 except Exception as e:
                     logging.error(f"Error setting wallet for {target}: {e}")
                 if ok:
-                    new_balance = float(amount)
-                    message = f"Wallet set to ${amount:.2f}."
+                    new_balance = int(amount_cents)
+                    message = f"Wallet set to ${format_cents(amount_cents)}."
                 else:
                     message = "Failed to update wallet."
         elif mode == 'adjust':
             try:
                 if kind == 'player':
-                    ok = self.db.update_wallet(ref, amount)
+                    ok = self.db.update_wallet(ref, amount_cents)
                 else:
-                    ok = self.db.update_npc_wallet(ref, amount)
+                    ok = self.db.update_npc_wallet(ref, amount_cents)
             except Exception as e:
                 logging.error(f"Error adjusting wallet for {target}: {e}")
             if ok:
@@ -250,7 +254,9 @@ class Casino:
                                    else self.db.get_npc_wallet(ref))
                 except Exception:
                     pass
-                message = f"Wallet adjusted by ${amount:+.2f}. New balance: ${new_balance:.2f}."
+                sign = '+' if amount_cents >= 0 else '-'
+                message = (f"Wallet adjusted by {sign}${format_cents(abs(amount_cents))}. "
+                           f"New balance: ${format_cents(new_balance)}.")
             else:
                 message = "Adjustment would make balance negative — rejected."
         else:
@@ -263,7 +269,7 @@ class Casino:
                 'request_id': request_id,
                 'target': target,
                 'kind': kind,
-                'new_balance': new_balance,
+                'new_balance_cents': new_balance,
                 'ok': ok,
                 'message': message,
             }
@@ -305,7 +311,7 @@ class Casino:
                 'event_type': 'player_wallet',
                 'request_id': request_id,
                 'player': player_name,
-                'balance': balance,
+                'balance_cents': balance,
             }
         )
 
@@ -362,7 +368,7 @@ class Casino:
         for _ in range(to_create):
             personality = get_random_personality()
             name = self._generate_npc_name()
-            self.db.create_npc(name, personality.name, personality.starting_wallet)
+            self.db.create_npc(name, personality.name, personality.starting_wallet_cents)
         logging.info(f"NPC roster: created {to_create} NPCs (roster was {current})")
 
     def _get_or_create_npcs(self, n, exclude_personalities):
@@ -379,7 +385,7 @@ class Casino:
                     'name': personality.name,
                     'personality_name': personality.name,
                     'backstory': '',
-                    'wallet': personality.starting_wallet,
+                    'wallet_cents': personality.starting_wallet_cents,
                 })
             return result
 
@@ -390,14 +396,14 @@ class Casino:
             cur_excl = set(exclude_personalities) | {r['personality_name'] for r in available}
             personality = get_random_personality(exclude_names=cur_excl)
             name = self._generate_npc_name()
-            npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet)
+            npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet_cents)
             backstory = self._generate_backstory(npc_id, personality, name)
             available.append({
                 'id': npc_id,
                 'name': name,
                 'personality_name': personality.name,
                 'backstory': backstory,
-                'wallet': personality.starting_wallet,
+                'wallet_cents': personality.starting_wallet_cents,
             })
 
         return available[:n]
@@ -933,8 +939,10 @@ class Casino:
                         player = all_players.get(player_name)
                         if player is not None:
                             self.update_wallet(player, bet_amount)
-                            refunded.append(f"{player_name} (${bet_amount:.2f})")
-                            logging.info(f"[{game_id[:8]}] Refunded ${bet_amount:.2f} to {player_name}")
+                            refunded.append(f"{player_name} (${format_cents(bet_amount)})")
+                            logging.info(
+                                f"[{game_id[:8]}] Refunded ${format_cents(bet_amount)} to {player_name}"
+                            )
                     if refunded:
                         game.output("🛑 Game called early! Returning bets: " + ", ".join(refunded))
                     else:

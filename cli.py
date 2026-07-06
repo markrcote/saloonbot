@@ -7,6 +7,8 @@ import uuid
 import aioconsole
 import redis.asyncio as redis
 
+from cardgames.money import dollars_to_cents
+
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
@@ -91,7 +93,7 @@ class CasinoCli:
                 except ValueError:
                     logging.error("Invalid bet amount. Usage: bet <amount>")
                     continue
-                await self.send_player_action("bet", {"amount": amount})
+                await self.send_player_action("bet", {"amount": dollars_to_cents(amount)})
             else:
                 await self.send_player_action(cmd)
 

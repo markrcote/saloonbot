@@ -147,6 +147,9 @@ def hunt(n_runs, filter_classes=None):
         test_e2e.TestWalletBalance,
         test_e2e.TestMultiplePlayers,
         test_e2e.TestNPCBots,
+        test_e2e.TestAdminWallet,
+        test_e2e.TestNPCLimits,
+        test_e2e.TestManualNPC,
     ]
     if filter_classes:
         all_classes = [c for c in all_classes if c.__name__ in filter_classes]

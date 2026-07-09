@@ -433,26 +433,26 @@ class TestWalletAdmin(unittest.TestCase):
 
     def test_set_user_wallet_absolute(self):
         self.db.add_user("Maverick")
-        self.assertTrue(self.db.set_user_wallet("Maverick", 555.0))
-        self.assertEqual(self.db.get_user_wallet("Maverick"), 555.0)
+        self.assertTrue(self.db.set_user_wallet("Maverick", 55500))
+        self.assertEqual(self.db.get_user_wallet("Maverick"), 55500)
 
     def test_set_user_wallet_missing_user_returns_false(self):
-        self.assertFalse(self.db.set_user_wallet("Ghost", 100.0))
+        self.assertFalse(self.db.set_user_wallet("Ghost", 10000))
 
     def test_set_npc_wallet_absolute(self):
-        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 200)
-        self.assertTrue(self.db.set_npc_wallet(npc_id, 42))
-        self.assertEqual(self.db.get_npc_wallet(npc_id), 42.0)
+        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 20000)
+        self.assertTrue(self.db.set_npc_wallet(npc_id, 4200))
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 4200)
 
     def test_set_npc_wallet_missing_npc_returns_false(self):
-        self.assertFalse(self.db.set_npc_wallet(9999, 50))
+        self.assertFalse(self.db.set_npc_wallet(9999, 5000))
 
     def test_find_npc_by_name_case_insensitive(self):
-        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 200)
+        npc_id = self.db.create_npc("Dusty Pete", "Prospector", 20000)
         found = self.db.find_npc_by_name("dusty pete")
         self.assertIsNotNone(found)
         self.assertEqual(found["id"], npc_id)
-        self.assertEqual(found["wallet"], 200)
+        self.assertEqual(found["wallet_cents"], 20000)
 
     def test_find_npc_by_name_miss_returns_none(self):
         self.assertIsNone(self.db.find_npc_by_name("Nobody"))
@@ -462,7 +462,7 @@ class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 1000.0
+        mock_casino.get_wallet.return_value = 100000
         mock_casino.update_wallet.return_value = True
         self.game = Blackjack(game_id="test_game", casino=mock_casino)
         # Set up a mock deck
@@ -478,15 +478,15 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.join(Player("Player 1"))
         self.game.tick()  # WAITING -> BETTING
         player = self.game.players[0]
-        self.game.bet(player, 10)
-        self.assertEqual(self.game.bets[player.name], 10)
+        self.game.bet(player, 1000)
+        self.assertEqual(self.game.bets[player.name], 1000)
 
     def test_bet_invalid_in_waiting_state(self):
         self.assertEqual(self.game.state, HandState.WAITING)
         self.game.join(Player("Player 1"))
         player = self.game.players_waiting[0]
         with self.assertRaises(CardGameError):
-            self.game.bet(player, 10)
+            self.game.bet(player, 1000)
 
     def test_bet_below_minimum_rejected(self):
         self.game.join(Player("Player 1"))
@@ -506,7 +506,7 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.join(Player("Player 1"))
         self.game.tick()  # WAITING -> BETTING
         player = self.game.players[0]
-        self.game.bet(player, 10)
+        self.game.bet(player, 1000)
         self.game.tick()  # All bet -> PLAYING
         self.assertEqual(self.game.state, HandState.PLAYING)
 
@@ -515,7 +515,7 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.join(Player("Player 2"))
         self.game.tick()  # WAITING -> BETTING
         player1 = self.game.players[0]
-        self.game.bet(player1, 10)
+        self.game.bet(player1, 1000)
         # Simulate timeout
         self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 1
         self.game.tick()  # Timeout -> bench non-betting player -> PLAYING
@@ -548,16 +548,16 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.join(Player("Player 1"))
         self.game.tick()  # WAITING -> BETTING
         player = self.game.players[0]
-        self.game.bet(player, 10)
+        self.game.bet(player, 1000)
         with self.assertRaises(CardGameError):
-            self.game.bet(player, 20)
+            self.game.bet(player, 2000)
 
 
 class TestBlackjackPayouts(unittest.TestCase):
     def test_winner_gets_2x_bet(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -572,22 +572,22 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.join(Player("Player 1"))
         game.tick()  # WAITING -> BETTING
         player = game.players[0]
-        game.bet(player, 20)
+        game.bet(player, 2000)
         game.tick()  # BETTING -> PLAYING
         game.stand(player)
         game.tick()  # DEALER_TURN
         game.tick()  # RESOLVING -> BETWEEN_HANDS
 
-        # Find the payout call (should be 40 = 2x bet)
+        # Find the payout call (should be 4000 = 2x bet)
         payout_calls = [call for call in mock_casino.update_wallet.call_args_list
                         if call[0][1] > 0]  # Positive amount = payout
         self.assertEqual(len(payout_calls), 1)
-        self.assertEqual(payout_calls[0][0][1], 40)
+        self.assertEqual(payout_calls[0][0][1], 4000)
 
     def test_tie_returns_bet(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -599,22 +599,22 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.join(Player("Player 1"))
         game.tick()  # WAITING -> BETTING
         player = game.players[0]
-        game.bet(player, 20)
+        game.bet(player, 2000)
         game.tick()  # BETTING -> PLAYING
         game.stand(player)
         game.tick()  # DEALER_TURN
         game.tick()  # RESOLVING -> BETWEEN_HANDS
 
-        # Find the return call (should be 20 = bet returned)
+        # Find the return call (should be 2000 = bet returned)
         payout_calls = [call for call in mock_casino.update_wallet.call_args_list
                         if call[0][1] > 0]  # Positive amount = payout
         self.assertEqual(len(payout_calls), 1)
-        self.assertEqual(payout_calls[0][0][1], 20)
+        self.assertEqual(payout_calls[0][0][1], 2000)
 
     def test_loser_forfeits_bet(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -628,7 +628,7 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.join(Player("Player 1"))
         game.tick()  # WAITING -> BETTING
         player = game.players[0]
-        game.bet(player, 20)
+        game.bet(player, 2000)
         game.tick()  # BETTING -> PLAYING
         game.stand(player)
         game.tick()  # DEALER_TURN
@@ -642,7 +642,7 @@ class TestBlackjackPayouts(unittest.TestCase):
     def test_leave_during_betting_returns_bet(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -651,19 +651,19 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.join(Player("Player 1"))
         game.tick()  # WAITING -> BETTING
         player = game.players[0]
-        game.bet(player, 20)
+        game.bet(player, 2000)
         game.leave(player)
 
         # Bet should be returned — cards haven't been dealt yet
         refund_calls = [call for call in mock_casino.update_wallet.call_args_list
                         if call[0][1] > 0]  # Positive amount = refund
         self.assertEqual(len(refund_calls), 1)
-        self.assertEqual(refund_calls[0][0][1], 20)
+        self.assertEqual(refund_calls[0][0][1], 2000)
 
     def test_leave_during_playing_forfeits_bet(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -672,7 +672,7 @@ class TestBlackjackPayouts(unittest.TestCase):
         game.join(Player("Player 1"))
         game.tick()  # WAITING -> BETTING
         player = game.players[0]
-        game.bet(player, 20)
+        game.bet(player, 2000)
         game.tick()  # BETTING -> PLAYING (new_hand)
         game.leave(player)
 
@@ -685,7 +685,7 @@ class TestBlackjackPayouts(unittest.TestCase):
         """Return a game with 3 players mid-hand (Alice=0, Bob=1, Carol=2), current=Bob."""
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
 
@@ -694,9 +694,9 @@ class TestBlackjackPayouts(unittest.TestCase):
         for p in (alice, bob, carol):
             game.join(p)
         game.tick()  # WAITING -> BETTING
-        game.bet(alice, 10)
-        game.bet(bob, 10)
-        game.bet(carol, 10)
+        game.bet(alice, 1000)
+        game.bet(bob, 1000)
+        game.bet(carol, 1000)
         # Control the deck: dealer gets 5+6=11, players get safe hands; no blackjack possible
         safe = [Card("H", 5), Card("H", 6), Card("H", 7), Card("H", 8),
                 Card("H", 3), Card("H", 4), Card("H", 5), Card("H", 6)]
@@ -794,7 +794,7 @@ class TestNPCDepartureHook(unittest.TestCase):
     def _make_game(self):
         mock_casino = MagicMock()
         mock_casino.db = MagicMock()
-        mock_casino.get_wallet.return_value = 200.0
+        mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
         hook = MagicMock()
@@ -1001,7 +1001,7 @@ class TestSerialization(unittest.TestCase):
         # Set up a game in progress
         game.join(Player("Player1"))
         game.tick()  # WAITING -> BETTING
-        game.bet(game.players[0], 20)
+        game.bet(game.players[0], 2000)
         game.tick()  # BETTING -> PLAYING
 
         # Serialize
@@ -1012,7 +1012,7 @@ class TestSerialization(unittest.TestCase):
         self.assertEqual(game_data['state'], "playing")
         self.assertEqual(game_data['current_player_idx'], 0)
         self.assertIn('Player1', game_data['bets'])
-        self.assertEqual(game_data['bets']['Player1'], 20)
+        self.assertEqual(game_data['bets']['Player1'], 2000)
 
         # Deserialize into new game
         restored_game = Blackjack.from_dict(game_data, mock_casino)
@@ -1023,7 +1023,7 @@ class TestSerialization(unittest.TestCase):
         self.assertEqual(restored_game.current_player_idx, 0)
         self.assertEqual(len(restored_game.players), 1)
         self.assertEqual(restored_game.players[0].name, "Player1")
-        self.assertEqual(restored_game.bets['Player1'], 20)
+        self.assertEqual(restored_game.bets['Player1'], 2000)
 
         # Verify hands were restored
         self.assertEqual(len(restored_game.dealer.hand), 2)
@@ -1157,7 +1157,7 @@ class TestSimpleBlackjackNPC(unittest.TestCase):
         self.npc = SimpleBlackjackNPC("TestNPC")
 
     def test_bet_returns_minimum(self):
-        self.assertEqual(self.npc.decide_bet(5, 100, 200), 5)
+        self.assertEqual(self.npc.decide_bet(500, 10000, 20000), 500)
 
     def test_hit_on_low_score_strong_dealer(self):
         """NPC should hit when score is below 17 against strong dealer card."""
@@ -1285,7 +1285,7 @@ class TestNPCBlackjackIntegration(unittest.TestCase):
         self.assertNotIn("NPCFriend", self.game.bets)
         self.assertNotIn("Human", self.game.bets)
         # Human places bet; NPC will auto-bet on next tick
-        self.game.bet(human, 10)
+        self.game.bet(human, 1000)
         self.game.tick()  # BETTING: NPC auto-bets, all bets in -> PLAYING
         self.assertIn("NPCFriend", self.game.bets)
         self.assertEqual(self.game.state, HandState.PLAYING)
@@ -1536,23 +1536,23 @@ class TestLLMBlackjackNPC(unittest.TestCase):
 
     def test_decide_bet_returns_none_on_first_call(self):
         npc = self._make_npc('{"amount": 20, "quip": "Bettin big pardner."}')
-        result = npc.decide_bet(5, 100, 200)
+        result = npc.decide_bet(500, 10000, 20000)
         self.assertIsNone(result)
 
     def test_decide_bet_returns_amount_after_future_resolves(self):
         npc = self._make_npc('{"amount": 20, "quip": "Bettin big pardner."}')
-        npc.decide_bet(5, 100, 200)
+        npc.decide_bet(500, 10000, 20000)
         npc._pending_bet_future.result(timeout=2.0)
-        result = npc.decide_bet(5, 100, 200)
-        self.assertEqual(result, 20)
+        result = npc.decide_bet(500, 10000, 20000)
+        self.assertEqual(result, 2000)
         self.assertEqual(npc.last_quip, "Bettin big pardner.")
 
     def test_decide_bet_clamps_to_range(self):
         npc = self._make_npc('{"amount": 9999, "quip": "All in!"}')
-        npc.decide_bet(5, 100, 200)
+        npc.decide_bet(500, 10000, 20000)
         npc._pending_bet_future.result(timeout=2.0)
-        result = npc.decide_bet(5, 100, 200)
-        self.assertEqual(result, 100)
+        result = npc.decide_bet(500, 10000, 20000)
+        self.assertEqual(result, 10000)
 
     def test_decide_bet_fallback_on_bad_json(self):
         from cardgames.llm_npc import LLMBlackjackNPC
@@ -1562,11 +1562,11 @@ class TestLLMBlackjackNPC(unittest.TestCase):
         personality = get_personality("The Grizzled Prospector")
         npc = LLMBlackjackNPC("TestNPC", personality, mock_llm)
         with self.assertLogs('cardgames.llm_npc', level='WARNING'):
-            npc.decide_bet(5, 100, 200)
+            npc.decide_bet(500, 10000, 20000)
             npc._pending_bet_future.result(timeout=2.0)
-        result = npc.decide_bet(5, 100, 200)
+        result = npc.decide_bet(500, 10000, 20000)
         # Fallback is min_bet
-        self.assertEqual(result, 5)
+        self.assertEqual(result, 500)
 
     def test_shutdown_calls_executor_shutdown(self):
         """shutdown() must call executor shutdown to release thread resources."""
@@ -1752,12 +1752,12 @@ class TestNPCPersistence(unittest.TestCase):
 
     def test_create_and_retrieve_npc(self):
         db = self._make_sqlite_db()
-        npc_id = db.create_npc("Billy Thornton", "The Grizzled Prospector", 150)
+        npc_id = db.create_npc("Billy Thornton", "The Grizzled Prospector", 15000)
         self.assertIsNotNone(npc_id)
         npc = db.get_npc_by_id(npc_id)
         self.assertEqual(npc['name'], "Billy Thornton")
         self.assertEqual(npc['personality_name'], "The Grizzled Prospector")
-        self.assertEqual(npc['wallet'], 150)
+        self.assertEqual(npc['wallet_cents'], 15000)
         self.assertIsNone(npc['current_game_id'])
 
     def test_get_available_npcs_excludes_in_game(self):
@@ -1821,9 +1821,9 @@ class TestNPCPersistence(unittest.TestCase):
 
     def test_personality_starting_wallet(self):
         from cardgames.personalities import get_personality
-        self.assertEqual(get_personality("The Railroad Baron").starting_wallet, 500)
-        self.assertEqual(get_personality("The Half-Broke Drifter").starting_wallet, 50)
-        self.assertEqual(get_personality("The Card Sharp").starting_wallet, 400)
+        self.assertEqual(get_personality("The Railroad Baron").starting_wallet_cents, 50000)
+        self.assertEqual(get_personality("The Half-Broke Drifter").starting_wallet_cents, 5000)
+        self.assertEqual(get_personality("The Card Sharp").starting_wallet_cents, 40000)
 
     def test_npc_base_class_has_db_fields(self):
         npc = SimpleBlackjackNPC("TestNPC", npc_db_id=42, backstory="Old timer")
@@ -2078,22 +2078,22 @@ class TestM3PlayerStatsFame(unittest.TestCase):
     def test_update_and_get_player_stats(self):
         db = self._make_sqlite_db()
         db.add_user("alice")
-        db.update_player_stats("alice", won=50.0, lost=0.0)
-        db.update_player_stats("alice", won=0.0, lost=20.0)
+        db.update_player_stats("alice", won_cents=5000, lost_cents=0)
+        db.update_player_stats("alice", won_cents=0, lost_cents=2000)
         stats = db.get_player_stats("alice")
         self.assertEqual(stats['hands_played'], 2)
-        self.assertEqual(stats['total_won'], 50.0)
-        self.assertEqual(stats['total_lost'], 20.0)
-        self.assertEqual(stats['biggest_win'], 50.0)
+        self.assertEqual(stats['total_won_cents'], 5000)
+        self.assertEqual(stats['total_lost_cents'], 2000)
+        self.assertEqual(stats['biggest_win_cents'], 5000)
 
     def test_biggest_win_tracks_maximum(self):
         db = self._make_sqlite_db()
         db.add_user("bob")
-        db.update_player_stats("bob", won=10.0, lost=0.0)
-        db.update_player_stats("bob", won=75.0, lost=0.0)
-        db.update_player_stats("bob", won=30.0, lost=0.0)
+        db.update_player_stats("bob", won_cents=1000, lost_cents=0)
+        db.update_player_stats("bob", won_cents=7500, lost_cents=0)
+        db.update_player_stats("bob", won_cents=3000, lost_cents=0)
         stats = db.get_player_stats("bob")
-        self.assertEqual(stats['biggest_win'], 75.0)
+        self.assertEqual(stats['biggest_win_cents'], 7500)
 
     def test_get_player_stats_returns_none_for_unknown_player(self):
         db = self._make_sqlite_db()
@@ -2114,8 +2114,8 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         mock_db = MagicMock()
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         player = Player("dave")
-        casino.record_hand_result(player, won=50.0, lost=0.0)
-        mock_db.update_player_stats.assert_called_once_with("dave", won=50.0, lost=0.0)
+        casino.record_hand_result(player, won_cents=5000, lost_cents=0)
+        mock_db.update_player_stats.assert_called_once_with("dave", won_cents=5000, lost_cents=0)
 
     def test_record_hand_result_skips_npc(self):
         from cardgames.casino import Casino
@@ -2123,14 +2123,14 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         mock_db = MagicMock()
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         npc = SimpleBlackjackNPC("Bot")
-        casino.record_hand_result(npc, won=50.0, lost=0.0)
+        casino.record_hand_result(npc, won_cents=5000, lost_cents=0)
         mock_db.update_player_stats.assert_not_called()
 
     def test_record_hand_result_no_db_silent(self):
         from cardgames.casino import Casino
         casino = Casino(redis_host="localhost", redis_port=6379, db=None)
         player = Player("eve")
-        casino.record_hand_result(player, won=10.0, lost=0.0)  # should not raise
+        casino.record_hand_result(player, won_cents=1000, lost_cents=0)  # should not raise
 
     def test_record_hand_result_db_failure_silent(self):
         from cardgames.casino import Casino
@@ -2138,7 +2138,7 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         mock_db.update_player_stats.side_effect = Exception("DB down")
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         player = Player("frank")
-        casino.record_hand_result(player, won=10.0, lost=0.0)  # should not raise
+        casino.record_hand_result(player, won_cents=1000, lost_cents=0)  # should not raise
 
     # --- Fame in table context ---
 
@@ -2146,8 +2146,8 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         from cardgames.casino import Casino
         mock_db = MagicMock()
         mock_db.get_player_stats.return_value = {'games_played': 20, 'hands_played': 50,
-                                                 'total_won': 200.0, 'total_lost': 100.0,
-                                                 'biggest_win': 75.0, 'last_seen': None}
+                                                 'total_won_cents': 20000, 'total_lost_cents': 10000,
+                                                 'biggest_win_cents': 7500, 'last_seen': None}
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         game = MagicMock()
         human = Player("grace")

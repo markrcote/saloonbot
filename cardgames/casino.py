@@ -753,7 +753,7 @@ class Casino:
                     'npc_type': getattr(p, 'npc_type', None),
                     'personality': getattr(getattr(p, 'personality', None), 'name', None),
                     'hand': serialize_hand(p.hand),
-                    'bet': game.bets.get(p.name, 0),
+                    'bet_cents': game.bets.get(p.name, 0),
                 }
             games_debug.append({
                 'game_id': game_id,

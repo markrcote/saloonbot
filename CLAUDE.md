@@ -97,13 +97,13 @@ Discord Users
 - `get_stats` - Request a player's statistics; bot sends with `request_id` and `player`, server responds via `player_stats`
 - `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
 - `lookup_wallet {target}` - Admin wallet lookup by name; searches users first then NPCs (case-insensitive); bot sends with `request_id`, server responds via `wallet_info`
-- `set_wallet {target, mode:'set'|'adjust', amount}` - Admin wallet edit; resolves target via `_resolve_wallet_target`; rejects set < 0 and adjusts that would go negative; responds via `wallet_set`
+- `set_wallet {target, mode:'set'|'adjust', amount}` - Admin wallet edit; `amount` is in cents; resolves target via `_resolve_wallet_target`; rejects set < 0 and adjusts that would go negative; responds via `wallet_set`
 - `npc_limits {min?, max?}` - Admin; no args = view current limits; with args = validate, persist via `set_setting`, update `Casino.npc_min/max`, respond via `npc_limits` event
 - `stop_game` - Terminate a game immediately (admin; requires `game_id`); unresolved bets are not returned
 - `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
 
 **Player actions** (`event_type: "player_action"`):
-- `join`, `leave`, `bet` (with `amount`), `hit`, `stand` (see `Action` in `blackjack.py`; double-down and split are not implemented)
+- `join`, `leave`, `bet` (with `amount`, in cents), `hit`, `stand` (see `Action` in `blackjack.py`; double-down and split are not implemented)
 
 **NPC actions** (`event_type: "npc_action"`, requires `game_id`):
 - `add_npc` - Add roster NPC(s) to a game; optional `count` (default 1); capped at `MAX_NPCS_PER_TABLE`
@@ -115,10 +115,10 @@ Discord Users
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
 - `usage_stats` response - includes `request_id` and `rows` list (each entry: `purpose`, `model`, `total_input`, `total_output`, `call_count`)
 - `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, and the `dirty_games` list (admin diagnostics)
-- `player_stats` response - includes `request_id`, `player`, and `stats` (games/hands played, totals, biggest win, last seen) or null if no record
-- `player_wallet` response - includes `request_id`, `player`, and `balance` (float or null if no record)
-- `wallet_info` response - includes `request_id`, `target`, `kind` (`'player'`|`'npc'`|`None`), and `balance` (float or null)
-- `wallet_set` response - includes `request_id`, `target`, `kind`, `new_balance`, `ok` (bool), and `message`
+- `player_stats` response - includes `request_id`, `player`, and `stats` (games/hands played, `total_won_cents`/`total_lost_cents`/`biggest_win_cents`, last seen) or null if no record
+- `player_wallet` response - includes `request_id`, `player`, and `balance_cents` (int or null if no record)
+- `wallet_info` response - includes `request_id`, `target`, `kind` (`'player'`|`'npc'`|`None`), and `balance_cents` (int or null)
+- `wallet_set` response - includes `request_id`, `target`, `kind`, `new_balance_cents`, `ok` (bool), and `message`
 - `npc_limits` response - includes `request_id`, `min`, `max`, `ok` (bool), and `message`
 
 ### Key Modules
@@ -133,13 +133,14 @@ Discord Users
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
 - `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive) and a `get_setting`/`set_setting` runtime config store
 - `sqlite_database.py` - SQLite alternative to `database.py`; same interface (including the wallet/settings helpers above), used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
+- `money.py` - Dollars/cents conversion helpers (`dollars_to_cents`, `cents_to_dollars`, `format_cents`); all wallet/bet/stats values are stored and passed internally as integer cents — dollars only appear at human-facing boundaries (Discord slash command args, plain-text chat commands, CLI input, LLM prompt text)
 
 **Database tables:**
 - `schema_version` - Single-row table tracking the last applied migration index
-- `users` - Stores player usernames and wallet balances (default $200)
+- `users` - Stores player usernames and wallet balances as `wallet_cents` (default 20000, i.e. $200)
 - `games` - Persists game state (deck, hands, bets, timers) for server restart recovery
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
-- `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), wallet, current_game_id
+- `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), `wallet_cents`, current_game_id
 - `llm_usage` - Per-call LLM token tracking: purpose, model, input/output tokens, npc_id, game_id
 - `settings` - Runtime key/value config store (`setting_key`/`setting_value`); accessed via `get_setting`/`set_setting`
 
@@ -162,8 +163,8 @@ Discord Users
 | DISCORD_TOKEN | - | Bot token; see secret resolution below |
 | DISCORD_GUILDS | - | Comma-separated guild IDs; see secret resolution below |
 | SALOONBOT_DEBUG | - | Set to enable debug logging |
-| BLACKJACK_MIN_BET | 5 | Minimum bet amount in dollars |
-| BLACKJACK_MAX_BET | 100 | Maximum bet amount in dollars |
+| BLACKJACK_MIN_BET | 500 | Minimum bet amount in cents |
+| BLACKJACK_MAX_BET | 10000 | Maximum bet amount in cents |
 | BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |

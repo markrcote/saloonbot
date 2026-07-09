@@ -412,7 +412,7 @@ class TestBlackjackGame(EndToEndTestCase):
             all_updates = self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
 
             # Place a bet
-            self.place_bet(game_id, 'Player1', 10)
+            self.place_bet(game_id, 'Player1', 1000)
 
             # Wait for player's initial hand to be dealt
             all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='Player1 has'))
@@ -449,7 +449,7 @@ class TestBlackjackGame(EndToEndTestCase):
             all_updates = self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
 
             # Place a bet
-            self.place_bet(game_id, 'HitPlayer', 10)
+            self.place_bet(game_id, 'HitPlayer', 1000)
 
             # Wait for player's initial hand to be dealt
             # (message like "HitPlayer has <card>, <card>")
@@ -483,7 +483,7 @@ class TestServerRestart(EndToEndTestCase):
                          predicate=lambda row: row[0] == 'betting', timeout=5),
             "Game should reach betting state"
         )
-        self.place_bet(game_id, 'PersistPlayer', 20)
+        self.place_bet(game_id, 'PersistPlayer', 2000)
 
         # With a deterministic deck the dealer cannot get blackjack; expect PLAYING directly
         result = self.poll_db(
@@ -500,12 +500,12 @@ class TestServerRestart(EndToEndTestCase):
         bet_result = self.poll_db(
             "SELECT bets_json FROM games WHERE game_id = %s",
             (game_id,),
-            predicate=lambda row: json.loads(row[0]).get('PersistPlayer') == 20
+            predicate=lambda row: json.loads(row[0]).get('PersistPlayer') == 2000
         )
         self.assertIsNotNone(bet_result, "Bet should be saved in database")
         bets = json.loads(bet_result[0])
         self.assertIn('PersistPlayer', bets)
-        self.assertEqual(bets['PersistPlayer'], 20)
+        self.assertEqual(bets['PersistPlayer'], 2000)
 
         # Restart server
         self._stop_server()
@@ -587,7 +587,7 @@ class TestServerRestart(EndToEndTestCase):
                          predicate=lambda row: row[0] == 'betting', timeout=5),
             "Game should reach betting state"
         )
-        self.place_bet(game_id, 'BetPlayer', 25)
+        self.place_bet(game_id, 'BetPlayer', 2500)
 
         # Deterministic deck: dealer can't get blackjack, game must reach PLAYING
         self.assertIsNotNone(
@@ -598,20 +598,20 @@ class TestServerRestart(EndToEndTestCase):
 
         # Wallet should be decremented by the bet amount
         after_bet = self.poll_db(
-            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            "SELECT wallet_cents FROM users WHERE username = 'BetPlayer'",
             (),
-            predicate=lambda row: float(row[0]) == 175.0
+            predicate=lambda row: row[0] == 17500
         )
-        self.assertIsNotNone(after_bet, "Wallet should be decremented to 175 after $25 bet")
+        self.assertIsNotNone(after_bet, "Wallet should be decremented to 17500 cents after a 2500-cent bet")
 
         # Bet must be persisted while the hand is live (game is in PLAYING state)
         before_restart = self.poll_db(
             "SELECT bets_json FROM games WHERE game_id = %s",
             (game_id,),
-            predicate=lambda row: json.loads(row[0]).get('BetPlayer') == 25
+            predicate=lambda row: json.loads(row[0]).get('BetPlayer') == 2500
         )
         self.assertIsNotNone(before_restart, "Bet should be saved in database before restart")
-        self.assertEqual(json.loads(before_restart[0]).get('BetPlayer'), 25)
+        self.assertEqual(json.loads(before_restart[0]).get('BetPlayer'), 2500)
 
         # Restart server
         self._stop_server()
@@ -624,22 +624,22 @@ class TestServerRestart(EndToEndTestCase):
         )
         self.assertIsNotNone(result, "Game should still exist after restart")
         bets = json.loads(result[0])
-        self.assertEqual(bets.get('BetPlayer'), 25, "Bet should be preserved")
+        self.assertEqual(bets.get('BetPlayer'), 2500, "Bet should be preserved")
 
         # Wallet must not be double-decremented
         after_restart = self.poll_db(
-            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            "SELECT wallet_cents FROM users WHERE username = 'BetPlayer'",
             ()
         )
-        self.assertEqual(float(after_restart[0]), 175.0,
+        self.assertEqual(after_restart[0], 17500,
                          "Wallet should not be decremented again on restart")
 
         # Verify wallet wasn't double-decremented
         after_restart = self.poll_db(
-            "SELECT wallet FROM users WHERE username = 'BetPlayer'",
+            "SELECT wallet_cents FROM users WHERE username = 'BetPlayer'",
             ()
         )
-        self.assertEqual(float(after_restart[0]), 175.0,
+        self.assertEqual(after_restart[0], 17500,
                          "Wallet should not be decremented again")
 
     def test_list_games_returns_active_games(self):
@@ -807,11 +807,11 @@ class TestWalletBalance(EndToEndTestCase):
                 "Game should reach betting state",
             )
 
-            row = self.poll_db("SELECT wallet FROM users WHERE username = %s", (player_name,))
+            row = self.poll_db("SELECT wallet_cents FROM users WHERE username = %s", (player_name,))
             self.assertIsNotNone(row)
-            starting = float(row[0])
+            starting = row[0]
 
-            bet = 10
+            bet = 1000
             # Drain any buffered messages accumulated while we were polling.
             self.collect_messages(pubsub, timeout=0.5)
             self.place_bet(game_id, player_name, bet)
@@ -834,13 +834,13 @@ class TestWalletBalance(EndToEndTestCase):
                 expected = starting - bet        # loss: bet escrowed, nothing returned
 
             result = self.poll_db(
-                "SELECT wallet FROM users WHERE username = %s",
+                "SELECT wallet_cents FROM users WHERE username = %s",
                 (player_name,),
-                predicate=lambda row: float(row[0]) == expected
+                predicate=lambda row: row[0] == expected
             )
             self.assertIsNotNone(
                 result,
-                f"Wallet should be ${expected:.2f} after hand. Messages: {messages}"
+                f"Wallet should be {expected} cents after hand. Messages: {messages}"
             )
         finally:
             pubsub.close()
@@ -858,8 +858,8 @@ class TestMultiplePlayers(EndToEndTestCase):
             self.join_player(game_id, 'Beta')
 
             self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
-            self.place_bet(game_id, 'Alpha', 10)
-            self.place_bet(game_id, 'Beta', 10)
+            self.place_bet(game_id, 'Alpha', 1000)
+            self.place_bet(game_id, 'Beta', 1000)
 
             first_turn = self.collect_messages(
                 pubsub, timeout=5, stop_on=["you're up", 'dust settles']
@@ -904,7 +904,7 @@ class TestNPCBots(EndToEndTestCase):
 
             self.collect_messages(pubsub, timeout=5, stop_on='Place your bets')
             # NPC auto-bets via tick loop; human places their bet
-            self.place_bet(game_id, 'HumanPlayer', 10)
+            self.place_bet(game_id, 'HumanPlayer', 1000)
 
             # Wait until it's the human's turn (NPC plays first and is handled automatically).
             # Dealer blackjack resolves the hand immediately with no player turns — valid outcome.
@@ -966,19 +966,19 @@ class TestAdminWallet(EndToEndTestCase):
         pubsub.close()
         return None
 
-    def _seed_player(self, name, wallet=200.0):
+    def _seed_player(self, name, wallet_cents=20000):
         cursor = self.db.cursor()
         cursor.execute(
-            "INSERT INTO users (username, wallet) VALUES (%s, %s)", (name, wallet)
+            "INSERT INTO users (username, wallet_cents) VALUES (%s, %s)", (name, wallet_cents)
         )
         self.db.commit()
         cursor.close()
 
-    def _seed_npc(self, name, wallet=100.0):
+    def _seed_npc(self, name, wallet_cents=10000):
         cursor = self.db.cursor()
         cursor.execute(
-            "INSERT INTO npcs (name, personality_name, backstory, wallet) VALUES (%s, %s, %s, %s)",
-            (name, 'Grizzled Prospector', '', wallet)
+            "INSERT INTO npcs (name, personality_name, backstory, wallet_cents) VALUES (%s, %s, %s, %s)",
+            (name, 'Grizzled Prospector', '', wallet_cents)
         )
         self.db.commit()
         npc_id = cursor.lastrowid
@@ -987,21 +987,21 @@ class TestAdminWallet(EndToEndTestCase):
 
     def test_lookup_wallet_player(self):
         """lookup_wallet returns correct balance for a seeded player."""
-        self._seed_player('LookupPlayer', wallet=250.0)
+        self._seed_player('LookupPlayer', wallet_cents=25000)
         resp = self._casino_request('lookup_wallet', target='LookupPlayer')
         self.assertIsNotNone(resp, "Should receive wallet_info response")
         self.assertEqual(resp['event_type'], 'wallet_info')
         self.assertEqual(resp['kind'], 'player')
-        self.assertAlmostEqual(resp['balance'], 250.0, places=2)
+        self.assertEqual(resp['balance_cents'], 25000)
 
     def test_lookup_wallet_npc(self):
         """lookup_wallet finds an NPC by name (case-insensitive)."""
-        self._seed_npc('Jebediah Kane', wallet=75.0)
+        self._seed_npc('Jebediah Kane', wallet_cents=7500)
         resp = self._casino_request('lookup_wallet', target='jebediah kane')
         self.assertIsNotNone(resp, "Should receive wallet_info response")
         self.assertEqual(resp['event_type'], 'wallet_info')
         self.assertEqual(resp['kind'], 'npc')
-        self.assertAlmostEqual(resp['balance'], 75.0, places=2)
+        self.assertEqual(resp['balance_cents'], 7500)
 
     def test_lookup_wallet_unknown(self):
         """lookup_wallet returns kind=None for an unknown target."""
@@ -1009,53 +1009,53 @@ class TestAdminWallet(EndToEndTestCase):
         self.assertIsNotNone(resp, "Should receive wallet_info response")
         self.assertEqual(resp['event_type'], 'wallet_info')
         self.assertIsNone(resp['kind'])
-        self.assertIsNone(resp['balance'])
+        self.assertIsNone(resp['balance_cents'])
 
     def test_set_wallet_player(self):
         """set_wallet (mode=set) sets a player's wallet to an absolute amount."""
-        self._seed_player('SetPlayer', wallet=200.0)
-        resp = self._casino_request('set_wallet', target='SetPlayer', mode='set', amount=500)
+        self._seed_player('SetPlayer', wallet_cents=20000)
+        resp = self._casino_request('set_wallet', target='SetPlayer', mode='set', amount=50000)
         self.assertIsNotNone(resp, "Should receive wallet_set response")
         self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
-        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('SetPlayer',))
+        row = self.poll_db("SELECT wallet_cents FROM users WHERE username = %s", ('SetPlayer',))
         self.assertIsNotNone(row)
-        self.assertAlmostEqual(float(row[0]), 500.0, places=2)
+        self.assertEqual(row[0], 50000)
 
     def test_adjust_wallet_player(self):
         """set_wallet (mode=adjust) adds chips to a player's wallet."""
-        self._seed_player('AdjustPlayer', wallet=200.0)
-        resp = self._casino_request('set_wallet', target='AdjustPlayer', mode='adjust', amount=50)
+        self._seed_player('AdjustPlayer', wallet_cents=20000)
+        resp = self._casino_request('set_wallet', target='AdjustPlayer', mode='adjust', amount=5000)
         self.assertIsNotNone(resp, "Should receive wallet_set response")
         self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
-        self.assertAlmostEqual(resp['new_balance'], 250.0, places=2)
-        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('AdjustPlayer',))
-        self.assertAlmostEqual(float(row[0]), 250.0, places=2)
+        self.assertEqual(resp['new_balance_cents'], 25000)
+        row = self.poll_db("SELECT wallet_cents FROM users WHERE username = %s", ('AdjustPlayer',))
+        self.assertEqual(row[0], 25000)
 
     def test_adjust_wallet_npc(self):
         """set_wallet (mode=adjust) adds chips to an NPC's wallet."""
-        self._seed_npc('RichNPC', wallet=100.0)
-        resp = self._casino_request('set_wallet', target='RichNPC', mode='adjust', amount=25)
+        self._seed_npc('RichNPC', wallet_cents=10000)
+        resp = self._casino_request('set_wallet', target='RichNPC', mode='adjust', amount=2500)
         self.assertIsNotNone(resp, "Should receive wallet_set response")
         self.assertTrue(resp['ok'], f"Expected ok=True, got message: {resp.get('message')}")
-        self.assertAlmostEqual(resp['new_balance'], 125.0, places=2)
+        self.assertEqual(resp['new_balance_cents'], 12500)
 
     def test_set_wallet_negative_rejected(self):
         """set_wallet (mode=set, amount<0) is rejected without touching the wallet."""
-        self._seed_player('NegPlayer', wallet=200.0)
-        resp = self._casino_request('set_wallet', target='NegPlayer', mode='set', amount=-50)
+        self._seed_player('NegPlayer', wallet_cents=20000)
+        resp = self._casino_request('set_wallet', target='NegPlayer', mode='set', amount=-5000)
         self.assertIsNotNone(resp, "Should receive wallet_set response")
         self.assertFalse(resp['ok'])
-        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('NegPlayer',))
-        self.assertAlmostEqual(float(row[0]), 200.0, places=2)
+        row = self.poll_db("SELECT wallet_cents FROM users WHERE username = %s", ('NegPlayer',))
+        self.assertEqual(row[0], 20000)
 
     def test_adjust_wallet_would_go_negative(self):
         """set_wallet (mode=adjust) that would make balance negative is rejected."""
-        self._seed_player('PoorPlayer', wallet=50.0)
-        resp = self._casino_request('set_wallet', target='PoorPlayer', mode='adjust', amount=-100)
+        self._seed_player('PoorPlayer', wallet_cents=5000)
+        resp = self._casino_request('set_wallet', target='PoorPlayer', mode='adjust', amount=-10000)
         self.assertIsNotNone(resp, "Should receive wallet_set response")
         self.assertFalse(resp['ok'])
-        row = self.poll_db("SELECT wallet FROM users WHERE username = %s", ('PoorPlayer',))
-        self.assertAlmostEqual(float(row[0]), 50.0, places=2)
+        row = self.poll_db("SELECT wallet_cents FROM users WHERE username = %s", ('PoorPlayer',))
+        self.assertEqual(row[0], 5000)
 
 
 class TestNPCLimits(EndToEndTestCase):

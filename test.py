@@ -2346,5 +2346,80 @@ class TestNPCAutofill(unittest.TestCase):
         casino._spawn_npcs_into_game.assert_not_called()
 
 
+class TestNPCWalletReplenishment(unittest.TestCase):
+    """M5: idle NPC wallet replenishment (_replenish_npc_wallets)."""
+
+    def _make_casino(self, db):
+        with patch('cardgames.casino.redis.Redis'):
+            casino = Casino(redis_host='localhost', redis_port=6379, db=db)
+        casino._last_wallet_replenish = 0  # force past the throttle window
+        return casino
+
+    def setUp(self):
+        self.db = SqliteDatabase(':memory:')
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_no_op_when_no_db(self):
+        casino = self._make_casino(db=None)
+        casino._replenish_npc_wallets()  # should not raise
+
+    def test_throttled_within_interval(self):
+        casino = self._make_casino(db=self.db)
+        casino._last_wallet_replenish = time.time()  # recent, still inside the window
+        npc_id = self.db.create_npc("Idle Pete", "The Grizzled Prospector", 100)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._replenish_npc_wallets()
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 100)
+
+    def test_skips_npc_seated_at_a_table(self):
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Seated Sam", "The Grizzled Prospector", 100)
+        self.db.set_npc_game(npc_id, "some-game-id")
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._replenish_npc_wallets()
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 100)
+
+    def test_skips_when_wallet_already_at_target(self):
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Flush Fred", "The Grizzled Prospector", 15000)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._replenish_npc_wallets()
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 15000)
+
+    def test_unknown_personality_skipped_without_error(self):
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Mystery Man", "Not A Real Personality", 100)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._replenish_npc_wallets()  # should not raise
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 100)
+
+    def test_probability_miss_leaves_wallet_unchanged(self):
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Unlucky Pete", "The Grizzled Prospector", 100)
+        with patch('cardgames.casino.random.random', return_value=0.999999):
+            casino._replenish_npc_wallets()
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 100)
+
+    def test_successful_roll_nudges_wallet_by_gap_fraction(self):
+        """Grizzled Prospector targets 15000c; from 100c the gap is 14900c, so a
+        successful roll should add round(0.2 * 14900) = 2980c."""
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Lucky Pete", "The Grizzled Prospector", 100)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._replenish_npc_wallets()
+        self.assertEqual(self.db.get_npc_wallet(npc_id), 100 + 2980)
+
+    def test_repeated_cycles_approach_target_without_overshooting(self):
+        casino = self._make_casino(db=self.db)
+        npc_id = self.db.create_npc("Persistent Pete", "The Grizzled Prospector", 100)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            for _ in range(200):
+                casino._last_wallet_replenish = 0  # bypass throttle each cycle
+                casino._replenish_npc_wallets()
+        self.assertLessEqual(self.db.get_npc_wallet(npc_id), 15000)
+
+
 if __name__ == '__main__':
     unittest.main()

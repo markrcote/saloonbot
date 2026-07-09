@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 import time
 import uuid
 
@@ -27,6 +28,13 @@ DEFAULT_NPC_AUTOFILL_MIN = 0   # auto-fill off by default
 DEFAULT_NPC_AUTOFILL_MAX = 4
 MAX_NPCS_PER_TABLE = 6         # hard cap regardless of limits
 AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
+
+WALLET_REPLENISH_INTERVAL = int(os.environ.get("WALLET_REPLENISH_INTERVAL", "300"))
+REPLENISH_PROB_MIN = 0.15         # chance per cycle at the low wealth reference point
+REPLENISH_PROB_RANGE = 0.35       # added on top of REPLENISH_PROB_MIN at the high reference point
+REPLENISH_PROB_LOW_CENTS = 7500   # $75 reference point (not the personalities' actual minimum)
+REPLENISH_PROB_HIGH_CENTS = 30000  # $300 reference point (not the personalities' actual maximum)
+REPLENISH_GAP_FRACTION = 0.2      # fraction of the remaining gap closed on a successful roll
 
 SALOON_NAME = os.environ.get("SALOON_NAME", "The Rusty Spur")
 SALOON_TOWN = os.environ.get("SALOON_TOWN", "Redemption, Texas")
@@ -68,6 +76,7 @@ class Casino:
         self.npc_min = DEFAULT_NPC_AUTOFILL_MIN
         self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
+        self._last_wallet_replenish = 0
 
     @property
     def llm_client(self):
@@ -647,6 +656,52 @@ class Casino:
         if changed:
             self._mark_dirty(game_id)
 
+    def _replenish_npc_wallets(self):
+        """Nudge idle (unseated) NPCs' wallets toward their personality's starting wallet.
+
+        Throttled to at most once per WALLET_REPLENISH_INTERVAL seconds; runs
+        regardless of whether any games are active, mirroring _autofill_npcs's
+        per-game throttling shape but at the Casino level.
+        """
+        if self.db is None:
+            return
+
+        now = time.time()
+        if now - self._last_wallet_replenish < WALLET_REPLENISH_INTERVAL:
+            return
+        self._last_wallet_replenish = now
+
+        span = REPLENISH_PROB_HIGH_CENTS - REPLENISH_PROB_LOW_CENTS
+        for npc in self.db.get_all_npcs():
+            if npc.get('current_game_id') is not None:
+                continue
+
+            try:
+                personality = get_personality(npc['personality_name'])
+            except ValueError:
+                continue
+
+            target = personality.starting_wallet_cents
+            wallet = npc['wallet_cents']
+            if wallet >= target:
+                continue
+
+            prob = REPLENISH_PROB_MIN + REPLENISH_PROB_RANGE * (target - REPLENISH_PROB_LOW_CENTS) / span
+            if random.random() >= prob:
+                continue
+
+            delta = round(REPLENISH_GAP_FRACTION * (target - wallet))
+            if delta <= 0:
+                continue
+            try:
+                self.db.update_npc_wallet(npc['id'], delta)
+                logging.info(
+                    f"Wallet replenishment: {npc['name']!r} +{delta}c "
+                    f"({wallet}c -> {wallet + delta}c, target {target}c)"
+                )
+            except Exception as e:
+                logging.error(f"Error replenishing wallet for NPC {npc['name']!r}: {e}")
+
     def _handle_npc_limits(self, request_id, min_val=None, max_val=None):
         """Handle an npc_limits request: view or update autofill min/max."""
         ok = True
@@ -983,6 +1038,8 @@ class Casino:
             logging.debug(f"Got unknown message: {data}")
 
     def _tick_games(self):
+        self._replenish_npc_wallets()
+
         for game_id, game in list(self.games.items()):
             try:
                 game.tick()

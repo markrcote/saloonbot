@@ -87,6 +87,7 @@ class EndToEndTestCase(unittest.TestCase):
     """Base test case that manages the server process."""
 
     server_process = None
+    EXTRA_ENV = {}  # subclasses may override to inject extra server env vars
 
     @classmethod
     def setUpClass(cls):
@@ -124,6 +125,7 @@ class EndToEndTestCase(unittest.TestCase):
             'LLM_TIMEOUT': '1',
             'PYTHONUNBUFFERED': '1',
         })
+        env.update(cls.EXTRA_ENV)
 
         fd, cls._server_log_path = tempfile.mkstemp(suffix='.log', prefix='saloonbot_server_')
         cls._server_log_fh = os.fdopen(fd, 'w')
@@ -1321,6 +1323,65 @@ class TestManualNPC(EndToEndTestCase):
         count_after = self._npc_count_in_game(debug_after, game_id)
         self.assertEqual(count_after, count_before - 1,
                          f"Expected NPC count to decrease by 1, was {count_before} → {count_after}")
+
+
+class TestNPCWalletReplenishment(EndToEndTestCase):
+    """E2E test for M5: idle NPC wallet replenishment pass."""
+
+    # Run the replenishment pass on (almost) every server tick instead of every 5 minutes.
+    EXTRA_ENV = {'WALLET_REPLENISH_INTERVAL': '1'}
+
+    def setUp(self):
+        super().setUp()
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npcs")
+        self.db.commit()
+        cursor.close()
+
+    def _seed_npc(self, name, personality_name, wallet_cents):
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO npcs (name, personality_name, backstory, wallet_cents) VALUES (%s, %s, %s, %s)",
+            (name, personality_name, '', wallet_cents)
+        )
+        self.db.commit()
+        npc_id = cursor.lastrowid
+        cursor.close()
+        return npc_id
+
+    def test_idle_npc_wallet_trends_toward_target(self):
+        """An idle, broke NPC's wallet should grow toward its personality's starting wallet.
+
+        Uses "The Railroad Baron" ($500 / 50000c starting wallet), whose high wealth
+        puts it near the top of the replenishment probability range (~81% per cycle),
+        so the pass is very likely to fire within a few 1s-throttled ticks.
+        """
+        npc_id = self._seed_npc('Broke Baron', 'The Railroad Baron', 100)
+
+        result = self.poll_db(
+            "SELECT wallet_cents FROM npcs WHERE id = %s",
+            (npc_id,),
+            predicate=lambda row: row[0] > 100,
+            timeout=20,
+        )
+        self.assertIsNotNone(result, "Idle NPC's wallet should increase via replenishment")
+        self.assertLessEqual(result[0], 50000, "Wallet should never exceed the personality's starting wallet")
+
+    def test_npc_seated_at_table_is_not_replenished(self):
+        """An NPC currently seated at a table must not be touched by the replenishment pass."""
+        game_id = self.create_game()
+        npc_id = self._seed_npc('Seated Baron', 'The Railroad Baron', 100)
+        cursor = self.db.cursor()
+        cursor.execute("UPDATE npcs SET current_game_id = %s WHERE id = %s", (game_id, npc_id))
+        self.db.commit()
+        cursor.close()
+
+        # Give the replenishment pass several cycles to (not) act.
+        time.sleep(5)
+
+        row = self.poll_db("SELECT wallet_cents FROM npcs WHERE id = %s", (npc_id,))
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], 100, "Seated NPC's wallet should be untouched by replenishment")
 
 
 if __name__ == "__main__":

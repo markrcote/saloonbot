@@ -4,7 +4,7 @@
 
 [VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
-**Current state:** M1–M4 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, and every NPC-departure path routes through one shared hook. Still missing: broke NPCs stay poor forever, NPCs have no memory of individual sessions, no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play). **M5 (NPC Wallet Replenishment) is next up.**
+**Current state:** M1–M5 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, and idle broke NPCs slowly rebuild their wallets between sessions. Still missing: NPCs have no memory of individual sessions, no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play). **M6 (NPC Memory & Context Window) is next up.**
 
 **What exists that can be reused:**
 - `personalities.py` — 19 rich personality definitions with system prompts
@@ -82,7 +82,7 @@
 
 ---
 
-## Milestone 5: NPC Wallet Replenishment
+## Milestone 5: NPC Wallet Replenishment ✓ DONE
 
 **Goal:** NPCs who go broke and leave a table aren't stuck poor forever — idle NPCs slowly rebuild their stake between sessions, at a rate that reflects who they are.
 
@@ -91,7 +91,7 @@
 - Each cycle, for every NPC currently **not** seated at any table (`npcs.current_game_id IS NULL` — `get_available_npcs()` already selects exactly this set) whose `wallet_cents < personality.starting_wallet_cents`: roll `P = 0.15 + 0.35 * (starting_wallet_cents - 7500) / (30000 - 7500)`, i.e. linearly scaled against reference points of $75/$300 (7500/30000 cents) — not the actual min/max across personalities, which spans $50–$500 (5000–50000 cents), so the resulting probability range is wider than the illustrative 15%–50% (roughly 11%–81% at the actual extremes). Confirmed with the user: use the raw formula unclamped, no cap applied. A "drifter" archetype (7500) gets ~15% chance per 5-minute cycle, a "rancher" (30000) gets 50%. On success, nudge `wallet_cents += round(0.2 * (starting_wallet_cents - wallet_cents))` — 20% of the remaining gap, asymptotically approaching the target and never exceeding it (no separate cap check needed; the formula can't overshoot).
 - Only idle NPCs replenish. NPCs actively seated at a table are governed purely by game outcomes — no passive top-up while playing, so wins/losses still matter at the table.
 - Wealth signal: reuse `Personality.starting_wallet_cents` directly for both the replenishment target and the probability driver — no dedicated `npcs.wealth` column. It already varies across archetypes (a designed-in wealth proxy), needs no new migration, and avoids the fragility of trying to extract a "wealth" signal from a 2–4 sentence LLM-generated backstory that may never mention money at all (which would also mean a new LLM call/purpose tag just to classify it). If backstory-level variance within the same personality ever matters, that's a future refinement, not a blocker here.
-- Files: `cardgames/casino.py` (new throttled pass inside `_tick_games()`, `WALLET_REPLENISH_INTERVAL` constant, `_last_wallet_replenish` timestamp)
+- Files: `cardgames/casino.py` (new throttled pass inside `_tick_games()`, `WALLET_REPLENISH_INTERVAL` constant, `_last_wallet_replenish` timestamp). `WALLET_REPLENISH_INTERVAL` is env-overridable (default 300s) so e2e tests can shrink it rather than waiting 5 real minutes.
 
 **Verification:** Drive an NPC's wallet to zero (or set it manually), remove it from all tables, let the replenishment pass run several cycles (or fast-forward `_last_wallet_replenish`/`WALLET_REPLENISH_INTERVAL` in a test), confirm wallet_cents trends upward toward its personality's `starting_wallet_cents` and stops there; confirm a wallet is untouched while its NPC is seated at a table.
 

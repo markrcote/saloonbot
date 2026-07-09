@@ -168,6 +168,7 @@ Discord Users
 | BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
+| WALLET_REPLENISH_INTERVAL | 300 | Seconds between idle-NPC wallet replenishment passes |
 | LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
 | ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy; see secret resolution below |
 | OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy; see secret resolution below |

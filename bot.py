@@ -14,6 +14,7 @@ import redis.exceptions
 from nextcord.ext import commands, tasks
 
 from cardgames.money import dollars_to_cents, format_cents
+from changelog import parse_changelog, select_recent_entries
 from wwnames.wwnames import WildWestNames
 
 _wwnames = WildWestNames()
@@ -307,6 +308,28 @@ class BlackjackCog(commands.Cog):
             color=0xc8a96e,
         )
         embed.add_field(name="Active Tables", value=tables_str, inline=False)
+        await interaction.send(embed=embed)
+
+    @nextcord.slash_command(name="changelog", guild_ids=GUILD_IDS,
+                            description="Show what's new at the saloon")
+    async def show_changelog(self, interaction: nextcord.Interaction):
+        try:
+            entries = select_recent_entries(parse_changelog())
+        except OSError:
+            entries = []
+        if not entries:
+            await interaction.send("No changelog available.", ephemeral=True)
+            return
+        embed = nextcord.Embed(
+            title=f"🤠 {SALOON_NAME} — What's New",
+            color=0xc8a96e,
+        )
+        for entry in entries:
+            embed.add_field(
+                name=f"{entry.date.isoformat()} — {entry.title}",
+                value=entry.body,
+                inline=False,
+            )
         await interaction.send(embed=embed)
 
     @nextcord.slash_command(name="usage", guild_ids=GUILD_IDS,
@@ -705,6 +728,7 @@ class BlackjackCog(commands.Cog):
             "`/wad` — Check your own wallet balance (private)\n"
             "`/stats` — View your stats and fame level\n"
             "`/saloon` — Show saloon info and active tables\n"
+            "`/changelog` — Show what's new at the saloon\n"
             "`/wwname` — Generate a random Old West name"
         )
         admin_cmds = (

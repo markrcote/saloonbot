@@ -1,8 +1,12 @@
 import json
+import os
+import tempfile
 import time
 import unittest
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
+from changelog import parse_changelog, select_recent_entries, ChangelogEntry
 from cardgames.blackjack import (
     Action, Blackjack, HandState, InvalidActionError, InvalidBetError,
     card_to_str, str_to_card, serialize_hand, deserialize_hand,
@@ -2419,6 +2423,75 @@ class TestNPCWalletReplenishment(unittest.TestCase):
                 casino._last_wallet_replenish = 0  # bypass throttle each cycle
                 casino._replenish_npc_wallets()
         self.assertLessEqual(self.db.get_npc_wallet(npc_id), 15000)
+
+
+class TestChangelog(unittest.TestCase):
+
+    def _write(self, text):
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False)
+        f.write(text)
+        f.close()
+        self.addCleanup(os.remove, f.name)
+        return f.name
+
+    def test_parse_changelog(self):
+        path = self._write(
+            "# Changelog\n\n"
+            "Intro text.\n\n"
+            "## 2026-07-09 — NPCs rebuild their stakes\n\n"
+            "- Broke NPCs slowly earn back their stake.\n"
+            "- Fixed a stuck-NPC bug.\n\n"
+            "## 2026-06-01 — Saloon identity\n\n"
+            "- The saloon now has a name.\n"
+        )
+        entries = parse_changelog(path)
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].date, date(2026, 7, 9))
+        self.assertEqual(entries[0].title, "NPCs rebuild their stakes")
+        self.assertIn("Broke NPCs slowly earn back their stake.", entries[0].body)
+        self.assertEqual(entries[1].date, date(2026, 6, 1))
+        self.assertEqual(entries[1].title, "Saloon identity")
+
+    def test_parse_changelog_ignores_malformed_headers(self):
+        path = self._write(
+            "# Changelog\n\n"
+            "## Not a dated entry\n\n"
+            "- Should be skipped.\n\n"
+            "## 2026-07-09 — Real entry\n\n"
+            "- Should be kept.\n"
+        )
+        entries = parse_changelog(path)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].title, "Real entry")
+
+    def _entries(self, *days_ago):
+        today = date(2026, 7, 18)
+        return [
+            ChangelogEntry(today - timedelta(days=d), f"Entry {i}", "body")
+            for i, d in enumerate(days_ago)
+        ], today
+
+    def test_select_recent_entries_empty(self):
+        self.assertEqual(select_recent_entries([]), [])
+
+    def test_select_recent_entries_falls_back_to_min_count(self):
+        # All entries are older than a week, so fewer than 5 fall in the window;
+        # the 5-most-recent floor should kick in instead.
+        entries, today = self._entries(30, 40, 50, 60, 70, 80, 90)
+        result = select_recent_entries(entries, today=today, min_count=5, days=7)
+        self.assertEqual(len(result), 5)
+        self.assertEqual(result, entries[:5])
+
+    def test_select_recent_entries_uses_week_when_more_than_min_count(self):
+        # 6 entries fall within the last week, which beats the 5-entry floor.
+        entries, today = self._entries(0, 1, 2, 3, 4, 5, 30)
+        result = select_recent_entries(entries, today=today, min_count=5, days=7)
+        self.assertEqual(len(result), 6)
+
+    def test_select_recent_entries_boundary_is_inclusive(self):
+        entries, today = self._entries(7, 30, 40, 50, 60, 70)
+        result = select_recent_entries(entries, today=today, min_count=5, days=7)
+        self.assertIn(entries[0], result)
 
 
 if __name__ == '__main__':

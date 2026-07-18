@@ -30,6 +30,7 @@ Slash commands:
 * `/wad` — privately check your current balance (only visible to you).
 * `/stats` — view your saloon record (hands played, winnings, etc.; only visible to you).
 * `/saloon` — show the saloon's name, town, and active tables.
+* `/changelog` — show what's new at the saloon: the last 5 entries in `CHANGELOG.md`, or the last week's worth, whichever is more.
 * `/stopgame` *(admin)* — end the current game (unresolved bets are not returned).
 * `/quitgame` *(admin)* — end the current game and return all unresolved bets to players.
 * `/checkwallet <target>` *(admin)* — check any player's or NPC's wallet balance.

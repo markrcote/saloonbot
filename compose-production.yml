@@ -68,6 +68,36 @@ services:
       - mysql_data:/var/lib/mysql
     ports:
       - "3306:3306"
+  redis-exporter:
+    container_name: saloonbot-redis-exporter
+    image: oliver006/redis_exporter:latest
+    restart: always
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    logging:
+      driver: journald
+      options:
+        tag: saloonbot-redis-exporter
+  mysqld-exporter:
+    container_name: saloonbot-mysqld-exporter
+    image: prom/mysqld-exporter:latest
+    restart: always
+    command:
+      - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+    volumes:
+      - /etc/saloonbot/secrets:/run/secrets:ro
+    ports:
+      - "9104:9104"
+    depends_on:
+      - mysql
+    logging:
+      driver: journald
+      options:
+        tag: saloonbot-mysqld-exporter
 volumes:
   mysql_data:
 secrets:

@@ -90,7 +90,7 @@ services:
     image: prom/mysqld-exporter:latest
     restart: unless-stopped
     command:
-      - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+      - --config.my-cnf=/run/secrets/mysql_exporter.cnf
     volumes:
       - /etc/saloonbot/secrets:/run/secrets:ro
     ports:

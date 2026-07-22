@@ -90,9 +90,9 @@ services:
     image: prom/mysqld-exporter:latest
     restart: unless-stopped
     command:
-      - --config.my-cnf=/run/secrets/mysql_exporter.cnf
-    volumes:
-      - /etc/saloonbot/secrets:/run/secrets:ro
+      - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+    secrets:
+      - mysql_exporter_cnf
     ports:
       - "9104:9104"
     depends_on:
@@ -119,3 +119,6 @@ services:
       - com.centurylinklabs.watchtower.enable=false
 volumes:
   mysql_data:
+secrets:
+  mysql_exporter_cnf:
+    file: /etc/saloonbot/secrets/mysql_exporter.cnf

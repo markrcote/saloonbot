@@ -82,9 +82,9 @@ services:
     image: prom/mysqld-exporter:latest
     restart: always
     command:
-      - --config.my-cnf=/run/secrets/mysql_exporter.cnf
-    volumes:
-      - /etc/saloonbot/secrets:/run/secrets:ro
+      - --config.my-cnf=/run/secrets/mysql_exporter_cnf
+    secrets:
+      - mysql_exporter_cnf
     ports:
       - "9104:9104"
     depends_on:
@@ -104,3 +104,5 @@ secrets:
     file: /etc/saloonbot/secrets/anthropic_api_key
   openai_api_key:
     file: /etc/saloonbot/secrets/openai_api_key
+  mysql_exporter_cnf:
+    file: /etc/saloonbot/secrets/mysql_exporter.cnf

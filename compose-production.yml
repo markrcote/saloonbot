@@ -1,6 +1,5 @@
 services:
   saloonbot-server:
-    container_name: saloonbot-server
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -17,8 +16,9 @@ services:
       - MYSQL_PASSWORD=saloonbot_password
       - MYSQL_DATABASE=saloonbot
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
-    volumes:
-      - /etc/saloonbot/secrets:/run/secrets:ro
+    secrets:
+      - anthropic_api_key
+      - openai_api_key
     depends_on:
       - redis
       - mysql
@@ -27,7 +27,6 @@ services:
       options:
         tag: saloonbot-server
   saloonbot-bot:
-    container_name: saloonbot-bot
     build:
       context: .
       dockerfile: Dockerfile.bot
@@ -50,13 +49,11 @@ services:
       options:
         tag: saloonbot-bot
   redis:
-    container_name: saloonbot-redis
     image: redis:alpine
     restart: always
     ports:
       - "6379:6379"
   mysql:
-    container_name: saloonbot-mysql
     image: mysql:8.0
     restart: always
     environment:
@@ -69,7 +66,6 @@ services:
     ports:
       - "3306:3306"
   redis-exporter:
-    container_name: saloonbot-redis-exporter
     image: oliver006/redis_exporter:latest
     restart: always
     environment:
@@ -83,7 +79,6 @@ services:
       options:
         tag: saloonbot-redis-exporter
   mysqld-exporter:
-    container_name: saloonbot-mysqld-exporter
     image: prom/mysqld-exporter:latest
     restart: always
     command:
@@ -105,3 +100,7 @@ secrets:
     file: /etc/saloonbot/secrets/discord_token
   discord_guilds:
     file: /etc/saloonbot/secrets/discord_guilds
+  anthropic_api_key:
+    file: /etc/saloonbot/secrets/anthropic_api_key
+  openai_api_key:
+    file: /etc/saloonbot/secrets/openai_api_key

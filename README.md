@@ -221,8 +221,9 @@ All four secret files must exist (Docker Compose requires them even if empty). D
 
 To run unit tests, run:
 ```bash
-python test.py
+pytest test.py
 ```
+(`python test.py` also works, since it's a plain `unittest` suite.)
 
 ### End-to-End Tests
 

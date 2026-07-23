@@ -13,8 +13,9 @@ SaloonBot is a Discord bot that generates Old West names and provides a blackjac
 
 ### Unit Testing
 ```bash
-python test.py
+pytest test.py
 ```
+(`python test.py` still works — it's a plain `unittest` suite — but `pytest` is the standard runner and what the pre-commit hook uses.)
 
 ### End-to-End Testing
 ```bash

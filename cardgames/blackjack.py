@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import time
 from enum import Enum
 
@@ -192,6 +193,12 @@ class Blackjack(CardGame):
     DEALER_CARD_PAUSE = float(os.getenv('BLACKJACK_DEALER_CARD_PAUSE', '1.0'))
     RESULT_PAUSE = float(os.getenv('BLACKJACK_RESULT_PAUSE', '0.8'))
 
+    # Ambient tables (no human players — NPCs only) run slower, as background atmosphere
+    # rather than a game anyone's actively waiting on.
+    AMBIENT_SPEED_MULTIPLIER = float(os.getenv('BLACKJACK_AMBIENT_SPEED_MULTIPLIER', '2.0'))
+    AMBIENT_TIME_BETWEEN_HANDS_MIN = int(os.getenv('BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN', '120'))
+    AMBIENT_TIME_BETWEEN_HANDS_MAX = int(os.getenv('BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX', '300'))
+
     # Valid actions for each state
     VALID_ACTIONS = {
         HandState.WAITING: {Action.JOIN, Action.LEAVE},
@@ -226,6 +233,7 @@ class Blackjack(CardGame):
 
         self.time_last_hand_ended = None
         self.time_last_event = time.time()
+        self.time_between_hands_duration = self.TIME_BETWEEN_HANDS
 
         # Betting state
         self.bets = {}  # Player -> bet amount
@@ -238,6 +246,15 @@ class Blackjack(CardGame):
 
     def output(self, output):
         self.casino.game_output(self.game_id, output)
+
+    def _is_ambient(self):
+        """True when every seated player is an NPC — nobody's actually watching this
+        hand, so it's just background atmosphere and can run slower."""
+        return bool(self.players) and all(getattr(p, 'is_npc', False) for p in self.players)
+
+    def _pause(self, base_seconds):
+        multiplier = self.AMBIENT_SPEED_MULTIPLIER if self._is_ambient() else 1.0
+        time.sleep(base_seconds * multiplier)
 
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
@@ -462,7 +479,7 @@ class Blackjack(CardGame):
         for player in self.players:
             self.output(f"🎴 {player} has {player.hand_str()} ({self.get_score(player)})")
 
-        time.sleep(self.DRAMATIC_PAUSE)
+        self._pause(self.DRAMATIC_PAUSE)
         first_player = self.players[0]
         self.output(f"👉 {first_player}, you're up, partner. Hit or stand?")
 
@@ -509,11 +526,12 @@ class Blackjack(CardGame):
         self._dirty = True
         self.output("✨ ~*~ The dust settles... ~*~ ✨")
         self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
+        ambient = self._is_ambient()
         for player in self.players:
-            time.sleep(self.RESULT_PAUSE)
+            self._pause(self.RESULT_PAUSE)
             self._resolve_player(player)
         for player in self.departed_players:
-            time.sleep(self.RESULT_PAUSE)
+            self._pause(self.RESULT_PAUSE)
             self._resolve_player(player, departed=True)
 
         self.bets = {}
@@ -521,6 +539,12 @@ class Blackjack(CardGame):
         self.current_player_idx = None
         self.state = HandState.BETWEEN_HANDS
         self.time_last_hand_ended = time.time()
+        if ambient:
+            self.time_between_hands_duration = random.uniform(
+                self.AMBIENT_TIME_BETWEEN_HANDS_MIN, self.AMBIENT_TIME_BETWEEN_HANDS_MAX
+            )
+        else:
+            self.time_between_hands_duration = self.TIME_BETWEEN_HANDS
 
     def hit(self, player):
         self._check_playing_state()
@@ -601,12 +625,12 @@ class Blackjack(CardGame):
 
         self.output(f"👀 Dealer's showing {self.dealer.hand[0]}.")
         self.output("🔄 Dealer flips the hole card...")
-        time.sleep(self.DEALER_CARD_PAUSE)
+        self._pause(self.DEALER_CARD_PAUSE)
         self.output(f"🎴 Dealer's got {self.dealer.hand_str()}")
         logging.info(f"[{self.game_id[:8]}] Dealer reveals {self.dealer.hand_str()} ({self.get_score(self.dealer)})")
 
         while self.get_score(self.dealer) < 17:
-            time.sleep(self.DEALER_CARD_PAUSE)
+            self._pause(self.DEALER_CARD_PAUSE)
             self.deal(self.dealer)
             self.output(f"🃏 Dealer draws... {self.dealer.hand[-1]}")
             logging.info(
@@ -778,7 +802,7 @@ class Blackjack(CardGame):
     def _tick_dealer_turn(self):
         """Handle DEALER_TURN state: execute dealer's turn."""
         self.output("👁️ All eyes on the dealer...")
-        time.sleep(self.DRAMATIC_PAUSE)
+        self._pause(self.DRAMATIC_PAUSE)
         self.dealer_turn()
 
     def _tick_resolving(self):
@@ -787,7 +811,7 @@ class Blackjack(CardGame):
 
     def _tick_between_hands(self):
         """Handle BETWEEN_HANDS state: wait then transition to WAITING."""
-        if time.time() > self.time_last_hand_ended + self.TIME_BETWEEN_HANDS:
+        if time.time() > self.time_last_hand_ended + self.time_between_hands_duration:
             self._dirty = True
             self.state = HandState.WAITING
 
@@ -799,6 +823,7 @@ class Blackjack(CardGame):
             'current_player_idx': self.current_player_idx,
             'time_betting_started': self.time_betting_started,
             'time_last_hand_ended': self.time_last_hand_ended,
+            'time_between_hands_duration': self.time_between_hands_duration,
             'time_last_event': self.time_last_event,
             'time_first_player_joined': self.time_first_player_joined,
             'deck': serialize_hand(self.deck),
@@ -828,6 +853,9 @@ class Blackjack(CardGame):
 
         if data['time_last_hand_ended'] is not None:
             game.time_last_hand_ended = data['time_last_hand_ended']
+
+        if data.get('time_between_hands_duration') is not None:
+            game.time_between_hands_duration = data['time_between_hands_duration']
 
         if data.get('time_first_player_joined') is not None:
             game.time_first_player_joined = data['time_first_player_joined']

@@ -355,6 +355,70 @@ class TestBlackjackStateMachine(unittest.TestCase):
             })
 
 
+class TestBlackjackAmbientTiming(unittest.TestCase):
+    """Ambient (all-NPC, no human players) tables run slower — see issue #229."""
+
+    def setUp(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 1000.0
+        mock_casino.update_wallet.return_value = True
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
+
+    def test_is_ambient_false_when_no_players(self):
+        self.assertFalse(self.game._is_ambient())
+
+    def test_is_ambient_true_when_all_npc(self):
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.assertTrue(self.game._is_ambient())
+
+    def test_is_ambient_false_with_human_player(self):
+        self.game.players.append(Player("Human"))
+        self.assertFalse(self.game._is_ambient())
+
+    def test_is_ambient_false_when_mixed(self):
+        self.game.players.append(Player("Human"))
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.assertFalse(self.game._is_ambient())
+
+    @patch('cardgames.blackjack.time.sleep')
+    def test_pause_applies_ambient_multiplier(self, mock_sleep):
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.game._pause(1.0)
+        mock_sleep.assert_called_once_with(1.0 * self.game.AMBIENT_SPEED_MULTIPLIER)
+
+    @patch('cardgames.blackjack.time.sleep')
+    def test_pause_no_multiplier_for_human_game(self, mock_sleep):
+        self.game.players.append(Player("Human"))
+        self.game._pause(1.0)
+        mock_sleep.assert_called_once_with(1.0)
+
+    def test_end_hand_ambient_sets_random_between_hands_duration(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        npc = SimpleBlackjackNPC("Bot1")
+        self.game.players.append(npc)
+        self.game.new_hand()
+        self.game.bets[npc.name] = self.game.MIN_BET
+        self.game.stand(npc)
+        self.game.dealer_turn()
+        self.game.end_hand()
+        self.assertGreaterEqual(self.game.time_between_hands_duration, self.game.AMBIENT_TIME_BETWEEN_HANDS_MIN)
+        self.assertLessEqual(self.game.time_between_hands_duration, self.game.AMBIENT_TIME_BETWEEN_HANDS_MAX)
+
+    def test_end_hand_human_game_uses_fixed_between_hands_duration(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        player = Player("Human")
+        self.game.players.append(player)
+        self.game.new_hand()
+        self.game.bets[player.name] = self.game.MIN_BET
+        self.game.stand(player)
+        self.game.dealer_turn()
+        self.game.end_hand()
+        self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
+
+
 class TestDatabaseIntegration(unittest.TestCase):
     def test_join_game_with_database(self):
         # Create a mock database

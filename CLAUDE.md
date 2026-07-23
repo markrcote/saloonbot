@@ -169,6 +169,9 @@ Discord Users
 | BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
+| BLACKJACK_AMBIENT_SPEED_MULTIPLIER | 2.0 | Multiplier applied to dramatic/dealer-card/result pauses when a table has no human players (NPCs only) |
+| BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN | 120 | Minimum seconds between hands on an all-NPC ambient table |
+| BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX | 300 | Maximum seconds between hands on an all-NPC ambient table (actual delay is randomized within [MIN, MAX]) |
 | WALLET_REPLENISH_INTERVAL | 300 | Seconds between idle-NPC wallet replenishment passes |
 | LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
 | ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy; see secret resolution below |
@@ -213,6 +216,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **NPC autofill**: `Casino.npc_min/npc_max` (default 0/4) control per-table NPC counts; `_autofill_npcs` runs on every tick (throttled to `AUTOFILL_INTERVAL=15s` per game), acts only in WAITING/BETWEEN_HANDS states. With `npc_min > 0`, games stay populated and `EMPTY_GAME_TIMEOUT` won't reap them — enabling NPC-only ambient play. Limits are persisted in `settings` as `npc_autofill_min`/`npc_autofill_max` and loaded at startup.
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
 - **LLM health checks**: `Casino.llm_client` lazily creates and probes the LLM client on first access (logged at startup). `Casino._check_llm_health`, called from `_tick_games` and throttled to `LLM_HEALTHCHECK_INTERVAL` (default 300s), re-probes a live client to detect outages/exhausted credits (falling back to simple NPC strategy) and, if currently unavailable, retries client creation to detect recovery — all without a server restart.
+- **Ambient table slowdown**: `Blackjack._is_ambient()` is true whenever every seated player is an NPC (no humans watching). `Blackjack._pause()` multiplies the dramatic/dealer-card/result pauses by `BLACKJACK_AMBIENT_SPEED_MULTIPLIER` on ambient tables. `end_hand()` also picks the BETWEEN_HANDS wait: a fixed `TIME_BETWEEN_HANDS` for tables with a human player, or a random duration in `[BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN, BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX]` for ambient ones — stored in `time_between_hands_duration` (persisted, so a restart mid-wait doesn't reset it).
 
 ## Testing
 - ALWAYS activate the virtualenv before running tests or scripts (e.g., `source .venv/bin/activate`)

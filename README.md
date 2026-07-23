@@ -67,8 +67,9 @@ Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with 
 | `OPENAI_API_KEY` | — | API key for OpenAI; supports `OPENAI_API_KEY_FILE` |
 | `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
 | `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
+| `LLM_HEALTHCHECK_INTERVAL` | `300` | Seconds between periodic re-checks of the LLM provider (detects credit exhaustion/outages and recovery without a restart) |
 
-API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions.
+API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
 
 All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) resolve in priority order: direct env var → `<VAR>_FILE` path → `/run/secrets/<lowercase_var>` → unset. Docker secrets mounted at `/run/secrets/` are picked up automatically with no extra configuration.
 

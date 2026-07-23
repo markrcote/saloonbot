@@ -30,6 +30,7 @@ MAX_NPCS_PER_TABLE = 6         # hard cap regardless of limits
 AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
 
 WALLET_REPLENISH_INTERVAL = int(os.environ.get("WALLET_REPLENISH_INTERVAL", "300"))
+LLM_HEALTHCHECK_INTERVAL = int(os.environ.get("LLM_HEALTHCHECK_INTERVAL", "300"))
 REPLENISH_PROB_MIN = 0.15         # chance per cycle at the low wealth reference point
 REPLENISH_PROB_RANGE = 0.35       # added on top of REPLENISH_PROB_MIN at the high reference point
 REPLENISH_PROB_LOW_CENTS = 7500   # $75 reference point (not the personalities' actual minimum)
@@ -77,6 +78,7 @@ class Casino:
         self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
         self._last_wallet_replenish = 0
+        self._last_llm_healthcheck = 0
 
     @property
     def llm_client(self):
@@ -93,6 +95,38 @@ class Casino:
             except Exception as e:
                 logging.warning(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
         return self._llm_client
+
+    def _check_llm_health(self):
+        """Periodically re-probe the LLM provider so outages and recoveries (e.g. API
+        credits running out or being topped up) are picked up without a server restart.
+
+        Throttled to at most once per LLM_HEALTHCHECK_INTERVAL seconds.
+        """
+        now = time.time()
+        if now - self._last_llm_healthcheck < LLM_HEALTHCHECK_INTERVAL:
+            return
+        self._last_llm_healthcheck = now
+
+        if self._llm_client is not None:
+            try:
+                self._llm_client.probe()
+            except Exception as e:
+                logging.warning(
+                    f"LLM client ({self._llm_client.provider}) failed health check: {e}."
+                    " Bot players will fall back to simple strategy."
+                )
+                self._llm_client = None
+        elif self._llm_client_tried:
+            try:
+                client = create_llm_client()
+                client.probe()
+                self._llm_client = client
+                logging.info(
+                    f"LLM client recovered: {client.provider} (model={client.model})."
+                    " Bot players will use AI strategy."
+                )
+            except Exception:
+                pass  # still unavailable; already logged when it first failed
 
     def get_wallet(self, player):
         """Get a player's wallet balance in cents (routes to users or npcs table)."""
@@ -1039,6 +1073,7 @@ class Casino:
 
     def _tick_games(self):
         self._replenish_npc_wallets()
+        self._check_llm_health()
 
         for game_id, game in list(self.games.items()):
             try:

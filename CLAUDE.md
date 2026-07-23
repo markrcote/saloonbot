@@ -174,6 +174,7 @@ Discord Users
 | OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy; see secret resolution below |
 | LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
 | LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
+| LLM_HEALTHCHECK_INTERVAL | 300 | Seconds between periodic re-probes of the LLM provider, to detect credit exhaustion/outages and recovery without a restart |
 | SALOON_NAME | The Rusty Spur | Name of the saloon (shown in Discord and injected into LLM context) |
 | SALOON_TOWN | Redemption, Texas | Town/location of the saloon |
 | SALOON_DETAIL_LEVEL | medium | Controls LLM context richness: `low` (names only, no backstory), `medium` (2-sentence backstory, archetypes), `high` (4-sentence backstory, full context) |
@@ -210,6 +211,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - **NPC autofill**: `Casino.npc_min/npc_max` (default 0/4) control per-table NPC counts; `_autofill_npcs` runs on every tick (throttled to `AUTOFILL_INTERVAL=15s` per game), acts only in WAITING/BETWEEN_HANDS states. With `npc_min > 0`, games stay populated and `EMPTY_GAME_TIMEOUT` won't reap them — enabling NPC-only ambient play. Limits are persisted in `settings` as `npc_autofill_min`/`npc_autofill_max` and loaded at startup.
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
+- **LLM health checks**: `Casino.llm_client` lazily creates and probes the LLM client on first access (logged at startup). `Casino._check_llm_health`, called from `_tick_games` and throttled to `LLM_HEALTHCHECK_INTERVAL` (default 300s), re-probes a live client to detect outages/exhausted credits (falling back to simple NPC strategy) and, if currently unavailable, retries client creation to detect recovery — all without a server restart.
 
 ## Testing
 - ALWAYS activate the virtualenv before running tests or scripts (e.g., `source .venv/bin/activate`)

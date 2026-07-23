@@ -2425,6 +2425,76 @@ class TestNPCWalletReplenishment(unittest.TestCase):
         self.assertLessEqual(self.db.get_npc_wallet(npc_id), 15000)
 
 
+class TestLLMHealthCheck(unittest.TestCase):
+    """Periodic LLM provider re-check (Casino._check_llm_health)."""
+
+    def _make_casino(self):
+        with patch('cardgames.casino.redis.Redis'):
+            casino = Casino(redis_host='localhost', redis_port=6379)
+        casino._last_llm_healthcheck = 0  # force past the throttle window
+        return casino
+
+    def test_no_op_when_never_tried(self):
+        """Before the lazy `llm_client` property has run once, the periodic check
+        should not attempt client creation itself."""
+        casino = self._make_casino()
+        with patch('cardgames.casino.create_llm_client') as mock_create:
+            casino._check_llm_health()
+        mock_create.assert_not_called()
+        self.assertIsNone(casino._llm_client)
+
+    def test_throttled_within_interval(self):
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        casino._last_llm_healthcheck = time.time()  # recent, still inside the window
+        with patch('cardgames.casino.create_llm_client') as mock_create:
+            casino._check_llm_health()
+        mock_create.assert_not_called()
+
+    def test_healthy_client_stays_set_after_successful_probe(self):
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        mock_client = MagicMock()
+        mock_client.provider = 'claude'
+        casino._llm_client = mock_client
+        casino._check_llm_health()
+        mock_client.probe.assert_called_once()
+        self.assertIs(casino._llm_client, mock_client)
+
+    def test_failing_probe_marks_client_unavailable(self):
+        from cardgames.llm_client import LLMError
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        mock_client = MagicMock()
+        mock_client.provider = 'claude'
+        mock_client.probe.side_effect = LLMError("credits exhausted")
+        casino._llm_client = mock_client
+        with self.assertLogs('root', level='WARNING'):
+            casino._check_llm_health()
+        self.assertIsNone(casino._llm_client)
+
+    def test_recovers_client_once_available_again(self):
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        casino._llm_client = None
+        mock_client = MagicMock()
+        mock_client.provider = 'claude'
+        mock_client.model = 'claude-haiku-4-5'
+        with patch('cardgames.casino.create_llm_client', return_value=mock_client):
+            casino._check_llm_health()
+        mock_client.probe.assert_called_once()
+        self.assertIs(casino._llm_client, mock_client)
+
+    def test_stays_unavailable_when_recreation_still_fails(self):
+        from cardgames.llm_client import LLMError
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        casino._llm_client = None
+        with patch('cardgames.casino.create_llm_client', side_effect=LLMError("no key")):
+            casino._check_llm_health()  # should not raise
+        self.assertIsNone(casino._llm_client)
+
+
 class TestChangelog(unittest.TestCase):
 
     def _write(self, text):

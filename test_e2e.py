@@ -742,6 +742,40 @@ class TestStopGame(EndToEndTestCase):
         finally:
             game_pubsub.close()
 
+    def test_stop_game_refunds_unresolved_bets(self):
+        """Test that stop_game returns unresolved bets to players' wallets."""
+        game_id = self.create_game(deck=self.DETERMINISTIC_DECK)
+        self.join_player(game_id, 'RefundPlayer')
+
+        self.assertIsNotNone(
+            self.poll_db("SELECT state FROM games WHERE game_id = %s", (game_id,),
+                         predicate=lambda row: row[0] == 'betting', timeout=5),
+            "Game should reach betting state"
+        )
+        self.place_bet(game_id, 'RefundPlayer', 2500)
+
+        # Wallet decremented by the bet amount before the stop
+        after_bet = self.poll_db(
+            "SELECT wallet_cents FROM users WHERE username = 'RefundPlayer'",
+            (),
+            predicate=lambda row: row[0] == 17500
+        )
+        self.assertIsNotNone(after_bet, "Wallet should be decremented to 17500 cents after a 2500-cent bet")
+
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'casino_action',
+            'action': 'stop_game',
+            'game_id': game_id,
+        }))
+
+        # Bet is refunded to the wallet
+        after_stop = self.poll_db(
+            "SELECT wallet_cents FROM users WHERE username = 'RefundPlayer'",
+            (),
+            predicate=lambda row: row[0] == 20000
+        )
+        self.assertIsNotNone(after_stop, "Wallet should be refunded to 20000 cents after stop_game")
+
     def test_stop_game_removes_from_database(self):
         """Test that stop_game deletes the game record from the database."""
         # Create a game with a player so it gets persisted

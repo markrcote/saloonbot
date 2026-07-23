@@ -1011,16 +1011,7 @@ class Casino:
             logging.debug(f"Got game message: {data}")
             try:
                 if data['event_type'] == 'casino_action' and data.get('action') == 'stop_game':
-                    logging.info(f"Stopping game {game_id} by admin request")
-                    self._delete_game(game_id)
-                    del self.games[game_id]
-                    self.publish_event(
-                        f"game_updates_{game_id}",
-                        {'game_id': game_id, 'event_type': 'game_over'}
-                    )
-                    return
-                if data['event_type'] == 'casino_action' and data.get('action') == 'quit_game':
-                    logging.info(f"Quitting game {game_id} by request — returning unresolved bets")
+                    logging.info(f"Stopping game {game_id} by admin request — returning unresolved bets")
                     game = self.games[game_id]
                     all_players = {p.name: p for p in game.players + game.departed_players}
                     refunded = []

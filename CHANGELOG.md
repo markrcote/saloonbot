@@ -2,6 +2,10 @@
 
 Notable changes to SaloonBot, for players and server admins. Dates are when each change shipped.
 
+## 2026-07-22 — /stopgame refunds bets
+
+- `/stopgame` now returns any unresolved bets to players when it ends a game. The redundant `/quitgame` command has been removed.
+
 ## 2026-07-09 — NPCs rebuild their stakes
 
 - NPCs who go broke and leave the table now slowly earn back their stake between sessions, instead of staying poor forever. Well-off personalities recover faster than drifters.

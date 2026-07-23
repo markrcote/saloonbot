@@ -100,8 +100,7 @@ Discord Users
 - `lookup_wallet {target}` - Admin wallet lookup by name; searches users first then NPCs (case-insensitive); bot sends with `request_id`, server responds via `wallet_info`
 - `set_wallet {target, mode:'set'|'adjust', amount}` - Admin wallet edit; `amount` is in cents; resolves target via `_resolve_wallet_target`; rejects set < 0 and adjusts that would go negative; responds via `wallet_set`
 - `npc_limits {min?, max?}` - Admin; no args = view current limits; with args = validate, persist via `set_setting`, update `Casino.npc_min/max`, respond via `npc_limits` event
-- `stop_game` - Terminate a game immediately (admin; requires `game_id`); unresolved bets are not returned
-- `quit_game` - Terminate a game and return all unresolved bets to players (admin; requires `game_id`)
+- `stop_game` - Terminate a game immediately and return all unresolved bets to players (admin; requires `game_id`)
 
 **Player actions** (`event_type: "player_action"`):
 - `join`, `leave`, `bet` (with `amount`, in cents), `hit`, `stand` (see `Action` in `blackjack.py`; double-down and split are not implemented)
@@ -126,7 +125,7 @@ Discord Users
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`, `quit_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play

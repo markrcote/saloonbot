@@ -1,8 +1,22 @@
+import functools
 import json
 import logging
 import sqlite3
+import threading
 
 DEFAULT_WALLET = 200.0
+
+
+def _synchronized(method):
+    """Serialize access to the shared DB connection: the main game loop and
+    NPC worker threads (usage logging, session memories) all use this object,
+    and the underlying connection is not safe for concurrent use."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 # Each entry is a list of SQL statements for that migration.
 # Append new entries to add future schema changes — never edit existing ones.
@@ -92,6 +106,16 @@ MIGRATIONS = [
         "UPDATE npcs SET wallet_cents = wallet * 100",
         "ALTER TABLE npcs DROP COLUMN wallet",
     ],
+    [   # Migration 7: NPC session memories
+        """CREATE TABLE IF NOT EXISTS npc_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            npc_id INTEGER NOT NULL,
+            game_id TEXT NULL,
+            session_summary TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_npc_memories_npc ON npc_memories (npc_id)",
+    ],
 ]
 
 
@@ -99,6 +123,7 @@ class SqliteDatabase:
     def __init__(self, db_path):
         self.db_path = db_path
         self.connection = None
+        self._lock = threading.RLock()
         self._init_database()
 
     def _connect(self):
@@ -137,6 +162,7 @@ class SqliteDatabase:
             logging.error(f"Error initializing SQLite database: {e}")
             raise
 
+    @_synchronized
     def add_user(self, username):
         self._connect()
         try:
@@ -151,6 +177,7 @@ class SqliteDatabase:
             logging.error(f"Error adding user {username}: {e}")
             raise
 
+    @_synchronized
     def get_user_wallet(self, username):
         """Get the wallet balance for a user, in cents."""
         self._connect()
@@ -166,6 +193,7 @@ class SqliteDatabase:
             logging.error(f"Error getting wallet for {username}: {e}")
             raise
 
+    @_synchronized
     def update_wallet(self, username, amount_cents):
         """Update a user's wallet by an amount in cents. Returns True on success, False if update would go negative."""
         self._connect()
@@ -190,6 +218,7 @@ class SqliteDatabase:
             logging.error(f"Error updating wallet for {username}: {e}")
             raise
 
+    @_synchronized
     def set_user_wallet(self, username, amount_cents):
         """Set a user's wallet to an absolute amount in cents. Returns True on success."""
         self._connect()
@@ -206,6 +235,7 @@ class SqliteDatabase:
             logging.error(f"Error setting wallet for {username}: {e}")
             raise
 
+    @_synchronized
     def save_game(self, game_id, game_data):
         self._connect()
         try:
@@ -250,6 +280,7 @@ class SqliteDatabase:
             logging.error(f"Error saving game {game_id}: {e}")
             raise
 
+    @_synchronized
     def load_game(self, game_id):
         self._connect()
         try:
@@ -264,6 +295,7 @@ class SqliteDatabase:
             logging.error(f"Error loading game {game_id}: {e}")
             raise
 
+    @_synchronized
     def load_all_active_games(self):
         """Load all persisted games from database, regardless of state."""
         self._connect()
@@ -290,6 +322,7 @@ class SqliteDatabase:
             'bets': json.loads(result['bets_json']),
         }
 
+    @_synchronized
     def delete_game(self, game_id):
         self._connect()
         try:
@@ -304,6 +337,7 @@ class SqliteDatabase:
             logging.error(f"Error deleting game {game_id}: {e}")
             raise
 
+    @_synchronized
     def save_game_channel(self, game_id, guild_id, channel_id):
         self._connect()
         try:
@@ -321,6 +355,7 @@ class SqliteDatabase:
             logging.error(f"Error saving game channel {game_id}: {e}")
             raise
 
+    @_synchronized
     def load_game_channels(self):
         self._connect()
         try:
@@ -337,6 +372,7 @@ class SqliteDatabase:
             logging.error(f"Error loading game channels: {e}")
             raise
 
+    @_synchronized
     def delete_game_channel(self, game_id):
         self._connect()
         try:
@@ -351,6 +387,7 @@ class SqliteDatabase:
             logging.error(f"Error deleting game channel {game_id}: {e}")
             raise
 
+    @_synchronized
     def create_npc(self, name, personality_name, wallet_cents):
         """Create a new NPC record. Returns the new npc id."""
         self._connect()
@@ -365,6 +402,7 @@ class SqliteDatabase:
             logging.error(f"Error creating NPC {name}: {e}")
             raise
 
+    @_synchronized
     def get_available_npcs(self, limit, exclude_personality_names=None):
         """Get available NPCs (current_game_id IS NULL). Returns list of dicts."""
         self._connect()
@@ -388,6 +426,7 @@ class SqliteDatabase:
             logging.error(f"Error getting available NPCs: {e}")
             raise
 
+    @_synchronized
     def get_npc_by_id(self, npc_id):
         """Get NPC by id. Returns dict or None."""
         self._connect()
@@ -399,6 +438,7 @@ class SqliteDatabase:
             logging.error(f"Error getting NPC {npc_id}: {e}")
             raise
 
+    @_synchronized
     def get_all_npcs(self):
         """Get all NPCs ordered by name. Returns list of dicts."""
         self._connect()
@@ -409,6 +449,7 @@ class SqliteDatabase:
             logging.error(f"Error getting all NPCs: {e}")
             raise
 
+    @_synchronized
     def find_npc_by_name(self, name):
         """Find an NPC by name (case-insensitive). Returns dict or None."""
         self._connect()
@@ -422,6 +463,7 @@ class SqliteDatabase:
             logging.error(f"Error finding NPC by name {name}: {e}")
             raise
 
+    @_synchronized
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance in cents. Returns int or None."""
         self._connect()
@@ -435,6 +477,7 @@ class SqliteDatabase:
             logging.error(f"Error getting NPC wallet {npc_id}: {e}")
             raise
 
+    @_synchronized
     def update_npc_wallet(self, npc_id, amount_cents):
         """Add amount_cents to NPC wallet. Returns True on success, False if would go negative."""
         self._connect()
@@ -457,6 +500,7 @@ class SqliteDatabase:
             logging.error(f"Error updating NPC wallet {npc_id}: {e}")
             raise
 
+    @_synchronized
     def set_npc_wallet(self, npc_id, amount_cents):
         """Set an NPC's wallet to an absolute amount in cents. Returns True on success."""
         self._connect()
@@ -470,6 +514,7 @@ class SqliteDatabase:
             logging.error(f"Error setting NPC wallet {npc_id}: {e}")
             raise
 
+    @_synchronized
     def set_npc_game(self, npc_id, game_id):
         """Assign NPC to a game and update last_played_at."""
         self._connect()
@@ -483,6 +528,7 @@ class SqliteDatabase:
             logging.error(f"Error setting NPC game {npc_id}: {e}")
             raise
 
+    @_synchronized
     def clear_npc_game(self, npc_id):
         """Clear an NPC's current_game_id."""
         self._connect()
@@ -495,6 +541,7 @@ class SqliteDatabase:
             logging.error(f"Error clearing NPC game {npc_id}: {e}")
             raise
 
+    @_synchronized
     def count_npcs(self):
         """Return total number of NPC records."""
         self._connect()
@@ -505,6 +552,7 @@ class SqliteDatabase:
             logging.error(f"Error counting NPCs: {e}")
             raise
 
+    @_synchronized
     def clear_stale_npc_games(self, active_game_ids):
         """Clear current_game_id for NPCs whose game is no longer active."""
         self._connect()
@@ -526,6 +574,7 @@ class SqliteDatabase:
             logging.error(f"Error clearing stale NPC games: {e}")
             raise
 
+    @_synchronized
     def update_npc_backstory(self, npc_id, backstory):
         """Set the backstory text for an NPC."""
         self._connect()
@@ -536,6 +585,43 @@ class SqliteDatabase:
             logging.error(f"Error updating NPC backstory {npc_id}: {e}")
             raise
 
+    @_synchronized
+    def add_npc_memory(self, npc_id, game_id, session_summary, max_rows):
+        """Insert a session memory for an NPC, pruning to the max_rows most recent."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("""
+                INSERT INTO npc_memories (npc_id, game_id, session_summary)
+                VALUES (?, ?, ?)
+            """, (npc_id, game_id, session_summary))
+            memory_id = cursor.lastrowid
+            self.connection.execute("""
+                DELETE FROM npc_memories WHERE npc_id = ? AND id NOT IN (
+                    SELECT id FROM npc_memories WHERE npc_id = ?
+                    ORDER BY id DESC LIMIT ?
+                )
+            """, (npc_id, npc_id, int(max_rows)))
+            self.connection.commit()
+            return memory_id
+        except sqlite3.Error as e:
+            logging.error(f"Error adding NPC memory {npc_id}: {e}")
+            raise
+
+    @_synchronized
+    def get_npc_memories(self, npc_id, limit):
+        """Return the most recent session memories for an NPC, newest first. List of dicts."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT * FROM npc_memories WHERE npc_id = ? ORDER BY id DESC LIMIT ?",
+                (npc_id, int(limit))
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logging.error(f"Error getting NPC memories {npc_id}: {e}")
+            raise
+
+    @_synchronized
     def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
         """Record a single LLM API call for usage tracking."""
         self._connect()
@@ -549,6 +635,7 @@ class SqliteDatabase:
             logging.error(f"Error logging LLM usage: {e}")
             raise
 
+    @_synchronized
     def get_llm_usage_summary(self, days=7):
         """Return token totals grouped by purpose for the past N days."""
         self._connect()
@@ -568,6 +655,7 @@ class SqliteDatabase:
             logging.error(f"Error getting LLM usage summary: {e}")
             raise
 
+    @_synchronized
     def increment_games_played(self, username):
         """Increment games_played and refresh last_seen for a human player."""
         self._connect()
@@ -582,6 +670,7 @@ class SqliteDatabase:
             logging.error(f"Error in increment_games_played({username}): {e}")
             raise
 
+    @_synchronized
     def update_player_stats(self, username, won_cents=0, lost_cents=0):
         """Record the outcome of a hand for a human player. Amounts are in cents."""
         self._connect()
@@ -600,6 +689,7 @@ class SqliteDatabase:
             logging.error(f"Error in update_player_stats({username}): {e}")
             raise
 
+    @_synchronized
     def get_player_stats(self, username):
         """Return stats dict for a player, or None if not found. Money fields are in cents."""
         self._connect()
@@ -624,6 +714,7 @@ class SqliteDatabase:
             logging.error(f"Error getting player stats for {username}: {e}")
             raise
 
+    @_synchronized
     def get_setting(self, key, default=None):
         """Get a runtime setting value (string), or default if not set."""
         self._connect()
@@ -637,6 +728,7 @@ class SqliteDatabase:
             logging.error(f"Error getting setting {key}: {e}")
             raise
 
+    @_synchronized
     def set_setting(self, key, value):
         """Set a runtime setting value (stored as a string), upserting on key."""
         self._connect()
@@ -651,6 +743,7 @@ class SqliteDatabase:
             logging.error(f"Error setting {key}: {e}")
             raise
 
+    @_synchronized
     def close(self):
         if self.connection:
             self.connection.close()

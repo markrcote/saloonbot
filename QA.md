@@ -10,6 +10,8 @@ Covers the main flows end-to-end. Aim: **under 5 minutes** total.
 
 # Terminal B – server
 export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1 ANTHROPIC_API_KEY=<your-key>
+# No API key handy? export LLM_PROVIDER=fake instead — bots run the full LLM
+# path (quips, session memories) with canned deterministic responses.
 source .venv/bin/activate && python server.py
 
 # Terminal C – CLI

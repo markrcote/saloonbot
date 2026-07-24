@@ -23,6 +23,11 @@ class Player:
     def hand_str(self):
         return ", ".join([card.str() for card in self.hand])
 
+    def observe_table_event(self, event):
+        """Receive a short description of a table event. No-op by default;
+        NPCs that keep session memory override this."""
+        pass
+
 
 class PlayerNotFoundError(Exception):
 

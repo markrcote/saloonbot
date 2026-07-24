@@ -1,5 +1,7 @@
+import functools
 import json
 import logging
+import threading
 import time
 
 import mysql.connector
@@ -10,6 +12,18 @@ _DEADLOCK_RETRIES = 3
 _DEADLOCK_BACKOFF_BASE = 0.05  # seconds
 
 DEFAULT_WALLET = 200.0
+
+
+def _synchronized(method):
+    """Serialize access to the shared DB connection: the main game loop and
+    NPC worker threads (usage logging, session memories) all use this object,
+    and mysql.connector connections are not safe for concurrent use."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 # Each entry is a list of SQL statements for that migration.
 # Append new entries to add future schema changes — never edit existing ones.
@@ -99,6 +113,16 @@ MIGRATIONS = [
         "UPDATE npcs SET wallet_cents = wallet * 100",
         "ALTER TABLE npcs DROP COLUMN wallet",
     ],
+    [   # Migration 7: NPC session memories
+        """CREATE TABLE IF NOT EXISTS npc_memories (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            npc_id INT NOT NULL,
+            game_id VARCHAR(36) NULL,
+            session_summary TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_npc_memories_npc (npc_id)
+        )""",
+    ],
 ]
 
 
@@ -110,6 +134,7 @@ class Database:
         self.password = password
         self.database = database
         self.connection = None
+        self._lock = threading.RLock()
         self._init_database()
 
     def _rollback_safe(self):
@@ -196,6 +221,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def add_user(self, username):
         """Add a new user to the database if they don't exist."""
         self._connect()
@@ -217,6 +243,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def get_user_wallet(self, username):
         """Get the wallet balance for a user, in cents."""
         self._connect()
@@ -238,6 +265,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def update_wallet(self, username, amount_cents):
         """Update a user's wallet by adding or subtracting an amount, in cents.
 
@@ -261,6 +289,7 @@ class Database:
 
         return self._execute_write(fn, f"update_wallet({username})")
 
+    @_synchronized
     def set_user_wallet(self, username, amount_cents):
         """Set a user's wallet to an absolute amount, in cents. Returns True on success."""
         def fn(cursor):
@@ -275,6 +304,7 @@ class Database:
 
         return self._execute_write(fn, f"set_user_wallet({username})")
 
+    @_synchronized
     def save_game(self, game_id, game_data):
         """Save game state to database."""
         params = (
@@ -318,6 +348,7 @@ class Database:
 
         return self._execute_write(fn, f"save_game({game_id})")
 
+    @_synchronized
     def load_game(self, game_id):
         """Load game state from database."""
         self._connect()
@@ -351,6 +382,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def load_all_active_games(self):
         """Load all persisted games from database, regardless of state."""
         self._connect()
@@ -383,6 +415,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def delete_game(self, game_id):
         """Delete a game from database."""
         def fn(cursor):
@@ -394,6 +427,7 @@ class Database:
 
         return self._execute_write(fn, f"delete_game({game_id})")
 
+    @_synchronized
     def save_game_channel(self, game_id, guild_id, channel_id):
         """Save game-channel association for bot recovery."""
         def fn(cursor):
@@ -409,6 +443,7 @@ class Database:
 
         return self._execute_write(fn, f"save_game_channel({game_id})")
 
+    @_synchronized
     def load_game_channels(self):
         """Load all game-channel associations."""
         self._connect()
@@ -432,6 +467,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def delete_game_channel(self, game_id):
         """Delete a game-channel association."""
         def fn(cursor):
@@ -445,6 +481,7 @@ class Database:
 
         return self._execute_write(fn, f"delete_game_channel({game_id})")
 
+    @_synchronized
     def create_npc(self, name, personality_name, wallet_cents):
         """Create a new NPC record. Returns the new npc id."""
         def fn(cursor):
@@ -454,6 +491,7 @@ class Database:
             return cursor.lastrowid
         return self._execute_write(fn, f"create_npc({name})")
 
+    @_synchronized
     def get_available_npcs(self, limit, exclude_personality_names=None):
         """Get available NPCs (current_game_id IS NULL). Returns list of dicts."""
         self._connect()
@@ -482,6 +520,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def get_npc_by_id(self, npc_id):
         """Get NPC by id. Returns dict or None."""
         self._connect()
@@ -497,6 +536,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def get_all_npcs(self):
         """Get all NPCs ordered by name. Returns list of dicts."""
         self._connect()
@@ -512,6 +552,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def find_npc_by_name(self, name):
         """Find an NPC by name (case-insensitive). Returns dict or None."""
         self._connect()
@@ -528,6 +569,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def get_npc_wallet(self, npc_id):
         """Get NPC wallet balance in cents. Returns int or None."""
         self._connect()
@@ -545,6 +587,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def update_npc_wallet(self, npc_id, amount_cents):
         """Add amount_cents to NPC wallet. Returns True on success, False if would go negative."""
         def fn(cursor):
@@ -562,6 +605,7 @@ class Database:
             return cursor.rowcount > 0
         return self._execute_write(fn, f"update_npc_wallet({npc_id})")
 
+    @_synchronized
     def set_npc_wallet(self, npc_id, amount_cents):
         """Set an NPC's wallet to an absolute amount in cents. Returns True on success."""
         def fn(cursor):
@@ -571,6 +615,7 @@ class Database:
             return cursor.rowcount > 0
         return self._execute_write(fn, f"set_npc_wallet({npc_id})")
 
+    @_synchronized
     def set_npc_game(self, npc_id, game_id):
         """Assign NPC to a game and update last_played_at."""
         def fn(cursor):
@@ -580,6 +625,7 @@ class Database:
             """, (game_id, npc_id))
         return self._execute_write(fn, f"set_npc_game({npc_id})")
 
+    @_synchronized
     def clear_npc_game(self, npc_id):
         """Clear an NPC's current_game_id."""
         def fn(cursor):
@@ -588,6 +634,7 @@ class Database:
             )
         return self._execute_write(fn, f"clear_npc_game({npc_id})")
 
+    @_synchronized
     def count_npcs(self):
         """Return total number of NPC records."""
         self._connect()
@@ -603,6 +650,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def clear_stale_npc_games(self, active_game_ids):
         """Clear current_game_id for NPCs whose game is no longer active."""
         def fn(cursor):
@@ -618,12 +666,54 @@ class Database:
                 cursor.execute("UPDATE npcs SET current_game_id = NULL WHERE current_game_id IS NOT NULL")
         return self._execute_write(fn, "clear_stale_npc_games")
 
+    @_synchronized
     def update_npc_backstory(self, npc_id, backstory):
         """Set the backstory text for an NPC."""
         def fn(cursor):
             cursor.execute("UPDATE npcs SET backstory = %s WHERE id = %s", (backstory, npc_id))
         return self._execute_write(fn, f"update_npc_backstory({npc_id})")
 
+    @_synchronized
+    def add_npc_memory(self, npc_id, game_id, session_summary, max_rows):
+        """Insert a session memory for an NPC, pruning to the max_rows most recent."""
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO npc_memories (npc_id, game_id, session_summary)
+                VALUES (%s, %s, %s)
+            """, (npc_id, game_id, session_summary))
+            memory_id = cursor.lastrowid
+            cursor.execute("""
+                DELETE FROM npc_memories WHERE npc_id = %s AND id NOT IN (
+                    SELECT id FROM (
+                        SELECT id FROM npc_memories WHERE npc_id = %s
+                        ORDER BY id DESC LIMIT %s
+                    ) AS keep
+                )
+            """, (npc_id, npc_id, int(max_rows)))
+            return memory_id
+        return self._execute_write(fn, f"add_npc_memory({npc_id})")
+
+    @_synchronized
+    def get_npc_memories(self, npc_id, limit):
+        """Return the most recent session memories for an NPC, newest first. List of dicts."""
+        self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM npc_memories WHERE npc_id = %s ORDER BY id DESC LIMIT %s",
+                (npc_id, int(limit))
+            )
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting NPC memories {npc_id}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    @_synchronized
     def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
         """Record a single LLM API call for usage tracking."""
         def fn(cursor):
@@ -633,6 +723,7 @@ class Database:
             """, (purpose, model, input_tokens, output_tokens, npc_id, game_id))
         return self._execute_write(fn, "log_llm_usage")
 
+    @_synchronized
     def get_llm_usage_summary(self, days=7):
         """Return token totals grouped by purpose for the past N days."""
         self._connect()
@@ -657,6 +748,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def increment_games_played(self, username):
         """Increment games_played and refresh last_seen for a human player."""
         def fn(cursor):
@@ -666,6 +758,7 @@ class Database:
             """, (username,))
         return self._execute_write(fn, f"increment_games_played({username})")
 
+    @_synchronized
     def update_player_stats(self, username, won_cents=0, lost_cents=0):
         """Record the outcome of a hand for a human player. Amounts are in cents."""
         def fn(cursor):
@@ -680,6 +773,7 @@ class Database:
             """, (won_cents, lost_cents, won_cents, username))
         return self._execute_write(fn, f"update_player_stats({username})")
 
+    @_synchronized
     def get_player_stats(self, username):
         """Return stats dict for a player, or None if not found. Money fields are in cents."""
         self._connect()
@@ -709,6 +803,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def get_setting(self, key, default=None):
         """Get a runtime setting value (string), or default if not set."""
         self._connect()
@@ -727,6 +822,7 @@ class Database:
             if cursor:
                 cursor.close()
 
+    @_synchronized
     def set_setting(self, key, value):
         """Set a runtime setting value (stored as a string), upserting on key."""
         def fn(cursor):
@@ -737,6 +833,7 @@ class Database:
             logging.debug(f"Set setting {key} = {value}")
         return self._execute_write(fn, f"set_setting({key})")
 
+    @_synchronized
     def close(self):
         """Close the database connection."""
         if self.connection and self.connection.is_connected():

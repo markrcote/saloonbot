@@ -10,7 +10,7 @@ import redis
 from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
 from .llm_client import create_llm_client, LLMError
-from .llm_npc import LLMBlackjackNPC
+from .llm_npc import LLMBlackjackNPC, MEMORY_RECALL_BY_DETAIL
 from .money import format_cents
 from .personalities import get_personality, get_random as get_random_personality
 from .simple_npc import SimpleBlackjackNPC
@@ -28,6 +28,9 @@ DEFAULT_NPC_AUTOFILL_MIN = 0   # auto-fill off by default
 DEFAULT_NPC_AUTOFILL_MAX = 4
 MAX_NPCS_PER_TABLE = 6         # hard cap regardless of limits
 AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
+
+MAX_MEMORIES_PER_NPC = 20      # npc_memories retention cap, pruned on insert
+SESSION_MEMORY_MIN_EVENTS = 3  # skip condensation for sessions shorter than this
 
 WALLET_REPLENISH_INTERVAL = int(os.environ.get("WALLET_REPLENISH_INTERVAL", "300"))
 LLM_HEALTHCHECK_INTERVAL = int(os.environ.get("LLM_HEALTHCHECK_INTERVAL", "300"))
@@ -381,6 +384,21 @@ class Casino:
             return result
         return get_table_context
 
+    def _load_npc_memories(self, npc_db_id):
+        """Fetch recent session summaries (newest first) for prompt recall.
+
+        Loaded once per seating; how many depends on SALOON_DETAIL_LEVEL.
+        """
+        limit = MEMORY_RECALL_BY_DETAIL.get(SALOON_DETAIL_LEVEL, 1)
+        if not limit or npc_db_id is None or self.db is None:
+            return []
+        try:
+            rows = self.db.get_npc_memories(npc_db_id, limit)
+            return [r['session_summary'] for r in rows]
+        except Exception as e:
+            logging.error(f"Error loading NPC memories for {npc_db_id}: {e}")
+            return []
+
     def _load_npc_limits(self):
         """Load npc_autofill_min/max from settings, clamping to valid range."""
         if self.db is None:
@@ -490,6 +508,32 @@ class Casino:
                 self.db.clear_npc_game(npc_db_id)
             except Exception as e:
                 logging.error(f"Error clearing NPC game for {player.name}: {e}")
+        self._condense_npc_session(game.game_id, player)
+
+    def _condense_npc_session(self, game_id, npc):
+        """Kick off fire-and-forget session condensation for a departing LLM NPC.
+
+        Skipped when the NPC keeps no session buffer (simple NPCs, low detail
+        level), the session was trivially short, or there's nowhere to save.
+        """
+        if not isinstance(npc, LLMBlackjackNPC):
+            return
+        if SALOON_DETAIL_LEVEL == 'low':
+            return
+        if npc.npc_db_id is None or self.db is None:
+            return
+        if len(npc.session_events) < SESSION_MEMORY_MIN_EVENTS:
+            logging.info(f"Skipping session condensation for {npc.name}: session too short")
+            return
+        npc.submit_session_condensation(game_id, self._save_npc_memory)
+
+    def _save_npc_memory(self, npc_db_id, game_id, summary):
+        """Persist a condensed session memory (called from an NPC worker thread)."""
+        try:
+            self.db.add_npc_memory(npc_db_id, game_id, summary, MAX_MEMORIES_PER_NPC)
+            logging.info(f"Saved session memory for NPC {npc_db_id}")
+        except Exception as e:
+            logging.error(f"Error saving session memory for NPC {npc_db_id}: {e}")
 
     def _mark_dirty(self, game_id):
         """Mark a game as needing a DB write on the next flush."""
@@ -525,8 +569,16 @@ class Casino:
 
         game = self.games.get(game_id)
         if game is not None:
+            # Seated NPCs never went through leave() on this path (stop_game,
+            # empty-game reap), so condense their sessions here.
+            # departed_players already condensed via the departure hook.
+            for player in game.players + game.players_waiting:
+                if isinstance(player, LLMBlackjackNPC):
+                    self._condense_npc_session(game_id, player)
             for player in game.players + game.players_waiting + game.departed_players:
                 if isinstance(player, LLMBlackjackNPC):
+                    # shutdown(wait=False) still runs already-queued work, so a
+                    # just-submitted condensation completes before threads exit
                     player.shutdown()
                 npc_db_id = getattr(player, 'npc_db_id', None)
                 if npc_db_id is not None and self.db is not None:
@@ -625,6 +677,7 @@ class Casino:
                     detail_level=SALOON_DETAIL_LEVEL,
                     table_context_fn=table_ctx,
                     usage_callback=self._log_usage,
+                    memories=self._load_npc_memories(npc_db_id),
                 )
             else:
                 npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)

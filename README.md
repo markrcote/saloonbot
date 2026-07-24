@@ -57,16 +57,23 @@ Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with 
 
 **Historical figures:** Doc Holliday, Calamity Jane, Jesse James, Wild Bill Hickok
 
+### NPC memory
+
+AI bots remember their nights at the table. While seated, each bot keeps track of what happens around it — bets, busts, wins, and banter — and when it leaves (including deciding on its own to "call it a night"), it condenses the session into a short memory that persists in the database. The next time that NPC sits down, its recent memories feed into its prompts, so a regular NPC can reference past sessions and the people it played with. Memory depth follows `SALOON_DETAIL_LEVEL`: `low` disables the feature, `medium` recalls 1 recent session, `high` recalls 3.
+
 ### Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `claude` | LLM provider: `claude` or `openai` |
+| `LLM_PROVIDER` | `claude` | LLM provider: `claude`, `openai`, or `fake` (deterministic offline provider for testing) |
 | `ANTHROPIC_API_KEY` | — | API key for Claude; supports `ANTHROPIC_API_KEY_FILE` |
 | `OPENAI_API_KEY` | — | API key for OpenAI; supports `OPENAI_API_KEY_FILE` |
 | `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
 | `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
 | `LLM_HEALTHCHECK_INTERVAL` | `300` | Seconds between periodic re-checks of the LLM provider (detects credit exhaustion/outages and recovery without a restart) |
+| `LLM_SESSION_MEMORY_TIMEOUT` | `15` | Seconds allowed for the background session-memory call |
+| `BLACKJACK_NPC_DEPARTURE_BASE` | `0.02` | Baseline per-hand chance an NPC calls it a night |
+| `BLACKJACK_NPC_DEPARTURE_RAMP` | `0.28` | Extra departure chance once an NPC has seen a full session |
 
 API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
 

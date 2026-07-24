@@ -6,6 +6,13 @@ Notable changes to SaloonBot, for players and server admins. Dates are when each
 
 - `/stopgame` now returns any unresolved bets to players when it ends a game. The redundant `/quitgame` command has been removed.
 
+## 2026-07-19 — NPCs remember
+
+- NPCs now remember their nights at the table. Each session they watch the bets, busts, wins, and banter around them, and when they leave they carry a memory of it — so a regular can bring up that time you cleaned them out.
+- NPCs decide on their own when to call it a night: the longer and busier their session, the more likely they head for the door after a hand.
+- Admins: memory depth follows `SALOON_DETAIL_LEVEL` (`low` turns it off), and a new `LLM_PROVIDER=fake` option runs AI bots with canned responses for testing without an API key.
+- Fixed a server hang that could occur when background NPC work (like usage logging) hit the database at the same moment as the game loop.
+
 ## 2026-07-09 — NPCs rebuild their stakes
 
 - NPCs who go broke and leave the table now slowly earn back their stake between sessions, instead of staying poor forever. Well-off personalities recover faster than drifters.

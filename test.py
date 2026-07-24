@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import tempfile
 import time
 import unittest
@@ -31,6 +32,9 @@ Blackjack.TIME_WAIT_FOR_PLAYERS = 0
 Blackjack.DRAMATIC_PAUSE = 0
 Blackjack.DEALER_CARD_PAUSE = 0
 Blackjack.RESULT_PAUSE = 0
+# Disable the random NPC departure roll; roll tests re-enable it per instance
+Blackjack.NPC_DEPARTURE_BASE = 0
+Blackjack.NPC_DEPARTURE_RAMP = 0
 
 
 class TestMoney(unittest.TestCase):
@@ -2626,6 +2630,534 @@ class TestChangelog(unittest.TestCase):
         entries, today = self._entries(7, 30, 40, 50, 60, 70)
         result = select_recent_entries(entries, today=today, min_count=5, days=7)
         self.assertIn(entries[0], result)
+
+
+class TestSessionCondensation(unittest.TestCase):
+    """Tests for M6 fire-and-forget session condensation on NPC departure."""
+
+    def _make_npc(self, llm_response="I had a fine night at the table.", events=5, npc_db_id=7,
+                  name="Memory NPC"):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = (llm_response, 80, 40)
+        mock_llm.model = "test-model"
+        usage_callback = MagicMock()
+        npc = LLMBlackjackNPC(name, get_personality("The Grizzled Prospector"),
+                              mock_llm, npc_db_id=npc_db_id, usage_callback=usage_callback)
+        for i in range(events):
+            npc.observe_table_event(f"event {i}")
+        return npc, mock_llm, usage_callback
+
+    def _drain_executor(self, npc):
+        npc._executor.submit(lambda: None).result(timeout=5.0)
+
+    def test_condense_saves_summary(self):
+        npc, mock_llm, usage_callback = self._make_npc()
+        save_callback = MagicMock()
+        npc.submit_session_condensation("game-9", save_callback)
+        self._drain_executor(npc)
+        save_callback.assert_called_once_with(7, "game-9", "I had a fine night at the table.")
+        usage_callback.assert_called_once()
+        self.assertEqual(usage_callback.call_args.args[0], 'session_memory')
+
+    def test_condense_prompt_contains_events(self):
+        npc, mock_llm, _ = self._make_npc(events=3)
+        npc.submit_session_condensation("game-9", MagicMock())
+        self._drain_executor(npc)
+        user_msg = mock_llm.complete.call_args.kwargs['user']
+        self.assertIn("- event 0", user_msg)
+        self.assertIn("- event 2", user_msg)
+        self.assertIn("first person", user_msg)
+
+    def test_condense_llm_failure_saves_nothing(self):
+        from cardgames.llm_client import LLMError
+        npc, mock_llm, usage_callback = self._make_npc()
+        mock_llm.complete.side_effect = LLMError("API down")
+        save_callback = MagicMock()
+        with self.assertLogs('cardgames.llm_npc', level='WARNING'):
+            npc.submit_session_condensation("game-9", save_callback)
+            self._drain_executor(npc)
+        save_callback.assert_not_called()
+        usage_callback.assert_not_called()
+
+    def test_condense_empty_response_saves_nothing(self):
+        npc, _, _ = self._make_npc(llm_response="   ")
+        save_callback = MagicMock()
+        with self.assertLogs('cardgames.llm_npc', level='WARNING'):
+            npc.submit_session_condensation("game-9", save_callback)
+            self._drain_executor(npc)
+        save_callback.assert_not_called()
+
+    def test_casino_gating_skips_simple_npc(self):
+        mock_casino = MagicMock()
+        Casino._condense_npc_session(mock_casino, "g", SimpleBlackjackNPC("Slim", npc_db_id=3))
+        # No LLM NPC → nothing submitted (SimpleBlackjackNPC has no submit method at all)
+
+    def test_casino_gating_skips_short_session(self):
+        npc, _, _ = self._make_npc(events=2)
+        npc.submit_session_condensation = MagicMock()
+        mock_casino = MagicMock()
+        Casino._condense_npc_session(mock_casino, "g", npc)
+        npc.submit_session_condensation.assert_not_called()
+
+    def test_casino_gating_skips_low_detail(self):
+        npc, _, _ = self._make_npc(events=10)
+        npc.submit_session_condensation = MagicMock()
+        mock_casino = MagicMock()
+        with patch('cardgames.casino.SALOON_DETAIL_LEVEL', 'low'):
+            Casino._condense_npc_session(mock_casino, "g", npc)
+        npc.submit_session_condensation.assert_not_called()
+
+    def test_casino_gating_skips_unrostered_npc(self):
+        npc, _, _ = self._make_npc(events=10, npc_db_id=None)
+        npc.submit_session_condensation = MagicMock()
+        mock_casino = MagicMock()
+        Casino._condense_npc_session(mock_casino, "g", npc)
+        npc.submit_session_condensation.assert_not_called()
+
+    def test_casino_submits_for_eligible_npc(self):
+        npc, _, _ = self._make_npc(events=10)
+        npc.submit_session_condensation = MagicMock()
+        mock_casino = MagicMock()
+        Casino._condense_npc_session(mock_casino, "game-1", npc)
+        npc.submit_session_condensation.assert_called_once_with("game-1", mock_casino._save_npc_memory)
+
+    def test_save_npc_memory_applies_retention_cap(self):
+        from cardgames.casino import MAX_MEMORIES_PER_NPC
+        mock_casino = MagicMock()
+        Casino._save_npc_memory(mock_casino, 7, "game-1", "A memory.")
+        mock_casino.db.add_npc_memory.assert_called_once_with(7, "game-1", "A memory.", MAX_MEMORIES_PER_NPC)
+
+    def test_departure_hook_triggers_condensation(self):
+        npc, _, _ = self._make_npc(events=10)
+        mock_casino = MagicMock()
+        game = MagicMock()
+        game.game_id = "game-2"
+        Casino._on_npc_departed(mock_casino, game, npc)
+        mock_casino._condense_npc_session.assert_called_once_with("game-2", npc)
+
+    def test_delete_game_condenses_seated_npcs_before_shutdown(self):
+        """stop_game/quit_game/empty-reap all funnel through _delete_game, which
+        bypasses leave() — seated LLM NPCs must still get their sessions condensed."""
+        seated, _, _ = self._make_npc(events=10, name="Seated NPC")
+        seated.shutdown = MagicMock()
+        waiting, _, _ = self._make_npc(events=10, name="Waiting NPC")
+        waiting.shutdown = MagicMock()
+        departed, _, _ = self._make_npc(events=10, name="Departed NPC")
+        departed.shutdown = MagicMock()
+
+        game = MagicMock()
+        game.players = [seated, Player("Alice")]
+        game.players_waiting = [waiting]
+        game.departed_players = [departed]
+
+        mock_casino = MagicMock()
+        mock_casino.games = {"game-3": game}
+        Casino._delete_game(mock_casino, "game-3")
+
+        condensed = [call.args[1] for call in mock_casino._condense_npc_session.call_args_list]
+        self.assertIn(seated, condensed)
+        self.assertIn(waiting, condensed)
+        self.assertNotIn(departed, condensed)  # already condensed via the departure hook
+        seated.shutdown.assert_called_once()
+        waiting.shutdown.assert_called_once()
+        departed.shutdown.assert_called_once()
+
+    def test_queued_condensation_survives_executor_shutdown(self):
+        """shutdown(wait=False) must not cancel a just-submitted condensation."""
+        npc, _, _ = self._make_npc()
+        save_callback = MagicMock()
+        npc.submit_session_condensation("game-4", save_callback)
+        npc.shutdown()
+        npc._executor.shutdown(wait=True)  # wait for the queued task to finish
+        save_callback.assert_called_once()
+
+
+class TestNPCDepartureRoll(unittest.TestCase):
+    """Tests for the M6 per-hand 'calling it a night' departure roll."""
+
+    def _make_game(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 100000
+        mock_casino.update_wallet.return_value = True
+        game = Blackjack(game_id="roll_test", casino=mock_casino)
+        game.NPC_DEPARTURE_BASE = 0.02
+        game.NPC_DEPARTURE_RAMP = 0.28
+        return game
+
+    def _make_llm_npc(self, events=0):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        npc = LLMBlackjackNPC("Roll NPC", get_personality("The Grizzled Prospector"), mock_llm)
+        for i in range(events):
+            npc.observe_table_event(f"event {i}")
+        return npc
+
+    def test_chance_baseline_for_simple_npc(self):
+        game = self._make_game()
+        self.assertAlmostEqual(game._npc_departure_chance(SimpleBlackjackNPC("Slim")), 0.02)
+
+    def test_chance_ramps_with_buffer_fill(self):
+        game = self._make_game()
+        self.assertAlmostEqual(game._npc_departure_chance(self._make_llm_npc(events=0)), 0.02)
+        self.assertAlmostEqual(game._npc_departure_chance(self._make_llm_npc(events=20)), 0.16)
+        self.assertAlmostEqual(game._npc_departure_chance(self._make_llm_npc(events=40)), 0.30)
+
+    def test_roll_removes_npc_when_it_fires(self):
+        game = self._make_game()
+        npc = SimpleBlackjackNPC("Slim")
+        game.players.append(npc)
+        with patch('cardgames.blackjack.random.random', return_value=0.0):
+            game._roll_npc_departures()
+        self.assertNotIn(npc, game.players)
+
+    def test_humans_never_roll(self):
+        game = self._make_game()
+        alice = Player("Alice")
+        game.players.append(alice)
+        with patch('cardgames.blackjack.random.random', return_value=0.0):
+            game._roll_npc_departures()
+        self.assertIn(alice, game.players)
+
+    def test_roll_fires_on_hand_end(self):
+        game = self._make_game()
+        npc = SimpleBlackjackNPC("Slim")
+        game.join(npc)
+        game.deck = [Card("S", 9), Card("S", 10),      # npc: 19
+                     Card("D", 8), Card("H", 10)]      # dealer: 18
+        game.tick()  # WAITING -> BETTING
+        game.tick()  # npc auto-bets, all bet -> PLAYING
+        game.tick()  # npc stands -> DEALER_TURN
+        game.tick()  # dealer plays -> RESOLVING
+        with patch('cardgames.blackjack.random.random', return_value=0.0):
+            game.tick()  # end_hand -> BETWEEN_HANDS + departure roll
+        self.assertEqual(game.state, HandState.BETWEEN_HANDS)
+        self.assertNotIn(npc, game.players)
+
+    def test_departure_frequency_matches_formula(self):
+        """Seeded 10k-roll statistical check at half buffer fill (p = 0.16)."""
+        game = self._make_game()
+        npc = self._make_llm_npc(events=20)
+        game.players.append(npc)
+        rng = random.Random(42)
+        departures = 0
+        with patch('cardgames.blackjack.random.random', rng.random):
+            for _ in range(10000):
+                game._roll_npc_departures()
+                if npc not in game.players:
+                    departures += 1
+                    game.players.append(npc)
+        # Expected 1600; binomial σ ≈ 37, so ±150 is > 4σ — effectively flake-free
+        self.assertGreater(departures, 1450)
+        self.assertLess(departures, 1750)
+
+
+class TestPromptContextGolden(unittest.TestCase):
+    """Golden tests pinning the exact _build_context_block() output per detail level."""
+
+    BACKSTORY = "Struck it rich in '49, lost it all twice over."
+    MEMORIES = [
+        "Beat a stranger named Alice out of $40 last week.",
+        "Lost my shirt to the dealer on Tuesday.",
+        "Won three hands straight off Eli.",
+    ]
+
+    def _make_npc(self, detail_level):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        npc = LLMBlackjackNPC(
+            "Winifred Cobb", get_personality("The Grizzled Prospector"), MagicMock(),
+            backstory=self.BACKSTORY,
+            saloon_name="The Dusty Trail", saloon_town="Tombstone, Arizona",
+            detail_level=detail_level,
+            table_context_fn=lambda: [
+                {'name': 'Alice', 'archetype': None, 'fame': 'known regular'},
+                {'name': 'Eli', 'archetype': 'The Bounty Hunter', 'fame': None},
+            ],
+            memories=self.MEMORIES,
+        )
+        npc.observe_table_event("Alice bet $10.00")
+        npc.observe_table_event("Alice stood at 18")
+        return npc
+
+    def test_low_detail(self):
+        npc = self._make_npc('low')
+        self.assertEqual(
+            npc._build_context_block(),
+            "You are playing blackjack at The Dusty Trail in Tombstone, Arizona. "
+            "Others at the table: Alice, Eli."
+        )
+
+    def test_medium_detail(self):
+        npc = self._make_npc('medium')
+        self.assertEqual(
+            npc._build_context_block(),
+            "You are playing blackjack at The Dusty Trail in Tombstone, Arizona. "
+            "Your backstory: Struck it rich in '49, lost it all twice over. "
+            "You remember from previous nights here: Beat a stranger named Alice out of $40 last week. "
+            "Others at the table: Alice, Eli (The Bounty Hunter). "
+            "Moments ago at the table: Alice bet $10.00; Alice stood at 18."
+        )
+
+    def test_high_detail(self):
+        npc = self._make_npc('high')
+        self.assertEqual(
+            npc._build_context_block(),
+            "You are playing blackjack at The Dusty Trail in Tombstone, Arizona. "
+            "Your backstory: Struck it rich in '49, lost it all twice over. "
+            "You remember from previous nights here: Beat a stranger named Alice out of $40 last week. "
+            "Lost my shirt to the dealer on Tuesday. Won three hands straight off Eli. "
+            "Others at the table: Alice, a known regular, Eli (The Bounty Hunter). "
+            "Moments ago at the table: Alice bet $10.00; Alice stood at 18."
+        )
+
+    def test_recap_shows_only_last_five_events(self):
+        npc = self._make_npc('medium')
+        for i in range(7):
+            npc.observe_table_event(f"event {i}")
+        block = npc._build_context_block()
+        self.assertIn("Moments ago at the table: event 2; event 3; event 4; event 5; event 6.", block)
+        self.assertNotIn("event 1", block)
+
+    def test_no_memories_no_recall_section(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        npc = LLMBlackjackNPC(
+            "Winifred Cobb", get_personality("The Grizzled Prospector"), MagicMock(),
+            detail_level='high')
+        self.assertNotIn("You remember", npc._build_context_block())
+
+
+class TestNPCMemories(unittest.TestCase):
+    """Tests for M6 npc_memories storage helpers."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.npc_id = self.db.create_npc("Winifred Cobb", "The Grizzled Prospector", 15000)
+
+    def test_add_and_get_memory(self):
+        memory_id = self.db.add_npc_memory(self.npc_id, "game-1", "Won big off a nervous stranger.", max_rows=20)
+        self.assertIsNotNone(memory_id)
+        memories = self.db.get_npc_memories(self.npc_id, limit=5)
+        self.assertEqual(len(memories), 1)
+        self.assertEqual(memories[0]['session_summary'], "Won big off a nervous stranger.")
+        self.assertEqual(memories[0]['game_id'], "game-1")
+
+    def test_get_memories_newest_first(self):
+        for i in range(3):
+            self.db.add_npc_memory(self.npc_id, f"game-{i}", f"Session {i}", max_rows=20)
+        memories = self.db.get_npc_memories(self.npc_id, limit=2)
+        self.assertEqual(len(memories), 2)
+        self.assertEqual(memories[0]['session_summary'], "Session 2")
+        self.assertEqual(memories[1]['session_summary'], "Session 1")
+
+    def test_prune_keeps_most_recent(self):
+        for i in range(25):
+            self.db.add_npc_memory(self.npc_id, None, f"Session {i}", max_rows=20)
+        memories = self.db.get_npc_memories(self.npc_id, limit=50)
+        self.assertEqual(len(memories), 20)
+        self.assertEqual(memories[0]['session_summary'], "Session 24")
+        self.assertEqual(memories[-1]['session_summary'], "Session 5")
+
+    def test_prune_is_per_npc(self):
+        other_id = self.db.create_npc("Eli Boone", "The Bounty Hunter", 25000)
+        for i in range(22):
+            self.db.add_npc_memory(self.npc_id, None, f"A {i}", max_rows=20)
+        self.db.add_npc_memory(other_id, None, "B only", max_rows=20)
+        self.assertEqual(len(self.db.get_npc_memories(self.npc_id, limit=50)), 20)
+        self.assertEqual(len(self.db.get_npc_memories(other_id, limit=50)), 1)
+
+    def test_null_game_id_allowed(self):
+        self.db.add_npc_memory(self.npc_id, None, "A quiet night.", max_rows=20)
+        memories = self.db.get_npc_memories(self.npc_id, limit=1)
+        self.assertIsNone(memories[0]['game_id'])
+
+
+class TestDatabaseThreadSafety(unittest.TestCase):
+    """The DB object is shared between the game loop and NPC worker threads
+    (usage logging, session memories); access must be serialized."""
+
+    def test_concurrent_access_is_serialized(self):
+        import threading
+        db = SqliteDatabase(":memory:")
+        npc_id = db.create_npc("Thready", "The Card Sharp", 10000)
+        errors = []
+
+        def hammer():
+            try:
+                for i in range(50):
+                    db.log_llm_usage('npc_action', 'model', 1, 1, npc_id=npc_id)
+                    db.get_npc_wallet(npc_id)
+                    db.add_npc_memory(npc_id, None, f"memory {i}", max_rows=20)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=hammer) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        self.assertEqual(errors, [])
+        rows = db.get_llm_usage_summary(days=1)
+        self.assertEqual(rows[0]['call_count'], 200)
+
+
+class TestFakeLLMClient(unittest.TestCase):
+    """Tests for the deterministic fake LLM provider."""
+
+    def setUp(self):
+        from cardgames.llm_client import FakeClient
+        self.client = FakeClient()
+
+    def test_action_prompt_low_score_hits(self):
+        text, in_tok, out_tok = self.client.complete(
+            "You are a gambler.", "Your hand: 5H, 8C (score: 13). Dealer shows: KD. Hit or stand?", 5)
+        result = json.loads(text)
+        self.assertEqual(result["action"], "hit")
+        self.assertGreater(in_tok, 0)
+        self.assertGreater(out_tok, 0)
+
+    def test_action_prompt_high_score_stands(self):
+        text, _, _ = self.client.complete(
+            "You are a gambler.", "Your hand: KH, 8C (score: 18). Dealer shows: KD. Hit or stand?", 5)
+        self.assertEqual(json.loads(text)["action"], "stand")
+
+    def test_bet_prompt_bets_minimum(self):
+        text, _, _ = self.client.complete(
+            "You are a gambler.",
+            "You have $200 in your wallet. The bet range is $5–$100. How much do you bet?", 5)
+        self.assertEqual(json.loads(text)["amount"], 5)
+
+    def test_other_prompt_returns_prose(self):
+        text, _, _ = self.client.complete(
+            "You are a gambler.", "Summarize your session in 2-4 sentences.", 5)
+        self.assertNotIn("{", text)
+        self.assertTrue(len(text) > 20)
+
+    def test_probe_is_noop(self):
+        self.client.probe()  # must not raise
+
+    def test_create_llm_client_fake_provider(self):
+        from cardgames.llm_client import create_llm_client, FakeClient
+        old = os.environ.get("LLM_PROVIDER")
+        os.environ["LLM_PROVIDER"] = "fake"
+        try:
+            client = create_llm_client()
+            self.assertIsInstance(client, FakeClient)
+        finally:
+            if old is None:
+                del os.environ["LLM_PROVIDER"]
+            else:
+                os.environ["LLM_PROVIDER"] = old
+
+
+class TestTableEventBuffer(unittest.TestCase):
+    """Tests for the M6 in-session event buffer and table-event plumbing."""
+
+    def _make_npc(self, name="Buffer NPC", detail_level='medium'):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = ('{"action": "stand", "quip": null}', 10, 5)
+        return LLMBlackjackNPC(name, get_personality("The Grizzled Prospector"),
+                               mock_llm, detail_level=detail_level)
+
+    def _make_game(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 100000
+        mock_casino.update_wallet.return_value = True
+        return Blackjack(game_id="event_test", casino=mock_casino)
+
+    def test_base_player_observe_is_noop(self):
+        Player("Someone").observe_table_event("Alice bet $10.00")  # must not raise
+
+    def test_npc_buffers_events(self):
+        npc = self._make_npc()
+        npc.observe_table_event("Alice bet $10.00")
+        npc.observe_table_event("Alice stood at 18")
+        self.assertEqual(npc.session_events, ["Alice bet $10.00", "Alice stood at 18"])
+
+    def test_buffer_caps_at_40_with_fifo_eviction(self):
+        npc = self._make_npc()
+        for i in range(45):
+            npc.observe_table_event(f"event {i}")
+        events = npc.session_events
+        self.assertEqual(len(events), 40)
+        self.assertEqual(events[0], "event 5")
+        self.assertEqual(events[-1], "event 44")
+
+    def test_low_detail_skips_buffering(self):
+        npc = self._make_npc(detail_level='low')
+        npc.observe_table_event("Alice bet $10.00")
+        self.assertEqual(npc.session_events, [])
+
+    def test_session_fill(self):
+        npc = self._make_npc()
+        self.assertEqual(npc.session_fill, 0.0)
+        for i in range(20):
+            npc.observe_table_event(f"e{i}")
+        self.assertEqual(npc.session_fill, 0.5)
+
+    def test_bet_emits_event_to_seated_players(self):
+        game = self._make_game()
+        npc = self._make_npc()
+        alice = Player("Alice")
+        game.join(npc)
+        game.join(alice)
+        game.tick()  # WAITING -> BETTING
+        game.bet(alice, 1000)
+        self.assertIn("Alice bet $10.00", npc.session_events)
+
+    def test_notify_reaches_waiting_players(self):
+        game = self._make_game()
+        npc = self._make_npc()
+        game.players_waiting.append(npc)
+        game._notify_table_event("Alice bet $10.00")
+        self.assertEqual(npc.session_events, ["Alice bet $10.00"])
+
+    def test_observer_exception_does_not_break_others(self):
+        class ExplodingPlayer(Player):
+            def observe_table_event(self, event):
+                raise RuntimeError("boom")
+
+        game = self._make_game()
+        npc = self._make_npc()
+        game.players_waiting.extend([ExplodingPlayer("Bad"), npc])
+        with self.assertLogs(level='ERROR'):
+            game._notify_table_event("Alice stood at 18")
+        self.assertEqual(npc.session_events, ["Alice stood at 18"])
+
+    def test_full_hand_events_reach_npc(self):
+        """Play one scripted hand and confirm actions and outcomes are buffered."""
+        game = self._make_game()
+        npc = self._make_npc()
+        alice = Player("Alice")
+        game.join(npc)
+        game.join(alice)
+        # Cards pop from the end: dealer first (2), then npc (2), then alice (2).
+        game.deck = [Card("C", 8), Card("C", 10),      # alice: 18
+                     Card("S", 9), Card("S", 10),      # npc: 19
+                     Card("D", 7), Card("H", 10)]      # dealer: 17
+        game.tick()  # WAITING -> BETTING
+        game.bet(game.players[0], 1000)
+        game.bet(game.players[1], 1000)
+        game.tick()  # all bet -> PLAYING (deals)
+        game.tick()  # npc's turn: stands (mock LLM) — first call submits
+        npc._pending_action_future.result(timeout=2.0)
+        game.tick()  # second call returns "stand"
+        game.stand(alice)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> end_hand
+        events = npc.session_events
+        self.assertIn("Buffer NPC stood at 19", events)
+        self.assertIn("Alice stood at 18", events)
+        self.assertIn("the dealer stood at 17", events)
+        self.assertIn("Buffer NPC won $20.00", events)
+        self.assertIn("Alice won $20.00", events)
 
 
 if __name__ == '__main__':

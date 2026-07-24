@@ -95,8 +95,13 @@ def deserialize_player(data, casino=None):
         if llm_client is not None:
             try:
                 personality = get_personality(personality_name)
+                memories = []
+                loader = getattr(casino, '_load_npc_memories', None)
+                if callable(loader):
+                    memories = loader(npc_db_id)
                 player = LLMBlackjackNPC(name, personality, llm_client,
-                                         npc_db_id=npc_db_id, backstory=backstory)
+                                         npc_db_id=npc_db_id, backstory=backstory,
+                                         memories=memories)
                 player.hand = hand
                 return player
             except Exception:
@@ -192,6 +197,9 @@ class Blackjack(CardGame):
     DRAMATIC_PAUSE = float(os.getenv('BLACKJACK_DRAMATIC_PAUSE', '1.5'))
     DEALER_CARD_PAUSE = float(os.getenv('BLACKJACK_DEALER_CARD_PAUSE', '1.0'))
     RESULT_PAUSE = float(os.getenv('BLACKJACK_RESULT_PAUSE', '0.8'))
+    # Per-hand chance an NPC "calls it a night": base + ramp * buffer fill.
+    NPC_DEPARTURE_BASE = float(os.getenv('BLACKJACK_NPC_DEPARTURE_BASE', '0.02'))
+    NPC_DEPARTURE_RAMP = float(os.getenv('BLACKJACK_NPC_DEPARTURE_RAMP', '0.28'))
 
     # Ambient tables (no human players — NPCs only) run slower, as background atmosphere
     # rather than a game anyone's actively waiting on.
@@ -341,6 +349,8 @@ class Blackjack(CardGame):
                 )
         elif reason == 'broke':
             self.output(f"💸 {player} is tapped out and tips their hat goodbye.")
+        elif reason == 'night':
+            self.output(f"🌙 {player} reckons it's time to call it a night and heads for the door.")
         else:
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
@@ -359,6 +369,15 @@ class Blackjack(CardGame):
                 else:
                     self.state = HandState.DEALER_TURN
                 self.current_player_idx = None
+
+    def _notify_table_event(self, event):
+        """Broadcast a short table-event description to everyone seated
+        (active and waiting), so memory-keeping NPCs can record it."""
+        for player in self.players + self.players_waiting:
+            try:
+                player.observe_table_event(event)
+            except Exception as e:
+                logging.error(f"[{self.game_id[:8]}] observe_table_event failed for {player.name}: {e}")
 
     def _fire_departure_hook(self, player):
         """Shared hook: fires whenever an NPC leaves the table, regardless of
@@ -423,6 +442,7 @@ class Blackjack(CardGame):
         self._dirty = True
         self._update_time_last_event()
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} bets ${format_cents(amount_cents)}")
+        self._notify_table_event(f"{player} bet ${format_cents(amount_cents)}")
 
         # Output bet (NPC balance hidden)
         if player.is_npc:
@@ -492,10 +512,12 @@ class Blackjack(CardGame):
             bet_amount = 0
 
         won = lost = 0
+        outcome_event = None
         if self.get_score(player) > 21:
             self._output_player_result(player, f"💥 {tag}went bust! ${format_cents(bet_amount)} lost to the house.")
             logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: bust — loses ${format_cents(bet_amount)}")
             lost = bet_amount
+            outcome_event = f"{player} busted and lost ${format_cents(bet_amount)}"
         else:
             if self.get_score(self.dealer) > 21 or self.get_score(player) > self.get_score(self.dealer):
                 winnings = bet_amount * 2
@@ -506,12 +528,14 @@ class Blackjack(CardGame):
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
                 won = bet_amount
+                outcome_event = f"{player} won ${format_cents(winnings)}"
             elif self.get_score(player) == self.get_score(self.dealer):
                 self.casino.update_wallet(player, bet_amount)
                 self._output_player_result(
                     player, f"🤝 {tag}pushes with the dealer. ${format_cents(bet_amount)} returned."
                 )
                 logging.info(f"[{self.game_id[:8]}] {_player_label(player)}: push at {self.get_score(player)}")
+                outcome_event = f"{player} pushed with the dealer"
             else:
                 self._output_player_result(player, f"❌ {tag}loses to the house. ${format_cents(bet_amount)} gone.")
                 logging.info(
@@ -519,6 +543,8 @@ class Blackjack(CardGame):
                     f" (held {self.get_score(player)} vs dealer {self.get_score(self.dealer)})"
                 )
                 lost = bet_amount
+                outcome_event = f"{player} lost ${format_cents(bet_amount)} to the house"
+        self._notify_table_event(outcome_event)
         self.casino.record_hand_result(player, won, lost)
 
     def end_hand(self):
@@ -545,6 +571,22 @@ class Blackjack(CardGame):
             )
         else:
             self.time_between_hands_duration = self.TIME_BETWEEN_HANDS
+        self._roll_npc_departures()
+
+    def _npc_departure_chance(self, npc):
+        """Per-hand chance an NPC leaves on its own. Simple NPCs have no
+        session buffer, so they sit at the flat baseline."""
+        fill = getattr(npc, 'session_fill', 0.0)
+        return self.NPC_DEPARTURE_BASE + self.NPC_DEPARTURE_RAMP * fill
+
+    def _roll_npc_departures(self):
+        """Once per hand (on entry to BETWEEN_HANDS): each seated NPC may
+        call it a night, with chance growing as its session buffer fills."""
+        npcs = [p for p in self.players + self.players_waiting if getattr(p, 'is_npc', False)]
+        for npc in npcs:
+            if random.random() < self._npc_departure_chance(npc):
+                logging.info(f"[{self.game_id[:8]}] NPC {npc.name} calls it a night")
+                self.leave(npc, reason='night')
 
     def hit(self, player):
         self._check_playing_state()
@@ -560,6 +602,10 @@ class Blackjack(CardGame):
         )
 
         score = self.get_score(player)
+        if score > 21:
+            self._notify_table_event(f"{player} hit, drew {player.hand[-1]} and busted at {score}")
+        else:
+            self._notify_table_event(f"{player} hit, drew {player.hand[-1]}, now at {score}")
         if score == 21:
             self.output(f"🎯 {player} hits 21!")
             self.next_turn()
@@ -575,6 +621,7 @@ class Blackjack(CardGame):
         self._update_time_last_event()
         self.output(f"✋ {player} stands pat.")
         logging.info(f"[{self.game_id[:8]}] {_player_label(player)} stands at {self.get_score(player)}")
+        self._notify_table_event(f"{player} stood at {self.get_score(player)}")
         self.next_turn()
 
     def hand_in_progress(self):
@@ -641,12 +688,15 @@ class Blackjack(CardGame):
         if self.get_score(self.dealer) == 21:
             self.output("🎯 Dealer hits 21!")
             logging.info(f"[{self.game_id[:8]}] Dealer hits 21")
+            self._notify_table_event("the dealer hit 21")
         elif self.get_score(self.dealer) > 21:
             self.output("💥 Dealer busts! The house crumbles!")
             logging.info(f"[{self.game_id[:8]}] Dealer busts at {self.get_score(self.dealer)}")
+            self._notify_table_event(f"the dealer busted at {self.get_score(self.dealer)}")
         else:
             self.output(f"✋ Dealer stands at {self.get_score(self.dealer)}.")
             logging.info(f"[{self.game_id[:8]}] Dealer stands at {self.get_score(self.dealer)}")
+            self._notify_table_event(f"the dealer stood at {self.get_score(self.dealer)}")
 
         self.state = HandState.RESOLVING
 
@@ -734,6 +784,7 @@ class Blackjack(CardGame):
                 quip = getattr(player, 'last_quip', None)
                 if quip:
                     self.output(f"🤠 {player.name}: \"{quip}\"")
+                    self._notify_table_event(f'{player.name} said: "{quip}"')
                     player.last_quip = None
                 amount = max(self.MIN_BET, min(amount, self.MAX_BET, int(wallet)))
                 self.bet(player, amount)
@@ -787,6 +838,7 @@ class Blackjack(CardGame):
             quip = getattr(current_player, 'last_quip', None)
             if quip:
                 self.output(f"🤠 {current_player.name}: \"{quip}\"")
+                self._notify_table_event(f'{current_player.name} said: "{quip}"')
                 current_player.last_quip = None
             if action == "hit":
                 self.hit(current_player)

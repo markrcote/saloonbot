@@ -124,14 +124,14 @@ Discord Users
 ### Key Modules
 
 **cardgames/**
-- `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; logs LLM usage to DB
+- `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence; broadcasts short table-event strings (bets, actions, outcomes, quips) to seated players via `_notify_table_event`; rolls the per-hand NPC departure chance on entry to BETWEEN_HANDS
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; condenses departing LLM NPCs' sessions into `npc_memories` (fire-and-forget, capped at `MAX_MEMORIES_PER_NPC=20` per NPC) and loads them back at seating via `_load_npc_memories`; logs LLM usage to DB
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
-- `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play
-- `llm_client.py` - LLM provider abstraction (Claude / OpenAI); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout
+- `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play, buffers table events per session (`deque(maxlen=40)`), and condenses them into a first-person memory on departure (`submit_session_condensation`)
+- `llm_client.py` - LLM provider abstraction (Claude / OpenAI / deterministic fake for testing); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
-- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive) and a `get_setting`/`set_setting` runtime config store
+- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive), a `get_setting`/`set_setting` runtime config store, and session-memory helpers (`add_npc_memory` insert+prune, `get_npc_memories` newest-first); every public method runs under an RLock (see thread safety in Key Patterns)
 - `sqlite_database.py` - SQLite alternative to `database.py`; same interface (including the wallet/settings helpers above), used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
 - `money.py` - Dollars/cents conversion helpers (`dollars_to_cents`, `cents_to_dollars`, `format_cents`); all wallet/bet/stats values are stored and passed internally as integer cents — dollars only appear at human-facing boundaries (Discord slash command args, plain-text chat commands, CLI input, LLM prompt text)
 
@@ -141,6 +141,7 @@ Discord Users
 - `games` - Persists game state (deck, hands, bets, timers) for server restart recovery
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
 - `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), `wallet_cents`, current_game_id
+- `npc_memories` - Condensed NPC session summaries: npc_id, game_id (no FK — games rows are deleted at game end), session_summary, created_at; pruned to the 20 most recent per NPC on insert
 - `llm_usage` - Per-call LLM token tracking: purpose, model, input/output tokens, npc_id, game_id
 - `settings` - Runtime key/value config store (`setting_key`/`setting_value`); accessed via `get_setting`/`set_setting`
 
@@ -171,16 +172,19 @@ Discord Users
 | BLACKJACK_AMBIENT_SPEED_MULTIPLIER | 2.0 | Multiplier applied to dramatic/dealer-card/result pauses when a table has no human players (NPCs only) |
 | BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN | 120 | Minimum seconds between hands on an all-NPC ambient table |
 | BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX | 300 | Maximum seconds between hands on an all-NPC ambient table (actual delay is randomized within [MIN, MAX]) |
+| BLACKJACK_NPC_DEPARTURE_BASE | 0.02 | Baseline per-hand chance an NPC leaves ("calls it a night") |
+| BLACKJACK_NPC_DEPARTURE_RAMP | 0.28 | Extra departure chance at a full session event buffer |
 | WALLET_REPLENISH_INTERVAL | 300 | Seconds between idle-NPC wallet replenishment passes |
-| LLM_PROVIDER | claude | LLM provider for bot players: `claude` or `openai` |
+| LLM_PROVIDER | claude | LLM provider for bot players: `claude`, `openai`, or `fake` (deterministic, no API key; for tests) |
 | ANTHROPIC_API_KEY | - | API key for Claude; if unset, bot players use simple strategy; see secret resolution below |
 | OPENAI_API_KEY | - | API key for OpenAI; if unset, bot players use simple strategy; see secret resolution below |
 | LLM_MODEL | provider default | Override LLM model (default: claude-haiku-4-5 / gpt-4o-mini) |
 | LLM_TIMEOUT | 5 | Seconds before bot player falls back to basic strategy |
 | LLM_HEALTHCHECK_INTERVAL | 300 | Seconds between periodic re-probes of the LLM provider, to detect credit exhaustion/outages and recovery without a restart |
+| LLM_SESSION_MEMORY_TIMEOUT | 15 | Seconds allowed for the fire-and-forget session-memory call |
 | SALOON_NAME | The Rusty Spur | Name of the saloon (shown in Discord and injected into LLM context) |
 | SALOON_TOWN | Redemption, Texas | Town/location of the saloon |
-| SALOON_DETAIL_LEVEL | medium | Controls LLM context richness: `low` (names only, no backstory), `medium` (2-sentence backstory, archetypes), `high` (4-sentence backstory, full context) |
+| SALOON_DETAIL_LEVEL | medium | Controls LLM context richness: `low` (names only, no backstory, session memory off entirely), `medium` (2-sentence backstory, archetypes, 1 recalled memory), `high` (4-sentence backstory, full context, 3 recalled memories) |
 
 ### Secret resolution
 
@@ -199,6 +203,8 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Clean all stateful tables in every test's setUp**: `DELETE FROM game_channels`, `DELETE FROM games`, `DELETE FROM users`, plus `redis.flushall()`.
 - **Prefer structured event assertions** (`data.get('event_type') == 'game_over'`) over text substring checks — more robust if wording changes.
 - **Use injectable decks for game-flow tests**: pass `deck=[...]` in the `new_game` message to control card order and prevent flaky failures from bad deals (e.g., unexpected dealer blackjack).
+- **Use `LLM_PROVIDER=fake` to e2e the LLM path**: the deterministic fake provider (no API key) makes the real server run LLM NPCs — quips, session memories, usage logging — with canned, valid responses. The fake stands at 16+, bets the minimum, and answers non-game prompts with fixed prose.
+- **The base e2e env zeroes the NPC departure roll** (`BLACKJACK_NPC_DEPARTURE_BASE/RAMP = 0`) so NPCs never randomly leave mid-test; tests exercising the roll override via `EXTRA_ENV`.
 
 ## Key Patterns
 
@@ -210,6 +216,8 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Schema migrations**: `_init_database()` runs on startup and applies any pending migrations from the `MIGRATIONS` list in order, each committed atomically; `schema_version` tracks the last applied index. To add a schema change, append a new entry to `MIGRATIONS` — never edit existing entries. Migrations run automatically on server restart, so no manual SQL is needed for staging/production deployments.
 - **Dirty-flag write-behind**: Each `Blackjack` instance sets its own `_dirty` flag when its state changes; on each tick the Casino moves dirty games into `_dirty_games`, then batches and flushes DB writes only when that set is non-empty, reducing unnecessary writes on each tick.
 - **MySQL deadlock retry**: `database.py` wraps writes in a retry helper that catches InnoDB deadlock errors (errno 1213) and retries automatically; callers don't need retry logic.
+- **DB thread safety**: the DB object is shared between the main game loop and NPC worker threads (usage logging, session-memory writes), and neither `mysql.connector` nor a shared sqlite3 connection tolerates concurrent use — every public method of both DB classes runs under a per-instance `RLock` via the `@_synchronized` decorator. Add the decorator to any new DB method.
+- **NPC session memory (M6)**: one session = one NPC's tenure at a table. `Blackjack` broadcasts templated event strings to seated players; LLM NPCs buffer them (40-event FIFO cap). On any departure path (the shared M4 hook, plus `_delete_game` for stop/quit/reap), the Casino submits a fire-and-forget condensation call (purpose `session_memory`) on the NPC's own executor producing a 2-4 sentence first-person memory in `npc_memories`; skipped for simple NPCs, at `low` detail, and for sessions under `SESSION_MEMORY_MIN_EVENTS=3` events; failures write no row. Memories are loaded once at seating and injected into prompts per detail level. The in-session buffer is deliberately not persisted across restarts. The per-hand departure roll (`0.02 + 0.28 * buffer fill`) gives busy tables natural turnover.
 - **Game persistence**: Casino saves game state to the database (MySQL or SQLite) after each action; restores all active games on startup via `load_all_active_games()`
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - **NPC autofill**: `Casino.npc_min/npc_max` (default 0/4) control per-table NPC counts; `_autofill_npcs` runs on every tick (throttled to `AUTOFILL_INTERVAL=15s` per game), acts only in WAITING/BETWEEN_HANDS states. With `npc_min > 0`, games stay populated and `EMPTY_GAME_TIMEOUT` won't reap them — enabling NPC-only ambient play. Limits are persisted in `settings` as `npc_autofill_min`/`npc_autofill_max` and loaded at startup.

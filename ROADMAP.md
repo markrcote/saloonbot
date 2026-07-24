@@ -4,7 +4,7 @@
 
 [VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
-**Current state:** M1–M5 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, and idle broke NPCs slowly rebuild their wallets between sessions. Still missing: NPCs have no memory of individual sessions, no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play). **M6 (NPC Memory & Context Window) is next up.**
+**Current state:** M1–M6 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, idle broke NPCs slowly rebuild their wallets between sessions, and NPCs now accumulate session memories: table events are buffered while seated, condensed into persistent first-person summaries on departure, and recalled into future prompts. Still missing: no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play). **M7 (NPC–NPC Relationships) is next up.**
 
 **What exists that can be reused:**
 - `personalities.py` — 19 rich personality definitions with system prompts
@@ -12,7 +12,8 @@
 - DB migration system (`MIGRATIONS` list in `database.py` / `sqlite_database.py`) — append-only, auto-applied on startup
 - `casino.py` `_dirty_games` write-behind pattern (game-level) and `Blackjack._dirty` flag (per-instance) — model for any new dirty-flag persistence
 - `wwnames/wwnames.py` — Old West name generator, used for NPC names since M1
-- `Blackjack.leave()` / `on_npc_departed` hook (M4) — the single point to observe any NPC leaving a table; M6 attaches session condensation here
+- `Blackjack.leave()` / `on_npc_departed` hook (M4) — the single point to observe any NPC leaving a table; M6's session condensation attaches here (and `_delete_game` covers the stop/quit/reap paths that bypass it)
+- M6's memory machinery for M7/M8: `npc_memories` rows (fresh session summaries to feed relationship-note generation), `submit_session_condensation`'s fire-and-forget executor pattern, and the `LLM_PROVIDER=fake` deterministic provider that makes the whole LLM path e2e-testable without an API key
 
 ---
 
@@ -97,7 +98,7 @@
 
 ---
 
-## Milestone 6: NPC Memory & Context Window
+## Milestone 6: NPC Memory & Context Window ✓ DONE
 
 **Goal:** NPCs stop making stateless, one-shot LLM calls. Each NPC accumulates a running memory of what happens while it's seated at a table, and condenses that into a persistent memory when it leaves — feeding future prompts and supplying the raw material for M7/M8's relationship notes.
 
@@ -118,6 +119,8 @@
 - Files: `cardgames/llm_npc.py`, `cardgames/casino.py`, `cardgames/blackjack.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`
 
 **Verification:** Seat an NPC, play a few hands with quips and a human player, remove the NPC, confirm an `npc_memories` row is created summarizing the session; seat it again later and confirm the next session's prompt references the prior memory. Separately, seat an NPC at a busy table and confirm its departure probability measurably increases as the buffer grows over many hands.
+
+**Implementation notes (as built):** All of the above shipped as designed, plus three things the plan didn't anticipate. (1) `_delete_game` (stop_game/quit_game/empty-game reap) bypasses the M4 hook entirely, so it now fires condensation for seated LLM NPCs directly before executor shutdown — without this, most admin- or reap-ended sessions would silently produce no memory. (2) A deterministic `LLM_PROVIDER=fake` provider was added so the real server can run the full LLM path in e2e tests without an API key; e2e covers the seat→play→remove→memory-row→reseat loop and a forced departure roll. (3) The fake provider exposed a latent race: NPC worker threads and the main game loop share one DB connection, which is not thread-safe — all public methods of both DB classes now run under a per-instance RLock. The departure roll runs once per hand in `end_hand()` (entry to BETWEEN_HANDS), applies to simple NPCs too at the flat 2% baseline, and its constants are env-overridable (`BLACKJACK_NPC_DEPARTURE_BASE/RAMP`) and zeroed in the test harnesses for determinism.
 
 ---
 
@@ -236,4 +239,4 @@ M1 (Persistent NPCs)
 │       └── M8 (PC–NPC Relationships)    ← requires M1 + M3 + M6
 ```
 
-M1 is the critical prerequisite. M2 and M3 can proceed in parallel after M1. M5 is independent — it can be picked up any time after M1 with no other dependencies, which is why it's slotted in next: it's small, self-contained, and unblocks nothing else, so there's no cost to doing it before the memory/relationships chain. M4 is a small standalone refactor that must land before M6 (it supplies the departure hook condensation attaches to). M6 is a prerequisite for both M7 and M8 (it supplies the session-condensation mechanism their relationship notes are generated from). M7 can start after M1+M6, M8 after M1+M3+M6. M9a and M9b both follow M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.
+M1 is the critical prerequisite. M2, M3, M4, and M5 built on it and are all done, as is M6 — the session-condensation mechanism M7's and M8's relationship notes are generated from. With M1–M6 complete, **M7 is unblocked and next**; M8 is also unblocked (M1+M3+M6 all done) but M7 comes first in the plan. M9a and M9b both follow M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.

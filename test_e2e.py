@@ -122,6 +122,8 @@ class EndToEndTestCase(unittest.TestCase):
             'BLACKJACK_DRAMATIC_PAUSE': '0',
             'BLACKJACK_DEALER_CARD_PAUSE': '0',
             'BLACKJACK_RESULT_PAUSE': '0',
+            'BLACKJACK_NPC_DEPARTURE_BASE': '0',
+            'BLACKJACK_NPC_DEPARTURE_RAMP': '0',
             'LLM_TIMEOUT': '1',
             'PYTHONUNBUFFERED': '1',
         })
@@ -319,6 +321,25 @@ class EndToEndTestCase(unittest.TestCase):
                         return response['game_id']
 
             self.fail("Failed to create game")
+        finally:
+            pubsub.close()
+
+    def _stop_game(self, game_id):
+        """Stop a game and wait for its game_over confirmation."""
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'casino_action',
+                'action': 'stop_game',
+                'game_id': game_id,
+            }))
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                msg = pubsub.get_message(timeout=0.5)
+                if msg and msg['type'] == 'message':
+                    data = json.loads(msg['data'])
+                    if data.get('event_type') == 'game_over':
+                        return
         finally:
             pubsub.close()
 
@@ -1218,24 +1239,6 @@ class TestManualNPC(EndToEndTestCase):
             self._stop_game(self.game_id)
         super().tearDown()
 
-    def _stop_game(self, game_id):
-        pubsub = self.subscribe_to_game(game_id)
-        try:
-            self.redis.publish("casino", json.dumps({
-                'event_type': 'casino_action',
-                'action': 'stop_game',
-                'game_id': game_id,
-            }))
-            deadline = time.time() + 5
-            while time.time() < deadline:
-                msg = pubsub.get_message(timeout=0.5)
-                if msg and msg['type'] == 'message':
-                    data = json.loads(msg['data'])
-                    if data.get('event_type') == 'game_over':
-                        return
-        finally:
-            pubsub.close()
-
     def _npc_action(self, action, game_id, **kwargs):
         self.redis.publish("casino", json.dumps({
             'event_type': 'npc_action',
@@ -1416,6 +1419,169 @@ class TestNPCWalletReplenishment(EndToEndTestCase):
         row = self.poll_db("SELECT wallet_cents FROM npcs WHERE id = %s", (npc_id,))
         self.assertIsNotNone(row)
         self.assertEqual(row[0], 100, "Seated NPC's wallet should be untouched by replenishment")
+
+
+class TestNPCSessionMemory(EndToEndTestCase):
+    """E2E tests for M6 NPC session memories, using the fake LLM provider."""
+
+    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+
+    # Two players (NPC seated first, then human). Cards pop from the end:
+    # dealer H6 + S10 (16, no blackjack, hits D2 → 18), NPC C8 + D10 (18 —
+    # the fake LLM stands at 16+), human C7 + D9 (16).
+    MEMORY_DECK = [
+        'H2', 'H3', 'H4', 'H5', 'H7', 'H8', 'H9',  # filler for later hands
+        'D2',           # dealer hit card → 18
+        'D9', 'C7',     # human: 16
+        'D10', 'C8',    # npc: 18
+        'S10', 'H6',    # dealer hole + face-up: 16
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.game_id = None
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npc_memories")
+        cursor.execute("DELETE FROM npcs")
+        cursor.execute("DELETE FROM llm_usage")
+        self.db.commit()
+        cursor.close()
+
+    def tearDown(self):
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def _remove_npc(self, game_id):
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'npc_action',
+            'action': 'remove_npc',
+            'game_id': game_id,
+        }))
+
+    def _play_one_hand(self, game_id, pubsub, player_name):
+        """Bet and stand through one hand, returning when the hand resolves."""
+        self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
+        self.place_bet(game_id, player_name, 1000)
+        pre = self.collect_messages(
+            pubsub, timeout=10, stop_on=[f"{player_name}, you're up", 'dust settles'])
+        if not any('dust settles' in m for m in pre):
+            self.assertTrue(
+                any(f"{player_name}, you're up" in m for m in pre),
+                f"{player_name} should be prompted for their turn. Messages: {pre}")
+            self.player_action(game_id, player_name, 'stand')
+            self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+
+    def test_npc_memories_table_exists(self):
+        """Migration 7 was applied on server startup."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT COUNT(*) FROM npc_memories")
+        cursor.fetchone()
+        cursor.close()
+
+    def test_removed_npc_writes_session_memory(self):
+        """The full memory loop: seat an LLM NPC, play a hand, remove the NPC,
+        and a condensed session memory lands in npc_memories with usage logged."""
+        game_id = self.create_game(num_bots=1, deck=self.MEMORY_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'MemHuman')
+            self._play_one_hand(game_id, pubsub, 'MemHuman')
+            self._remove_npc(game_id)
+
+            row = self.poll_db(
+                "SELECT npc_id, game_id, session_summary FROM npc_memories LIMIT 1",
+                (), timeout=10)
+            self.assertIsNotNone(row, "Expected a session memory row after NPC removal")
+            self.assertEqual(row[1], game_id)
+            self.assertIn("Played a few hands", row[2])
+
+            usage = self.poll_db(
+                "SELECT COUNT(*) FROM llm_usage WHERE purpose = 'session_memory'",
+                (), predicate=lambda r: r[0] > 0, timeout=5)
+            self.assertIsNotNone(usage, "Expected a session_memory llm_usage row")
+        finally:
+            pubsub.close()
+
+    def test_second_session_appends_second_memory(self):
+        """Reseat the same roster NPC and confirm each session leaves its own memory."""
+        game_id = self.create_game(num_bots=1, deck=self.MEMORY_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'MemHuman')
+            self._play_one_hand(game_id, pubsub, 'MemHuman')
+            self._remove_npc(game_id)
+            first = self.poll_db(
+                "SELECT npc_id FROM npc_memories LIMIT 1", (), timeout=10)
+            self.assertIsNotNone(first, "Expected a memory after the first session")
+
+            # Reseat: the only roster NPC is available again and gets picked up
+            # (its prior memory is loaded into the prompt context at seating).
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'npc_action',
+                'action': 'add_npc',
+                'game_id': game_id,
+            }))
+            self._play_one_hand(game_id, pubsub, 'MemHuman')
+            self._remove_npc(game_id)
+
+            rows = self.poll_db(
+                "SELECT COUNT(*) FROM npc_memories WHERE npc_id = %s",
+                (first[0],), predicate=lambda r: r[0] >= 2, timeout=10)
+            self.assertIsNotNone(rows, "Expected a second memory row for the same NPC")
+        finally:
+            pubsub.close()
+
+
+class TestNPCDepartureE2E(EndToEndTestCase):
+    """E2E: with the departure roll forced to certainty, an NPC calls it a
+    night after the hand and its session is condensed without any remove_npc."""
+
+    EXTRA_ENV = {
+        'LLM_PROVIDER': 'fake',
+        'BLACKJACK_NPC_DEPARTURE_BASE': '1.0',
+        'BLACKJACK_NPC_DEPARTURE_RAMP': '0',
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.game_id = None
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npc_memories")
+        cursor.execute("DELETE FROM npcs")
+        self.db.commit()
+        cursor.close()
+
+    def tearDown(self):
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def test_forced_departure_condenses_session(self):
+        game_id = self.create_game(num_bots=1, deck=TestNPCSessionMemory.MEMORY_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'RollHuman')
+            self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
+            self.place_bet(game_id, 'RollHuman', 1000)
+            pre = self.collect_messages(
+                pubsub, timeout=10, stop_on=["RollHuman, you're up", 'dust settles'])
+            if not any('dust settles' in m for m in pre):
+                self.player_action(game_id, 'RollHuman', 'stand')
+            end = self.collect_messages(pubsub, timeout=10, stop_on='call it a night')
+            self.assertTrue(
+                any('call it a night' in m for m in end),
+                f"NPC should call it a night after the hand. Messages: {end}")
+
+            row = self.poll_db(
+                "SELECT game_id FROM npc_memories LIMIT 1", (), timeout=10)
+            self.assertIsNotNone(row, "Expected a session memory after the forced departure")
+            self.assertEqual(row[0], game_id)
+        finally:
+            pubsub.close()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
+import json
 import os
+import re
 from abc import ABC, abstractmethod
 
 
@@ -106,14 +108,50 @@ class OpenAIClient(LLMClient):
             raise LLMError(str(e)) from e
 
 
+class FakeClient(LLMClient):
+    """Deterministic offline provider for testing (LLM_PROVIDER=fake).
+
+    Answers by prompt shape: action prompts get valid hit/stand JSON,
+    bet prompts get a minimum bet, everything else a fixed prose line.
+    """
+
+    provider = "fake"
+
+    def __init__(self):
+        self.model = "fake"
+
+    def complete(self, system: str, user: str, timeout: float) -> tuple[str, int, int]:
+        input_tokens = (len(system) + len(user)) // 4
+        if "Hit or stand?" in user:
+            score_match = re.search(r"score: (\d+)", user)
+            score = int(score_match.group(1)) if score_match else 20
+            action = "hit" if score < 16 else "stand"
+            text = json.dumps({"action": action, "quip": "Cards don't lie, friend."})
+        elif "How much do you bet?" in user:
+            range_match = re.search(r"range is \$(\d+)", user)
+            amount = int(range_match.group(1)) if range_match else 5
+            text = json.dumps({"amount": amount, "quip": "Easin' in slow tonight."})
+        else:
+            text = (
+                "Played a few hands at the table tonight. "
+                "Folks came and went, and the cards mostly behaved."
+            )
+        return text, input_tokens, len(text) // 4
+
+    def probe(self) -> None:
+        pass
+
+
 def create_llm_client() -> LLMClient:
     explicit = os.environ.get("LLM_PROVIDER", "").lower()
     if explicit == "claude":
         return ClaudeClient()
     elif explicit == "openai":
         return OpenAIClient()
+    elif explicit == "fake":
+        return FakeClient()
     elif explicit:
-        raise LLMError(f"Unknown LLM_PROVIDER: {explicit!r}. Expected 'claude' or 'openai'.")
+        raise LLMError(f"Unknown LLM_PROVIDER: {explicit!r}. Expected 'claude', 'openai', or 'fake'.")
 
     has_anthropic = bool(_read_key("ANTHROPIC_API_KEY"))
     has_openai = bool(_read_key("OPENAI_API_KEY"))

@@ -284,7 +284,7 @@ class LLMBlackjackNPC(NPCPlayer):
             try:
                 self._usage_callback(
                     purpose, self._llm_client.model, input_tokens, output_tokens,
-                    npc_id=self.npc_db_id
+                    npc_id=self.npc_db_id, provider=self._llm_client.provider
                 )
             except Exception as e:
                 logger.warning("Failed to record LLM usage: %s", e)

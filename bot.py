@@ -231,10 +231,10 @@ class BlackjackCog(commands.Cog):
         else:
             logging.info("No active games to restore")
 
-    async def _handle_usage_stats_response(self, interaction, rows):
+    async def _handle_usage_stats_response(self, interaction, rows, days=7):
         """Format and send LLM usage stats as an ephemeral followup."""
         if not rows:
-            await interaction.followup.send("No LLM usage recorded in the past 7 days.", ephemeral=True)
+            await interaction.followup.send(f"No LLM usage recorded in the past {days} days.", ephemeral=True)
             return
 
         lines = []
@@ -244,15 +244,16 @@ class BlackjackCog(commands.Cog):
             out_tok = r.get('total_output', 0) or 0
             total_in += in_tok
             total_out += out_tok
+            provider = r.get('provider') or 'unknown'
             lines.append(
-                f"**{r['purpose']}** ({r['model']}) — "
+                f"**{r['purpose']}** ({r['model']} / {provider}) — "
                 f"{r.get('call_count', 0)} calls, "
                 f"{in_tok:,} in / {out_tok:,} out tokens"
             )
 
         lines.append(f"\n**Total:** {total_in:,} input / {total_out:,} output tokens")
         embed = nextcord.Embed(
-            title="LLM Usage (past 7 days)",
+            title=f"LLM Usage (past {days} days)",
             description="\n".join(lines),
             color=0x4169e1,
         )
@@ -333,9 +334,20 @@ class BlackjackCog(commands.Cog):
         await interaction.send(embed=embed)
 
     @nextcord.slash_command(name="usage", guild_ids=GUILD_IDS,
-                            description="Show LLM usage stats for the past 7 days (admin only)",
+                            description="Show LLM usage stats (admin only)",
                             default_member_permissions=nextcord.Permissions(administrator=True))
-    async def usage_stats(self, interaction: nextcord.Interaction):
+    async def usage_stats(
+        self,
+        interaction: nextcord.Interaction,
+        days: int = nextcord.SlashOption(
+            name="days",
+            description="How many days of usage history to show (default 7)",
+            required=False,
+            default=7,
+            min_value=1,
+            max_value=90,
+        ),
+    ):
         await interaction.response.defer(ephemeral=True)
         request_id = str(uuid.uuid4())
         self._pending_usage_interactions[request_id] = interaction
@@ -343,6 +355,7 @@ class BlackjackCog(commands.Cog):
             'event_type': 'casino_action',
             'action': 'get_usage',
             'request_id': request_id,
+            'days': days,
         }
         try:
             await self.redis.publish("casino", json.dumps(message))
@@ -425,6 +438,29 @@ class BlackjackCog(commands.Cog):
             title="NPC Roster",
             description="\n".join(npc_lines) if npc_lines else "No NPCs in roster",
             color=0x4169e1,
+        ))
+
+        # --- LLM Health ---
+        llm_health = data.get('llm_health', {})
+        if llm_health:
+            lh_lines = []
+            for provider, info in llm_health.items():
+                icon = "🟢" if info["status"] == "up" else "🔴" if info["status"] == "down" else "⚪"
+                lh_lines.append(
+                    f"{icon} **{provider}**: {info['status']}"
+                    f" | last success: {info['last_success_at'] or '—'}"
+                    f" | last failure: {info['last_failure_at'] or '—'}"
+                )
+                if info.get('last_error'):
+                    lh_lines.append(f"  ⤷ {info['last_error']}")
+            mode = "AI strategy" if data.get('llm_active') else "⚠️ FALLBACK — simple/rule-based strategy"
+            lh_lines.append(f"\n**Current NPC mode:** {mode}")
+        else:
+            lh_lines = ["No LLM health data yet (no probe attempted)."]
+        embeds.append(nextcord.Embed(
+            title="LLM Health",
+            description="\n".join(lh_lines),
+            color=0x888888,
         ))
 
         await interaction.followup.send(embeds=embeds, ephemeral=True)
@@ -943,7 +979,9 @@ class BlackjackCog(commands.Cog):
                 request_id = data.get("request_id")
                 interaction = self._pending_usage_interactions.pop(request_id, None)
                 if interaction:
-                    await self._handle_usage_stats_response(interaction, data.get("rows", []))
+                    await self._handle_usage_stats_response(
+                        interaction, data.get("rows", []), days=data.get("days", 7)
+                    )
 
             elif data.get("event_type") == "debug_state":
                 request_id = data.get("request_id")

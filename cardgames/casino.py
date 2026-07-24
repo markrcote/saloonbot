@@ -7,6 +7,7 @@ import uuid
 
 import redis
 
+from . import metrics
 from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
 from .llm_client import create_llm_client, LLMError
@@ -82,6 +83,7 @@ class Casino:
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
         self._last_wallet_replenish = 0
         self._last_llm_healthcheck = 0
+        self._llm_health = {}  # provider -> {status, last_success_at, last_failure_at, last_error}
 
     @property
     def llm_client(self):
@@ -95,9 +97,29 @@ class Casino:
                     f"LLM client ready: {client.provider} (model={client.model})."
                     " Bot players will use AI strategy."
                 )
+                self._set_llm_health(client.provider, up=True)
             except Exception as e:
                 logging.warning(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
+                provider = os.environ.get("LLM_PROVIDER", "").lower() or "unknown"
+                self._set_llm_health(provider, up=False, error=e)
         return self._llm_client
+
+    def _set_llm_health(self, provider, up, error=None):
+        """Record a probe/creation outcome for a provider, for /debug and /metrics."""
+        provider = provider or "unknown"
+        state = self._llm_health.setdefault(provider, {
+            "status": "unknown", "last_success_at": None, "last_failure_at": None, "last_error": None,
+        })
+        now = time.time()
+        if up:
+            state["status"] = "up"
+            state["last_success_at"] = now
+            state["last_error"] = None
+        else:
+            state["status"] = "down"
+            state["last_failure_at"] = now
+            state["last_error"] = str(error) if error else None
+        metrics.set_llm_provider_status(provider, up)
 
     def _check_llm_health(self):
         """Periodically re-probe the LLM provider so outages and recoveries (e.g. API
@@ -113,11 +135,13 @@ class Casino:
         if self._llm_client is not None:
             try:
                 self._llm_client.probe()
+                self._set_llm_health(self._llm_client.provider, up=True)
             except Exception as e:
                 logging.warning(
                     f"LLM client ({self._llm_client.provider}) failed health check: {e}."
                     " Bot players will fall back to simple strategy."
                 )
+                self._set_llm_health(self._llm_client.provider, up=False, error=e)
                 self._llm_client = None
         elif self._llm_client_tried:
             try:
@@ -128,6 +152,7 @@ class Casino:
                     f"LLM client recovered: {client.provider} (model={client.model})."
                     " Bot players will use AI strategy."
                 )
+                self._set_llm_health(client.provider, up=True)
             except Exception:
                 pass  # still unavailable; already logged when it first failed
 
@@ -152,12 +177,13 @@ class Casino:
             return self.db.update_npc_wallet(npc_db_id, amount_cents)
         return self.db.update_wallet(player.name, amount_cents)
 
-    def _log_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
-        """Write an LLM usage record to DB. Silently ignores failures."""
+    def _log_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, provider=None):
+        """Write an LLM usage record to DB and Prometheus. Silently ignores DB failures."""
+        metrics.record_llm_usage(purpose, model, provider, input_tokens, output_tokens)
         if self.db is None:
             return
         try:
-            self.db.log_llm_usage(purpose, model, input_tokens, output_tokens, npc_id, game_id)
+            self.db.log_llm_usage(purpose, model, input_tokens, output_tokens, npc_id, provider)
         except Exception as e:
             logging.warning(f"Failed to log LLM usage ({purpose}): {e}")
 
@@ -182,7 +208,10 @@ class Casino:
                 timeout=timeout,
             )
             backstory = text.strip()
-            self._log_usage('backstory_gen', self.llm_client.model, in_tok, out_tok, npc_id=npc_id)
+            self._log_usage(
+                'backstory_gen', self.llm_client.model, in_tok, out_tok,
+                npc_id=npc_id, provider=self.llm_client.provider
+            )
             if self.db is not None and npc_id is not None:
                 try:
                     self.db.update_npc_backstory(npc_id, backstory)
@@ -864,12 +893,13 @@ class Casino:
         )
         logging.info(f"Responded to list_games with {len(games_info)} games")
 
-    def _handle_get_usage(self, request_id):
-        """Handle a get_usage request: query DB and publish 7-day summary."""
+    def _handle_get_usage(self, request_id, days=7):
+        """Handle a get_usage request: query DB and publish a usage summary for the past N days."""
+        days = max(1, min(90, int(days)))
         rows = []
         if self.db is not None:
             try:
-                rows = self.db.get_llm_usage_summary(days=7)
+                rows = self.db.get_llm_usage_summary(days=days)
             except Exception as e:
                 logging.error(f"Error getting LLM usage summary: {e}")
 
@@ -878,6 +908,7 @@ class Casino:
             {
                 'event_type': 'usage_stats',
                 'request_id': request_id,
+                'days': days,
                 'rows': [dict(r) for r in rows],
             }
         )
@@ -922,6 +953,20 @@ class Casino:
             except Exception as e:
                 logging.error(f"Error fetching NPC roster for debug: {e}")
 
+        def _iso(ts):
+            from datetime import datetime, timezone
+            return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None
+
+        llm_health = {
+            provider: {
+                'status': state['status'],
+                'last_success_at': _iso(state['last_success_at']),
+                'last_failure_at': _iso(state['last_failure_at']),
+                'last_error': state['last_error'],
+            }
+            for provider, state in self._llm_health.items()
+        }
+
         self.publish_event(
             'casino_update',
             {
@@ -930,6 +975,8 @@ class Casino:
                 'games': games_debug,
                 'npcs': npcs,
                 'dirty_games': list(self._dirty_games),
+                'llm_health': llm_health,
+                'llm_active': self._llm_client is not None,
             }
         )
 
@@ -1025,7 +1072,7 @@ class Casino:
                 elif data['action'] == 'get_usage':
                     request_id = data.get('request_id')
                     if request_id:
-                        self._handle_get_usage(request_id)
+                        self._handle_get_usage(request_id, days=data.get('days', 7))
                 elif data['action'] == 'get_debug':
                     request_id = data.get('request_id')
                     if request_id:

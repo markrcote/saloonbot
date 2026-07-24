@@ -85,6 +85,7 @@ python cli.py   # name: Eve, bots: 1
 
 - [ ] Server log shows LLM timeout warning for bot's action
 - [ ] Bot still acts (basic strategy fallback); game completes without hang
+- [ ] `curl localhost:9400/metrics` shows `saloonbot_llm_calls_total` and `saloonbot_llm_provider_up` series (check via Discord `/debug` too, if available: LLM Health section reflects the fallback)
 - [ ] Restore: `unset LLM_TIMEOUT`, restart server
 
 ---
@@ -96,4 +97,4 @@ python cli.py   # name: Eve, bots: 1
 | 1 | Solo game completes end-to-end |
 | 2 | LLM bot auto-bets, plays, quips |
 | 3 | Multi-bot distinct personalities; addnpc/removenpc work |
-| 4 | LLM timeout falls back gracefully; no crash |
+| 4 | LLM timeout falls back gracefully; no crash; `/metrics` shows LLM series |

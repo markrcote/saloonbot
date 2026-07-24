@@ -2,6 +2,7 @@ import logging
 import os
 import subprocess
 
+from cardgames import metrics
 from cardgames.casino import Casino
 from cardgames.database import Database
 from cardgames.sqlite_database import SqliteDatabase
@@ -23,6 +24,8 @@ MYSQL_PORT = os.getenv("MYSQL_PORT", 3306)
 MYSQL_USER = os.getenv("MYSQL_USER", "saloonbot")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "saloonbot")
+
+METRICS_PORT = int(os.getenv("METRICS_PORT", 9400))
 
 logging.basicConfig(
     level=LOG_LEVEL,
@@ -89,6 +92,7 @@ def _log_config():
     logging.info(f"  SALOON_NAME: {os.getenv('SALOON_NAME', 'The Rusty Spur')}")
     logging.info(f"  SALOON_TOWN: {os.getenv('SALOON_TOWN', 'Redemption, Texas')}")
     logging.info(f"  SALOON_DETAIL_LEVEL: {os.getenv('SALOON_DETAIL_LEVEL', 'medium')}")
+    logging.info(f"  METRICS_PORT: {METRICS_PORT}")
     logging.info("============================")
 
 
@@ -98,6 +102,7 @@ def main():
         db = SqliteDatabase(SQLITE_PATH)
     else:
         db = Database(MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE)
+    metrics.start_metrics_server(METRICS_PORT)
     casino = Casino(REDIS_HOST, REDIS_PORT, db)
     casino.listen()
 

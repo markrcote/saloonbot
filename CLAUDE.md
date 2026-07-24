@@ -93,7 +93,7 @@ Discord Users
 **Casino actions** (`event_type: "casino_action"`):
 - `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
-- `get_usage` - Request 7-day LLM usage summary (admin; bot sends with `request_id`, server responds via `usage_stats`)
+- `get_usage` - Request an LLM usage summary; optional `days` (default 7, clamped 1–90) (admin; bot sends with `request_id`, server responds via `usage_stats`)
 - `get_debug` - Request full internal state dump (admin; bot sends with `request_id`, server responds via `debug_state`)
 - `get_stats` - Request a player's statistics; bot sends with `request_id` and `player`, server responds via `player_stats`
 - `get_wallet` - Request a player's wallet balance; bot sends with `request_id` and `player`, server responds via `player_wallet`
@@ -113,8 +113,8 @@ Discord Users
 
 - `new_game` response - includes `game_id`, `request_id`, and optional channel info
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
-- `usage_stats` response - includes `request_id` and `rows` list (each entry: `purpose`, `model`, `total_input`, `total_output`, `call_count`)
-- `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, and the `dirty_games` list (admin diagnostics)
+- `usage_stats` response - includes `request_id`, `days`, and `rows` list (each entry: `purpose`, `model`, `provider`, `total_input`, `total_output`, `call_count`)
+- `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, the `dirty_games` list, `llm_health` (per-provider status/last success/last failure/last error), and `llm_active` (bool — whether NPCs are currently using AI vs. simple fallback strategy) (admin diagnostics)
 - `player_stats` response - includes `request_id`, `player`, and `stats` (games/hands played, `total_won_cents`/`total_lost_cents`/`biggest_win_cents`, last seen) or null if no record
 - `player_wallet` response - includes `request_id`, `player`, and `balance_cents` (int or null if no record)
 - `wallet_info` response - includes `request_id`, `target`, `kind` (`'player'`|`'npc'`|`None`), and `balance_cents` (int or null)
@@ -125,13 +125,14 @@ Discord Users
 
 **cardgames/**
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence; broadcasts short table-event strings (bets, actions, outcomes, quips) to seated players via `_notify_table_event`; rolls the per-hand NPC departure chance on entry to BETWEEN_HANDS
-- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; condenses departing LLM NPCs' sessions into `npc_memories` (fire-and-forget, capped at `MAX_MEMORIES_PER_NPC=20` per NPC) and loads them back at seating via `_load_npc_memories`; logs LLM usage to DB
+- `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; condenses departing LLM NPCs' sessions into `npc_memories` (fire-and-forget, capped at `MAX_MEMORIES_PER_NPC=20` per NPC) and loads them back at seating via `_load_npc_memories`; logs LLM usage to DB and Prometheus (`metrics.record_llm_usage`) and tracks per-provider health state (`_llm_health`, updated via `_set_llm_health`) for `/debug` and `/metrics`
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play, buffers table events per session (`deque(maxlen=40)`), and condenses them into a first-person memory on departure (`submit_session_condensation`)
 - `llm_client.py` - LLM provider abstraction (Claude / OpenAI / deterministic fake for testing); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout
+- `metrics.py` - Prometheus metrics: `saloonbot_llm_calls_total`/`saloonbot_llm_input_tokens_total`/`saloonbot_llm_output_tokens_total` (labeled `purpose`/`model`/`provider`), `saloonbot_llm_provider_up` gauge and `saloonbot_llm_provider_failures_total` counter (labeled `provider`); `record_llm_usage`/`set_llm_provider_status` are the two update entry points, called from `casino.py`; `start_metrics_server(port)` wraps `prometheus_client.start_http_server` (background thread, non-blocking)
 - `personalities.py` - 15 archetype + 4 historical-figure personality definitions; `PersonalityRegistry` with `get_random(exclude_names)` and `get_all_names()`
-- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive), a `get_setting`/`set_setting` runtime config store, and session-memory helpers (`add_npc_memory` insert+prune, `get_npc_memories` newest-first); every public method runs under an RLock (see thread safety in Key Patterns)
+- `database.py` - MySQL connection with auto-reconnect; manages schema via `MIGRATIONS` list; wallet helpers come in delta (`update_wallet`/`update_npc_wallet`) and absolute (`set_user_wallet`/`set_npc_wallet`) forms, plus `find_npc_by_name` (case-insensitive), a `get_setting`/`set_setting` runtime config store, and session-memory helpers (`add_npc_memory` insert+prune, `get_npc_memories` newest-first); `log_llm_usage`/`get_llm_usage_summary` track `provider` alongside purpose/model; every public method runs under an RLock (see thread safety in Key Patterns)
 - `sqlite_database.py` - SQLite alternative to `database.py`; same interface (including the wallet/settings helpers above), used when `USE_SQLITE=1`; own `MIGRATIONS` list with SQLite-compatible SQL
 - `money.py` - Dollars/cents conversion helpers (`dollars_to_cents`, `cents_to_dollars`, `format_cents`); all wallet/bet/stats values are stored and passed internally as integer cents — dollars only appear at human-facing boundaries (Discord slash command args, plain-text chat commands, CLI input, LLM prompt text)
 
@@ -142,7 +143,7 @@ Discord Users
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
 - `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), `wallet_cents`, current_game_id
 - `npc_memories` - Condensed NPC session summaries: npc_id, game_id (no FK — games rows are deleted at game end), session_summary, created_at; pruned to the 20 most recent per NPC on insert
-- `llm_usage` - Per-call LLM token tracking: purpose, model, input/output tokens, npc_id, game_id
+- `llm_usage` - Per-call LLM token tracking: purpose, model, provider, input/output tokens, npc_id
 - `settings` - Runtime key/value config store (`setting_key`/`setting_value`); accessed via `get_setting`/`set_setting`
 
 **wwnames/**
@@ -185,6 +186,7 @@ Discord Users
 | SALOON_NAME | The Rusty Spur | Name of the saloon (shown in Discord and injected into LLM context) |
 | SALOON_TOWN | Redemption, Texas | Town/location of the saloon |
 | SALOON_DETAIL_LEVEL | medium | Controls LLM context richness: `low` (names only, no backstory, session memory off entirely), `medium` (2-sentence backstory, archetypes, 1 recalled memory), `high` (4-sentence backstory, full context, 3 recalled memories) |
+| METRICS_PORT | 9400 | Port for the Prometheus `/metrics` endpoint (LLM usage counters, provider health gauge) |
 
 ### Secret resolution
 
@@ -205,6 +207,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Use injectable decks for game-flow tests**: pass `deck=[...]` in the `new_game` message to control card order and prevent flaky failures from bad deals (e.g., unexpected dealer blackjack).
 - **Use `LLM_PROVIDER=fake` to e2e the LLM path**: the deterministic fake provider (no API key) makes the real server run LLM NPCs — quips, session memories, usage logging — with canned, valid responses. The fake stands at 16+, bets the minimum, and answers non-game prompts with fixed prose.
 - **The base e2e env zeroes the NPC departure roll** (`BLACKJACK_NPC_DEPARTURE_BASE/RAMP = 0`) so NPCs never randomly leave mid-test; tests exercising the roll override via `EXTRA_ENV`.
+- **The `/metrics` endpoint is reachable at `localhost:METRICS_PORT`** in e2e tests since the server runs as a bare subprocess (no Docker port mapping needed); see `TestMetricsEndpoint` for the pattern (drive a hand with `LLM_PROVIDER=fake`, then poll `requests.get(.../metrics)` for the expected series).
 
 ## Key Patterns
 
@@ -222,7 +225,8 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - **Bot recovery**: On `on_ready`, bot sends `list_games` request, then reconnects to all active games (subscribes to topics, announces reconnection in channel)
 - **NPC autofill**: `Casino.npc_min/npc_max` (default 0/4) control per-table NPC counts; `_autofill_npcs` runs on every tick (throttled to `AUTOFILL_INTERVAL=15s` per game), acts only in WAITING/BETWEEN_HANDS states. With `npc_min > 0`, games stay populated and `EMPTY_GAME_TIMEOUT` won't reap them — enabling NPC-only ambient play. Limits are persisted in `settings` as `npc_autofill_min`/`npc_autofill_max` and loaded at startup.
 - `new_game` requests should include `guild_id`/`channel_id` so bot recovery can find the right channel after restart
-- **LLM health checks**: `Casino.llm_client` lazily creates and probes the LLM client on first access (logged at startup). `Casino._check_llm_health`, called from `_tick_games` and throttled to `LLM_HEALTHCHECK_INTERVAL` (default 300s), re-probes a live client to detect outages/exhausted credits (falling back to simple NPC strategy) and, if currently unavailable, retries client creation to detect recovery — all without a server restart.
+- **LLM health checks**: `Casino.llm_client` lazily creates and probes the LLM client on first access (logged at startup). `Casino._check_llm_health`, called from `_tick_games` and throttled to `LLM_HEALTHCHECK_INTERVAL` (default 300s), re-probes a live client to detect outages/exhausted credits (falling back to simple NPC strategy) and, if currently unavailable, retries client creation to detect recovery — all without a server restart. Every probe/creation outcome (from both the lazy `llm_client` property and the periodic re-check) is recorded via `_set_llm_health` into an in-memory `_llm_health` dict (per-provider status, last success/failure time, last error) and mirrored to the `saloonbot_llm_provider_up`/`saloonbot_llm_provider_failures_total` Prometheus metrics — surfaced via `/debug` (`llm_health`/`llm_active`) and `/metrics`, so an outage (e.g. credits running out) is visible without reading server logs.
+- **Prometheus `/metrics` endpoint**: `metrics.start_metrics_server(METRICS_PORT)` (default port 9400) runs a background HTTP server (via `prometheus_client.start_http_server`, non-blocking — doesn't interact with the synchronous game loop) started once in `server.py`'s `main()`. Exposes LLM call/token counters and provider-health gauge/counter, all labeled by `purpose`/`model`/`provider` where applicable; intended to be scraped by an external Prometheus instance (alerting/dashboards live outside this repo).
 - **Ambient table slowdown**: `Blackjack._is_ambient()` is true whenever every seated player is an NPC (no humans watching). `Blackjack._pause()` multiplies the dramatic/dealer-card/result pauses by `BLACKJACK_AMBIENT_SPEED_MULTIPLIER` on ambient tables. `end_hand()` also picks the BETWEEN_HANDS wait: a fixed `TIME_BETWEEN_HANDS` for tables with a human player, or a random duration in `[BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN, BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX]` for ambient ones — stored in `time_between_hands_duration` (persisted, so a restart mid-wait doesn't reset it).
 
 ## Testing

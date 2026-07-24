@@ -38,8 +38,8 @@ Slash commands:
 * `/npclimits [min] [max]` *(admin)* — view or set the NPC autofill min/max per table. With `min > 0`, tables stay populated with NPCs even when no humans are present.
 * `/addnpc [count]` *(admin)* — add one or more roster NPCs to the current game (default: 1).
 * `/removenpc [name]` *(admin)* — remove an NPC from the current game; omit name to remove any NPC.
-* `/usage` *(admin)* — show a 7-day summary of LLM token usage.
-* `/debug` *(admin)* — dump full internal state for troubleshooting.
+* `/usage [days]` *(admin)* — show a summary of LLM token usage (default 7 days, up to 90), broken down by purpose, model, and provider.
+* `/debug` *(admin)* — dump full internal state for troubleshooting, including live LLM provider health (up/down, last success/failure, whether NPCs are currently on AI or fallback strategy).
 
 ### Metadata
 
@@ -74,10 +74,15 @@ AI bots remember their nights at the table. While seated, each bot keeps track o
 | `LLM_SESSION_MEMORY_TIMEOUT` | `15` | Seconds allowed for the background session-memory call |
 | `BLACKJACK_NPC_DEPARTURE_BASE` | `0.02` | Baseline per-hand chance an NPC calls it a night |
 | `BLACKJACK_NPC_DEPARTURE_RAMP` | `0.28` | Extra departure chance once an NPC has seen a full session |
+| `METRICS_PORT` | `9400` | Port for the Prometheus `/metrics` endpoint |
 
 API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
 
 All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) resolve in priority order: direct env var → `<VAR>_FILE` path → `/run/secrets/<lowercase_var>` → unset. Docker secrets mounted at `/run/secrets/` are picked up automatically with no extra configuration.
+
+### Metrics
+
+The server exposes a Prometheus-format `/metrics` endpoint on `METRICS_PORT` (default `9400`): LLM call/token counters (`saloonbot_llm_calls_total`, `saloonbot_llm_input_tokens_total`, `saloonbot_llm_output_tokens_total`, labeled by purpose/model/provider) and provider health (`saloonbot_llm_provider_up` gauge, `saloonbot_llm_provider_failures_total` counter). This repo only exposes the metrics — scraping, dashboards, and alerting are configured in whatever external Prometheus/Grafana setup you point at it.
 
 ## CLI
 

@@ -123,6 +123,10 @@ MIGRATIONS = [
             KEY idx_npc_memories_npc (npc_id)
         )""",
     ],
+    [   # Migration 8: LLM provider tracking; drop llm_usage.game_id (never populated)
+        "ALTER TABLE llm_usage ADD COLUMN provider VARCHAR(32) NULL",
+        "ALTER TABLE llm_usage DROP COLUMN game_id",
+    ],
 ]
 
 
@@ -714,30 +718,30 @@ class Database:
                 cursor.close()
 
     @_synchronized
-    def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, game_id=None):
+    def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, provider=None):
         """Record a single LLM API call for usage tracking."""
         def fn(cursor):
             cursor.execute("""
-                INSERT INTO llm_usage (purpose, model, input_tokens, output_tokens, npc_id, game_id)
+                INSERT INTO llm_usage (purpose, model, input_tokens, output_tokens, npc_id, provider)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (purpose, model, input_tokens, output_tokens, npc_id, game_id))
+            """, (purpose, model, input_tokens, output_tokens, npc_id, provider))
         return self._execute_write(fn, "log_llm_usage")
 
     @_synchronized
     def get_llm_usage_summary(self, days=7):
-        """Return token totals grouped by purpose for the past N days."""
+        """Return token totals grouped by purpose/model/provider for the past N days."""
         self._connect()
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)
             cursor.execute("""
-                SELECT purpose, model,
+                SELECT purpose, model, provider,
                        SUM(input_tokens) AS total_input,
                        SUM(output_tokens) AS total_output,
                        COUNT(*) AS call_count
                 FROM llm_usage
                 WHERE occurred_at >= NOW() - INTERVAL %s DAY
-                GROUP BY purpose, model
+                GROUP BY purpose, model, provider
                 ORDER BY total_input + total_output DESC
             """, (days,))
             return cursor.fetchall()

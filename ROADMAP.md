@@ -203,6 +203,8 @@ These concerns apply across all milestones and should be introduced in **M1** an
 - New `/usage` Discord command (admin-only): shows token totals by purpose for the past 7 days, estimated cost (configurable per-token rate via `LLM_COST_PER_1K_INPUT` / `LLM_COST_PER_1K_OUTPUT` env vars)
 - Files: `cardgames/llm_client.py`, `cardgames/database.py`, `cardgames/sqlite_database.py`, `bot.py`
 
+**As built (this doc predates the actual implementation, done incrementally across M2 and a later usage/health-visibility pass):** `llm_usage` tracks `purpose`/`model`/`provider`/`input_tokens`/`output_tokens`/`npc_id` — the `game_id` column originally proposed above was added then dropped again (never populated by any call site). `/usage` accepts an optional `days` argument (default 7, max 90) and groups by purpose/model/provider. **Dollar-cost estimation (`LLM_COST_PER_1K_INPUT`/`_OUTPUT`) was considered and explicitly declined** — token/call counts were judged sufficient, so no pricing table exists. Instead, a Prometheus `/metrics` endpoint (`cardgames/metrics.py`, port `METRICS_PORT`) exposes LLM call/token counters and per-provider health (`saloonbot_llm_provider_up`), and `/debug` surfaces live provider health (`llm_health`/`llm_active`) — together giving both a leading indicator (usage-volume trend, scraped by an external Prometheus/Grafana stack) and a lagging one (provider actually down) for catching credit exhaustion, without needing to know real-time account balance.
+
 ### Detail Level Configuration
 
 **Goal:** Let operators tune how much NPC depth (and thus how many tokens) the system uses.

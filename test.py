@@ -2020,6 +2020,26 @@ class TestM2LLMUsageTracking(unittest.TestCase):
                 self.assertEqual(r['total_output'], 130)
                 self.assertEqual(r['call_count'], 2)
 
+    def test_log_and_summarize_usage_with_provider(self):
+        db = self._make_sqlite_db()
+        db.log_llm_usage('npc_action', 'claude-haiku-4-5', 100, 50, npc_id=1, provider='claude')
+        db.log_llm_usage('npc_action', 'gpt-4o-mini', 90, 40, npc_id=2, provider='openai')
+        # No provider passed at all -- should still aggregate under provider=None.
+        db.log_llm_usage('npc_bet', 'claude-haiku-4-5', 150, 60)
+        rows = db.get_llm_usage_summary(days=7)
+        by_key = {(r['purpose'], r['model'], r['provider']): r for r in rows}
+
+        claude_row = by_key[('npc_action', 'claude-haiku-4-5', 'claude')]
+        self.assertEqual(claude_row['total_input'], 100)
+        self.assertEqual(claude_row['call_count'], 1)
+
+        openai_row = by_key[('npc_action', 'gpt-4o-mini', 'openai')]
+        self.assertEqual(openai_row['total_input'], 90)
+
+        no_provider_row = by_key[('npc_bet', 'claude-haiku-4-5', None)]
+        self.assertEqual(no_provider_row['total_input'], 150)
+        self.assertEqual(no_provider_row['call_count'], 1)
+
     def test_update_npc_backstory(self):
         db = self._make_sqlite_db()
         npc_id = db.create_npc("Clara", "The Saloon Singer", 200)
@@ -2038,6 +2058,115 @@ class TestM2LLMUsageTracking(unittest.TestCase):
         mock_db.log_llm_usage.side_effect = Exception("DB error")
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         casino._log_usage('npc_action', 'claude-haiku-4-5', 100, 50)  # should not raise
+
+    def test_log_usage_forwards_provider_to_db(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        casino._log_usage('npc_action', 'claude-haiku-4-5', 100, 50, npc_id=7, provider='claude')
+        mock_db.log_llm_usage.assert_called_once_with(
+            'npc_action', 'claude-haiku-4-5', 100, 50, 7, 'claude'
+        )
+
+    def test_handle_get_usage_forwards_days_and_clamps(self):
+        from cardgames.casino import Casino
+        with patch('cardgames.casino.redis.Redis'):
+            casino = Casino(redis_host='localhost', redis_port=6379, db=self._make_sqlite_db())
+        casino._handle_get_usage('req-1', days=200)  # over max_value=90, must clamp
+        published_data = json.loads(casino.redis.publish.call_args[0][1])
+        self.assertEqual(published_data['event_type'], 'usage_stats')
+        self.assertEqual(published_data['request_id'], 'req-1')
+        self.assertEqual(published_data['days'], 90)
+
+    def test_handle_get_usage_default_days(self):
+        from cardgames.casino import Casino
+        with patch('cardgames.casino.redis.Redis'):
+            casino = Casino(redis_host='localhost', redis_port=6379, db=self._make_sqlite_db())
+        casino._handle_get_usage('req-2')
+        published_data = json.loads(casino.redis.publish.call_args[0][1])
+        self.assertEqual(published_data['days'], 7)
+
+    def test_llm_npc_record_usage_includes_provider(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_client = MagicMock()
+        mock_client.model = 'claude-haiku-4-5'
+        mock_client.provider = 'claude'
+        usage_callback = MagicMock()
+        npc = LLMBlackjackNPC(
+            "Doc", get_personality('The Card Sharp'), mock_client,
+            npc_db_id=42, usage_callback=usage_callback,
+        )
+        npc._record_usage('npc_action', 100, 50)
+        usage_callback.assert_called_once_with(
+            'npc_action', 'claude-haiku-4-5', 100, 50, npc_id=42, provider='claude'
+        )
+
+
+class TestMetrics(unittest.TestCase):
+    """Tests for the cardgames.metrics Prometheus module."""
+
+    def _labeled_value(self, metric, **labels):
+        return metric.labels(**labels)._value.get()
+
+    def test_record_llm_usage_updates_counters(self):
+        from cardgames import metrics
+        before_calls = self._labeled_value(
+            metrics.LLM_CALLS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+        )
+        before_in = self._labeled_value(
+            metrics.LLM_INPUT_TOKENS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+        )
+        before_out = self._labeled_value(
+            metrics.LLM_OUTPUT_TOKENS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+        )
+        metrics.record_llm_usage('test_purpose', 'test-model', 'claude', 100, 50)
+        self.assertEqual(
+            self._labeled_value(
+                metrics.LLM_CALLS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+            ),
+            before_calls + 1,
+        )
+        self.assertEqual(
+            self._labeled_value(
+                metrics.LLM_INPUT_TOKENS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+            ),
+            before_in + 100,
+        )
+        self.assertEqual(
+            self._labeled_value(
+                metrics.LLM_OUTPUT_TOKENS_TOTAL, purpose='test_purpose', model='test-model', provider='claude'
+            ),
+            before_out + 50,
+        )
+
+    def test_record_llm_usage_defaults_missing_provider_to_unknown(self):
+        from cardgames import metrics
+        before = self._labeled_value(
+            metrics.LLM_CALLS_TOTAL, purpose='test_purpose2', model='test-model', provider='unknown'
+        )
+        metrics.record_llm_usage('test_purpose2', 'test-model', None, 10, 5)
+        self.assertEqual(
+            self._labeled_value(
+                metrics.LLM_CALLS_TOTAL, purpose='test_purpose2', model='test-model', provider='unknown'
+            ),
+            before + 1,
+        )
+
+    def test_set_llm_provider_status_up(self):
+        from cardgames import metrics
+        metrics.set_llm_provider_status('test_provider_up', up=True)
+        self.assertEqual(self._labeled_value(metrics.LLM_PROVIDER_UP, provider='test_provider_up'), 1)
+
+    def test_set_llm_provider_status_down_increments_failures(self):
+        from cardgames import metrics
+        before = self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_down')
+        metrics.set_llm_provider_status('test_provider_down', up=False)
+        self.assertEqual(self._labeled_value(metrics.LLM_PROVIDER_UP, provider='test_provider_down'), 0)
+        self.assertEqual(
+            self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_down'),
+            before + 1,
+        )
 
 
 class TestM2SaloonContext(unittest.TestCase):
@@ -2528,6 +2657,8 @@ class TestLLMHealthCheck(unittest.TestCase):
         casino._check_llm_health()
         mock_client.probe.assert_called_once()
         self.assertIs(casino._llm_client, mock_client)
+        self.assertEqual(casino._llm_health['claude']['status'], 'up')
+        self.assertIsNotNone(casino._llm_health['claude']['last_success_at'])
 
     def test_failing_probe_marks_client_unavailable(self):
         from cardgames.llm_client import LLMError
@@ -2540,6 +2671,9 @@ class TestLLMHealthCheck(unittest.TestCase):
         with self.assertLogs('root', level='WARNING'):
             casino._check_llm_health()
         self.assertIsNone(casino._llm_client)
+        self.assertEqual(casino._llm_health['claude']['status'], 'down')
+        self.assertIsNotNone(casino._llm_health['claude']['last_failure_at'])
+        self.assertIn("credits exhausted", casino._llm_health['claude']['last_error'])
 
     def test_recovers_client_once_available_again(self):
         casino = self._make_casino()
@@ -2552,6 +2686,7 @@ class TestLLMHealthCheck(unittest.TestCase):
             casino._check_llm_health()
         mock_client.probe.assert_called_once()
         self.assertIs(casino._llm_client, mock_client)
+        self.assertEqual(casino._llm_health['claude']['status'], 'up')
 
     def test_stays_unavailable_when_recreation_still_fails(self):
         from cardgames.llm_client import LLMError
@@ -2561,6 +2696,49 @@ class TestLLMHealthCheck(unittest.TestCase):
         with patch('cardgames.casino.create_llm_client', side_effect=LLMError("no key")):
             casino._check_llm_health()  # should not raise
         self.assertIsNone(casino._llm_client)
+
+    def test_handle_get_debug_includes_llm_health_and_active_flag(self):
+        casino = self._make_casino()
+        mock_client = MagicMock()
+        mock_client.provider = 'claude'
+        casino._llm_client = mock_client
+        casino._set_llm_health('claude', up=True)
+        casino._handle_get_debug('req-3')
+        published_data = json.loads(casino.redis.publish.call_args[0][1])
+        self.assertEqual(published_data['event_type'], 'debug_state')
+        self.assertTrue(published_data['llm_active'])
+        self.assertEqual(published_data['llm_health']['claude']['status'], 'up')
+        self.assertIsNotNone(published_data['llm_health']['claude']['last_success_at'])
+
+    def test_handle_get_debug_llm_inactive_when_no_client(self):
+        casino = self._make_casino()
+        casino._llm_client = None
+        casino._handle_get_debug('req-4')
+        published_data = json.loads(casino.redis.publish.call_args[0][1])
+        self.assertFalse(published_data['llm_active'])
+        self.assertEqual(published_data['llm_health'], {})
+
+    def test_set_llm_health_records_up_and_down(self):
+        casino = self._make_casino()
+        casino._set_llm_health('claude', up=True)
+        self.assertEqual(casino._llm_health['claude']['status'], 'up')
+        self.assertIsNotNone(casino._llm_health['claude']['last_success_at'])
+        self.assertIsNone(casino._llm_health['claude']['last_error'])
+
+        casino._set_llm_health('claude', up=False, error=RuntimeError("boom"))
+        self.assertEqual(casino._llm_health['claude']['status'], 'down')
+        self.assertIsNotNone(casino._llm_health['claude']['last_failure_at'])
+        self.assertEqual(casino._llm_health['claude']['last_error'], 'boom')
+
+    def test_lazy_llm_client_property_records_failure(self):
+        """The initial lazy client-creation failure path should also populate
+        _llm_health, using LLM_PROVIDER as a best-effort provider name."""
+        from cardgames.llm_client import LLMError
+        casino = self._make_casino()
+        with patch('cardgames.casino.create_llm_client', side_effect=LLMError("no key")), \
+             patch.dict(os.environ, {'LLM_PROVIDER': 'openai'}):
+            self.assertIsNone(casino.llm_client)
+        self.assertEqual(casino._llm_health['openai']['status'], 'down')
 
 
 class TestChangelog(unittest.TestCase):

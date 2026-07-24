@@ -17,6 +17,9 @@ services:
       - MYSQL_PASSWORD=saloonbot_password
       - MYSQL_DATABASE=saloonbot
       - SALOONBOT_DEBUG=${SALOONBOT_DEBUG}
+      - METRICS_PORT=9400
+    ports:
+      - "9400:9400"
     volumes:
       - /etc/saloonbot/secrets:/run/secrets:ro
     depends_on:

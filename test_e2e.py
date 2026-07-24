@@ -16,6 +16,7 @@ import unittest
 
 import mysql.connector
 import redis
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -1533,6 +1534,69 @@ class TestNPCSessionMemory(EndToEndTestCase):
             self.assertIsNotNone(rows, "Expected a second memory row for the same NPC")
         finally:
             pubsub.close()
+
+
+class TestMetricsEndpoint(EndToEndTestCase):
+    """E2E: the Prometheus /metrics endpoint exposes LLM usage and health series."""
+
+    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+    METRICS_PORT = 9400
+
+    # Same shape as TestNPCSessionMemory.MEMORY_DECK: NPC stands at 18, human at 16.
+    METRICS_DECK = [
+        'H2', 'H3', 'H4', 'H5', 'H7', 'H8', 'H9',
+        'D2',
+        'D9', 'C7',
+        'D10', 'C8',
+        'S10', 'H6',
+    ]
+
+    def setUp(self):
+        super().setUp()
+        self.game_id = None
+
+    def tearDown(self):
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def test_metrics_endpoint_exposes_llm_series(self):
+        """Drive one hand with a fake-provider NPC, then confirm /metrics carries
+        both the per-call token counters and the provider-up gauge."""
+        game_id = self.create_game(num_bots=1, deck=self.METRICS_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'MetricsHuman')
+            self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
+            self.place_bet(game_id, 'MetricsHuman', 1000)
+            messages = self.collect_messages(
+                pubsub, timeout=10, stop_on=["MetricsHuman, you're up", 'dust settles'])
+            if not any('dust settles' in m for m in messages):
+                self.player_action(game_id, 'MetricsHuman', 'stand')
+                self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+        finally:
+            pubsub.close()
+
+        def _fetch_metrics():
+            resp = requests.get(f"http://localhost:{self.METRICS_PORT}/metrics", timeout=5)
+            resp.raise_for_status()
+            return resp.text
+
+        body = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            body = _fetch_metrics()
+            if 'saloonbot_llm_calls_total' in body:
+                break
+            time.sleep(0.5)
+
+        self.assertIsNotNone(body)
+        self.assertIn('saloonbot_llm_calls_total', body)
+        self.assertIn('saloonbot_llm_input_tokens_total', body)
+        self.assertIn('saloonbot_llm_output_tokens_total', body)
+        self.assertIn('provider="fake"', body)
+        self.assertIn('saloonbot_llm_provider_up{provider="fake"} 1.0', body)
 
 
 class TestNPCDepartureE2E(EndToEndTestCase):

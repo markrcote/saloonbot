@@ -209,6 +209,32 @@ class EndToEndTestCase(unittest.TestCase):
         self.db.commit()
         cursor.close()
 
+    def _casino_request(self, action, **kwargs):
+        """Publish a casino action and wait for the matching casino_update response."""
+        pubsub = self.redis.pubsub()
+        pubsub.subscribe("casino_update")
+        pubsub.get_message(timeout=1)  # skip subscribe confirmation
+
+        request_id = f"test-request-{time.time()}"
+        message = {
+            'event_type': 'casino_action',
+            'action': action,
+            'request_id': request_id,
+            **kwargs,
+        }
+        self.redis.publish("casino", json.dumps(message))
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            msg = pubsub.get_message(timeout=0.5)
+            if msg and msg['type'] == 'message':
+                data = json.loads(msg['data'])
+                if data.get('request_id') == request_id:
+                    pubsub.close()
+                    return data
+        pubsub.close()
+        return None
+
     def tearDown(self):
         """Dump server log on test failure."""
         outcome = getattr(self, '_outcome', None)
@@ -998,32 +1024,6 @@ class TestAdminWallet(EndToEndTestCase):
         self.db.commit()
         cursor.close()
 
-    def _casino_request(self, action, **kwargs):
-        """Publish a casino action and wait for the matching casino_update response."""
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino_update")
-        pubsub.get_message(timeout=1)  # skip subscribe confirmation
-
-        request_id = f"test-wallet-{time.time()}"
-        message = {
-            'event_type': 'casino_action',
-            'action': action,
-            'request_id': request_id,
-            **kwargs,
-        }
-        self.redis.publish("casino", json.dumps(message))
-
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            msg = pubsub.get_message(timeout=0.5)
-            if msg and msg['type'] == 'message':
-                data = json.loads(msg['data'])
-                if data.get('request_id') == request_id:
-                    pubsub.close()
-                    return data
-        pubsub.close()
-        return None
-
     def _seed_player(self, name, wallet_cents=20000):
         cursor = self.db.cursor()
         cursor.execute(
@@ -1126,32 +1126,6 @@ class TestNPCLimits(EndToEndTestCase):
         cursor.execute("DELETE FROM settings")
         self.db.commit()
         cursor.close()
-
-    def _casino_request(self, action, **kwargs):
-        """Publish a casino action and wait for a matching casino_update response."""
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe("casino_update")
-        pubsub.get_message(timeout=1)
-
-        request_id = f"test-limits-{time.time()}"
-        message = {
-            'event_type': 'casino_action',
-            'action': action,
-            'request_id': request_id,
-            **kwargs,
-        }
-        self.redis.publish("casino", json.dumps(message))
-
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            msg = pubsub.get_message(timeout=0.5)
-            if msg and msg['type'] == 'message':
-                data = json.loads(msg['data'])
-                if data.get('request_id') == request_id:
-                    pubsub.close()
-                    return data
-        pubsub.close()
-        return None
 
     def _get_debug(self):
         """Request and return the full debug_state from the server."""

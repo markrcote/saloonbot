@@ -32,6 +32,14 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+# The LLM SDKs log every HTTP request and retry at INFO (via their own and
+# httpx's loggers), which floods the logs during provider outages — e.g. 5
+# lines per failed health probe. Our own "LLM client unavailable/recovered"
+# messages carry the signal, so quiet the SDKs unless debugging.
+if not DEBUG_LOGGING:
+    for noisy_logger in ("httpx", "openai", "anthropic"):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
 VERSION = None
 try:
     with open('.version') as version_file:

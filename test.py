@@ -2040,6 +2040,27 @@ class TestM2LLMUsageTracking(unittest.TestCase):
         self.assertEqual(no_provider_row['total_input'], 150)
         self.assertEqual(no_provider_row['call_count'], 1)
 
+    def test_mysql_usage_summary_converts_decimal_totals(self):
+        """MySQL SUM() returns Decimal; the summary must return JSON-serializable ints."""
+        import threading
+        from decimal import Decimal
+        from cardgames.database import Database
+
+        db = Database.__new__(Database)
+        db._lock = threading.RLock()
+        db.connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [{
+            'purpose': 'npc_action', 'model': 'gpt-4o-mini', 'provider': 'openai',
+            'total_input': Decimal('300'), 'total_output': Decimal('130'), 'call_count': 2,
+        }]
+        db.connection.cursor.return_value = mock_cursor
+
+        rows = db.get_llm_usage_summary(days=7)
+        self.assertEqual(rows[0]['total_input'], 300)
+        self.assertEqual(rows[0]['total_output'], 130)
+        json.dumps(rows)  # must not raise
+
     def test_update_npc_backstory(self):
         db = self._make_sqlite_db()
         npc_id = db.create_npc("Clara", "The Saloon Singer", 200)

@@ -745,7 +745,13 @@ class Database:
                 GROUP BY purpose, model, provider
                 ORDER BY total_input + total_output DESC
             """, (days,))
-            return cursor.fetchall()
+            rows = cursor.fetchall()
+            # MySQL returns SUM() as Decimal, which json.dumps can't serialize
+            # when these rows are published over Redis.
+            for row in rows:
+                row['total_input'] = int(row['total_input'] or 0)
+                row['total_output'] = int(row['total_output'] or 0)
+            return rows
         except Error as e:
             logging.error(f"Error getting LLM usage summary: {e}")
             raise

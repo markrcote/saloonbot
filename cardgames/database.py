@@ -544,6 +544,7 @@ class Database:
     def get_all_npcs(self):
         """Get all NPCs ordered by name. Returns list of dicts."""
         self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)

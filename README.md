@@ -203,6 +203,13 @@ docker compose up -d
 
 This runs all components (bot, server, and redis) in Docker containers.
 
+For staging hosts that should track `main` automatically, `staging-autodeploy.sh`
+fast-forwards the checkout to `origin/main` and re-runs
+`docker compose -f compose.staging.yml up -d` when anything changed. It's meant
+to run from a systemd timer or cron entry, complementing watchtower: watchtower
+auto-updates images but reuses each container's existing config, so compose-file
+changes (ports, env vars, new services) only land via a pull + `up`.
+
 Schema migrations run automatically on server startup — deploy new code and restart; no manual SQL needed.
 
 #### Secrets setup (one-time per host)

@@ -209,6 +209,13 @@ fast-forwards the checkout to `origin/main` and re-runs
 to run from a systemd timer or cron entry, complementing watchtower: watchtower
 auto-updates images but reuses each container's existing config, so compose-file
 changes (ports, env vars, new services) only land via a pull + `up`.
+Reference unit files are in `systemd/` — install with:
+
+```bash
+sudo cp systemd/saloonbot-autodeploy.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now saloonbot-autodeploy.timer
+```
 
 Schema migrations run automatically on server startup — deploy new code and restart; no manual SQL needed.
 

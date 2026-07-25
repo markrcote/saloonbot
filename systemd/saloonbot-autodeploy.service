@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync saloonbot checkout with origin/main and apply compose changes
+Documentation=https://github.com/markrcote/home-network/blob/master/containers/saloonbot.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=saloonbot
+Group=saloonbot
+WorkingDirectory=/home/saloonbot/saloonbot
+ExecStart=/home/saloonbot/saloonbot/staging-autodeploy.sh

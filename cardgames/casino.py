@@ -35,7 +35,10 @@ MAX_MEMORIES_PER_NPC = 20      # npc_memories retention cap, pruned on insert
 SESSION_MEMORY_MIN_EVENTS = 3  # skip condensation for sessions shorter than this
 
 # M7: NPC-NPC relationships. Absence of a row means strangers.
-RELATIONSHIP_CHANCE = 0.70        # chance a newly created NPC has any pre-existing relationships
+# The two formation chances are env-overridable (like the departure roll)
+# so e2e tests can pin them for determinism.
+RELATIONSHIP_CHANCE = float(os.environ.get(
+    "NPC_RELATIONSHIP_CHANCE", "0.70"))   # chance a new NPC has any pre-existing relationships
 RELATIONSHIP_MIN_PARTNERS = 1
 RELATIONSHIP_MAX_PARTNERS = 3
 RELATIONSHIP_SAMPLE_POOL = 10     # roster NPCs sampled as potential partners
@@ -43,7 +46,8 @@ RELATIONSHIP_TYPES = ('friend', 'rival', 'complicated')
 RELATIONSHIP_TYPE_WEIGHTS = (0.45, 0.30, 0.25)
 RELATIONSHIP_STRENGTH_MIN = 20    # initial strength range: passing acquaintances...
 RELATIONSHIP_STRENGTH_MAX = 60    # ...up to real history already baked in
-ORGANIC_RELATIONSHIP_CHANCE = 0.15  # chance two stranger NPCs bond after a shared session
+ORGANIC_RELATIONSHIP_CHANCE = float(os.environ.get(
+    "NPC_ORGANIC_RELATIONSHIP_CHANCE", "0.15"))  # chance two stranger NPCs bond after a shared session
 ORGANIC_INITIAL_STRENGTH = 20       # organic bonds start at the bottom of the creation range
 RELATIONSHIP_SESSION_INCREMENT = 5  # strength gained per shared session
 RELATIONSHIP_STRENGTH_CAP = 100

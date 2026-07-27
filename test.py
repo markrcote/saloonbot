@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -528,6 +529,78 @@ class TestWalletAdmin(unittest.TestCase):
 
     def test_find_npc_by_name_miss_returns_none(self):
         self.assertIsNone(self.db.find_npc_by_name("Nobody"))
+
+
+class TestNpcRelationshipsDb(unittest.TestCase):
+    """M7: npc_relationships table accessors."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.ida = self.db.create_npc("Winifred Cobb", "Prospector", 20000)
+        self.idb = self.db.create_npc("Dusty Pete", "Gunslinger", 20000)
+        self.idc = self.db.create_npc("Sal Ruiz", "Rancher", 20000)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_ordered_pair_normalizes(self):
+        from cardgames.sqlite_database import ordered_pair
+        self.assertEqual(ordered_pair(7, 3), (3, 7))
+        self.assertEqual(ordered_pair(3, 7), (3, 7))
+
+    def test_create_and_get_order_insensitive(self):
+        rel_id = self.db.create_npc_relationship(self.idb, self.ida, "rival", 40, "Old grudge.")
+        for pair in ((self.ida, self.idb), (self.idb, self.ida)):
+            rel = self.db.get_npc_relationship(*pair)
+            self.assertIsNotNone(rel)
+            self.assertEqual(rel["id"], rel_id)
+            self.assertEqual(rel["relationship_type"], "rival")
+            self.assertEqual(rel["strength"], 40)
+            self.assertEqual(rel["notes"], "Old grudge.")
+
+    def test_rows_stored_low_id_first(self):
+        self.db.create_npc_relationship(self.idb, self.ida, "friend", 20, "Pals.")
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["npc_id_a"], min(self.ida, self.idb))
+        self.assertEqual(rel["npc_id_b"], max(self.ida, self.idb))
+
+    def test_get_missing_pair_returns_none(self):
+        self.assertIsNone(self.db.get_npc_relationship(self.ida, self.idb))
+
+    def test_duplicate_pair_rejected_even_reversed(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 20, "Pals.")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.create_npc_relationship(self.idb, self.ida, "rival", 30, "Wait, no.")
+
+    def test_get_npc_relationships_strongest_first(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 20, "Pals.")
+        self.db.create_npc_relationship(self.ida, self.idc, "rival", 60, "Bad blood.")
+        rels = self.db.get_npc_relationships(self.ida)
+        self.assertEqual(len(rels), 2)
+        self.assertEqual(rels[0]["strength"], 60)
+        self.assertEqual(rels[1]["strength"], 20)
+        # idb only appears in one row
+        self.assertEqual(len(self.db.get_npc_relationships(self.idb)), 1)
+
+    def test_update_fields(self):
+        rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 20, "Pals.")
+        self.assertTrue(self.db.update_npc_relationship(rel_id, strength=25))
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["strength"], 25)
+        self.assertEqual(rel["relationship_type"], "friend")
+        self.assertTrue(self.db.update_npc_relationship(
+            rel_id, relationship_type="complicated", notes="It's complicated now."))
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["relationship_type"], "complicated")
+        self.assertEqual(rel["notes"], "It's complicated now.")
+        self.assertEqual(rel["strength"], 25)
+
+    def test_update_no_fields_returns_false(self):
+        rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 20, "Pals.")
+        self.assertFalse(self.db.update_npc_relationship(rel_id))
+
+    def test_update_missing_row_returns_false(self):
+        self.assertFalse(self.db.update_npc_relationship(9999, strength=50))
 
 
 class TestBlackjackBetting(unittest.TestCase):

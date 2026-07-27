@@ -127,7 +127,27 @@ MIGRATIONS = [
         "ALTER TABLE llm_usage ADD COLUMN provider VARCHAR(32) NULL",
         "ALTER TABLE llm_usage DROP COLUMN game_id",
     ],
+    [   # Migration 9: NPC-NPC relationships; absence of a row means strangers.
+        # Rows are stored with npc_id_a < npc_id_b, enforced by the unique pair index.
+        """CREATE TABLE IF NOT EXISTS npc_relationships (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            npc_id_a INT NOT NULL,
+            npc_id_b INT NOT NULL,
+            relationship_type VARCHAR(20) NOT NULL,
+            strength INT NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY idx_npc_relationships_pair (npc_id_a, npc_id_b)
+        )""",
+    ],
 ]
+
+
+def ordered_pair(npc_id_x, npc_id_y):
+    """Normalize an NPC id pair to (low, high) — the canonical storage order."""
+    a, b = int(npc_id_x), int(npc_id_y)
+    return (a, b) if a < b else (b, a)
 
 
 class Database:
@@ -717,6 +737,86 @@ class Database:
         finally:
             if cursor:
                 cursor.close()
+
+    @_synchronized
+    def create_npc_relationship(self, npc_id_x, npc_id_y, relationship_type, strength, notes):
+        """Create a relationship row for an NPC pair (stored low-id-first). Returns the new row id."""
+        npc_id_a, npc_id_b = ordered_pair(npc_id_x, npc_id_y)
+
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO npc_relationships (npc_id_a, npc_id_b, relationship_type, strength, notes)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (npc_id_a, npc_id_b, relationship_type, int(strength), notes))
+            return cursor.lastrowid
+        return self._execute_write(fn, f"create_npc_relationship({npc_id_a},{npc_id_b})")
+
+    @_synchronized
+    def get_npc_relationship(self, npc_id_x, npc_id_y):
+        """Get the relationship row for an NPC pair (order-insensitive). Returns dict or None."""
+        npc_id_a, npc_id_b = ordered_pair(npc_id_x, npc_id_y)
+        self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM npc_relationships WHERE npc_id_a = %s AND npc_id_b = %s",
+                (npc_id_a, npc_id_b)
+            )
+            return cursor.fetchone()
+        except Error as e:
+            logging.error(f"Error getting NPC relationship ({npc_id_a},{npc_id_b}): {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    @_synchronized
+    def get_npc_relationships(self, npc_id):
+        """Get all relationship rows involving an NPC, strongest first. Returns list of dicts."""
+        self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT * FROM npc_relationships
+                WHERE npc_id_a = %s OR npc_id_b = %s
+                ORDER BY strength DESC, id
+            """, (int(npc_id), int(npc_id)))
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting NPC relationships for {npc_id}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    @_synchronized
+    def update_npc_relationship(self, relationship_id, strength=None, relationship_type=None, notes=None):
+        """Update the provided fields of a relationship row. Returns True if the row exists."""
+        fields, params = [], []
+        if strength is not None:
+            fields.append("strength = %s")
+            params.append(int(strength))
+        if relationship_type is not None:
+            fields.append("relationship_type = %s")
+            params.append(relationship_type)
+        if notes is not None:
+            fields.append("notes = %s")
+            params.append(notes)
+        if not fields:
+            return False
+        params.append(int(relationship_id))
+
+        def fn(cursor):
+            cursor.execute(
+                f"UPDATE npc_relationships SET {', '.join(fields)} WHERE id = %s",
+                params
+            )
+            return cursor.rowcount > 0
+        return self._execute_write(fn, f"update_npc_relationship({relationship_id})")
 
     @_synchronized
     def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, provider=None):

@@ -25,6 +25,11 @@ MEMORY_RECALL_BY_DETAIL = {'low': 0, 'medium': 1, 'high': 3}
 RECENT_EVENTS_IN_PROMPT = 5
 
 
+def _first_sentence(text):
+    idx = text.find('. ')
+    return text[:idx + 1] if idx >= 0 else text
+
+
 class LLMBlackjackNPC(NPCPlayer):
 
     npc_type = "llm"
@@ -33,7 +38,7 @@ class LLMBlackjackNPC(NPCPlayer):
                  npc_db_id=None, backstory='',
                  saloon_name='The Rusty Spur', saloon_town='Redemption, Texas',
                  detail_level='medium', table_context_fn=None, usage_callback=None,
-                 memories=None):
+                 memories=None, relationships=None):
         super().__init__(name, npc_db_id=npc_db_id, backstory=backstory)
         self.personality = personality
         self._llm_client = llm_client
@@ -52,6 +57,9 @@ class LLMBlackjackNPC(NPCPlayer):
         self._session_events = deque(maxlen=SESSION_EVENT_BUFFER_SIZE)
         # Session memories loaded once at seating, newest first.
         self._memories = list(memories or [])
+        # Relationships loaded once at seating: dicts of partner/type/notes.
+        # Only partners actually present at the table surface in prompts.
+        self._relationships = list(relationships or [])
 
     def observe_table_event(self, event):
         if self._detail_level == 'low':
@@ -177,6 +185,25 @@ class LLMBlackjackNPC(NPCPlayer):
                         desc += f", a {fame}"
                     descriptions.append(desc)
                 parts.append(f"Others at the table: {', '.join(descriptions)}.")
+
+        if self._detail_level != 'low' and self._relationships and table_players:
+            present = {p['name'] for p in table_players}
+            rel_lines = []
+            for rel in self._relationships:
+                if rel.get('partner') not in present:
+                    continue
+                note = str(rel.get('notes') or '').strip()
+                if self._detail_level == 'medium' and note:
+                    note = _first_sentence(note)
+                if rel.get('type') == 'complicated':
+                    line = f"You and {rel['partner']} have a complicated history."
+                else:
+                    line = f"{rel['partner']} is an old {rel.get('type')} of yours."
+                if note:
+                    line += f" {note}"
+                rel_lines.append(line)
+            if rel_lines:
+                parts.append(" ".join(rel_lines))
 
         if self._detail_level != 'low' and self._session_events:
             recent = list(self._session_events)[-RECENT_EVENTS_IN_PROMPT:]

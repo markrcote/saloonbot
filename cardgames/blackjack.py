@@ -99,9 +99,13 @@ def deserialize_player(data, casino=None):
                 loader = getattr(casino, '_load_npc_memories', None)
                 if callable(loader):
                     memories = loader(npc_db_id)
+                relationships = []
+                rel_loader = getattr(casino, '_load_npc_relationships', None)
+                if callable(rel_loader):
+                    relationships = rel_loader(npc_db_id)
                 player = LLMBlackjackNPC(name, personality, llm_client,
                                          npc_db_id=npc_db_id, backstory=backstory,
-                                         memories=memories)
+                                         memories=memories, relationships=relationships)
                 player.hand = hand
                 return player
             except Exception:

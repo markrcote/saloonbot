@@ -3456,6 +3456,84 @@ class TestPromptContextGolden(unittest.TestCase):
         self.assertNotIn("You remember", npc._build_context_block())
 
 
+class TestRelationshipPromptInjection(unittest.TestCase):
+    """M7: relationship context surfaces only for partners present at the table."""
+
+    RELATIONSHIPS = [
+        {'partner': 'Eli', 'type': 'rival',
+         'notes': 'They fell out over a claim in the hills. Neither forgave the other.'},
+        {'partner': 'Absent Amy', 'type': 'friend', 'notes': 'Rode together for years.'},
+    ]
+
+    def _make_npc(self, detail_level, relationships=None):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        return LLMBlackjackNPC(
+            "Winifred Cobb", get_personality("The Grizzled Prospector"), MagicMock(),
+            detail_level=detail_level,
+            table_context_fn=lambda: [
+                {'name': 'Alice', 'archetype': None, 'fame': None},
+                {'name': 'Eli', 'archetype': 'The Bounty Hunter', 'fame': None},
+            ],
+            relationships=self.RELATIONSHIPS if relationships is None else relationships,
+        )
+
+    def test_high_detail_includes_full_notes_for_present_partner(self):
+        block = self._make_npc('high')._build_context_block()
+        self.assertIn(
+            "Eli is an old rival of yours. They fell out over a claim in the hills. "
+            "Neither forgave the other.",
+            block,
+        )
+
+    def test_absent_partner_not_mentioned(self):
+        block = self._make_npc('high')._build_context_block()
+        self.assertNotIn("Absent Amy", block)
+
+    def test_medium_detail_trims_note_to_first_sentence(self):
+        block = self._make_npc('medium')._build_context_block()
+        self.assertIn("Eli is an old rival of yours. They fell out over a claim in the hills.", block)
+        self.assertNotIn("Neither forgave the other", block)
+
+    def test_low_detail_omits_relationships(self):
+        block = self._make_npc('low')._build_context_block()
+        self.assertNotIn("rival", block)
+
+    def test_complicated_phrasing(self):
+        rels = [{'partner': 'Eli', 'type': 'complicated', 'notes': 'Nobody talks about it.'}]
+        block = self._make_npc('high', relationships=rels)._build_context_block()
+        self.assertIn("You and Eli have a complicated history. Nobody talks about it.", block)
+
+    def test_no_relationships_no_section(self):
+        block = self._make_npc('high', relationships=[])._build_context_block()
+        self.assertNotIn("of yours", block)
+
+    def test_casino_loader_resolves_partner_names(self):
+        db = SqliteDatabase(":memory:")
+        casino = Casino(redis_host="localhost", redis_port=6379, db=db)
+        casino._llm_client_tried = True
+        ida = db.create_npc("Ada Boone", "Prospector", 20000)
+        idb = db.create_npc("Bea Colter", "Gunslinger", 20000)
+        db.create_npc_relationship(ida, idb, "rival", 40, "Bad blood over cards.")
+        rels = casino._load_npc_relationships(ida)
+        self.assertEqual(rels, [{'partner': 'Bea Colter', 'type': 'rival',
+                                 'notes': 'Bad blood over cards.'}])
+        # and from the other side, the partner is Ada
+        rels_b = casino._load_npc_relationships(idb)
+        self.assertEqual(rels_b[0]['partner'], "Ada Boone")
+        db.close()
+
+    def test_casino_loader_empty_at_low_detail(self):
+        db = SqliteDatabase(":memory:")
+        casino = Casino(redis_host="localhost", redis_port=6379, db=db)
+        ida = db.create_npc("Ada Boone", "Prospector", 20000)
+        idb = db.create_npc("Bea Colter", "Gunslinger", 20000)
+        db.create_npc_relationship(ida, idb, "rival", 40, "Bad blood.")
+        with patch('cardgames.casino.SALOON_DETAIL_LEVEL', 'low'):
+            self.assertEqual(casino._load_npc_relationships(ida), [])
+        db.close()
+
+
 class TestNPCMemories(unittest.TestCase):
     """Tests for M6 npc_memories storage helpers."""
 

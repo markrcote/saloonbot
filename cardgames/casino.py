@@ -43,6 +43,11 @@ RELATIONSHIP_TYPES = ('friend', 'rival', 'complicated')
 RELATIONSHIP_TYPE_WEIGHTS = (0.45, 0.30, 0.25)
 RELATIONSHIP_STRENGTH_MIN = 20    # initial strength range: passing acquaintances...
 RELATIONSHIP_STRENGTH_MAX = 60    # ...up to real history already baked in
+ORGANIC_RELATIONSHIP_CHANCE = 0.15  # chance two stranger NPCs bond after a shared session
+ORGANIC_INITIAL_STRENGTH = 20       # organic bonds start at the bottom of the creation range
+RELATIONSHIP_SESSION_INCREMENT = 5  # strength gained per shared session
+RELATIONSHIP_STRENGTH_CAP = 100
+RELATIONSHIP_NOTE_BOUNDARY = 20     # note/type refresh when strength crosses a multiple of this
 
 # Fallback notes written at creation so notes is never NULL; the LLM call
 # that replaces them is fire-and-forget and may never land.
@@ -583,6 +588,123 @@ class Casino:
         except Exception as e:
             logging.warning(f"Relationship note generation failed for {name_a} & {name_b}: {e}")
 
+    @staticmethod
+    def _npc_tuple(player):
+        archetype = getattr(getattr(player, 'personality', None), 'name', None) or 'gambler'
+        return (player.npc_db_id, player.name, archetype)
+
+    def _update_relationships_on_departure(self, game, npc, others=None):
+        """Apply shared-session relationship effects for a departing NPC (M7).
+
+        Pairs with still-seated related NPCs gain strength; stranger pairs roll
+        a small chance to form a brand-new relationship. Each shared session
+        counts once per pair: the hook fires after removal, so when the second
+        NPC of a pair leaves, the first is already gone. `others` overrides the
+        still-seated list for paths where nobody is removed (_delete_game).
+        """
+        npc_db_id = getattr(npc, 'npc_db_id', None)
+        if npc_db_id is None or self.db is None:
+            return
+        if others is None:
+            others = game.players + game.players_waiting
+        for other in others:
+            other_id = getattr(other, 'npc_db_id', None)
+            if other_id is None or other_id == npc_db_id:
+                continue
+            try:
+                rel = self.db.get_npc_relationship(npc_db_id, other_id)
+            except Exception as e:
+                logging.error(f"Error loading relationship for {npc.name} & {other.name}: {e}")
+                continue
+            if rel is None:
+                if random.random() < ORGANIC_RELATIONSHIP_CHANCE:
+                    self._create_relationship(
+                        self._npc_tuple(npc), self._npc_tuple(other),
+                        strength=ORGANIC_INITIAL_STRENGTH,
+                    )
+            else:
+                self._increment_relationship(rel, npc, other)
+
+    def _increment_relationship(self, rel, npc, other):
+        """Award the shared-session strength bump; refresh the note on a boundary crossing."""
+        old = int(rel['strength'])
+        new = min(RELATIONSHIP_STRENGTH_CAP, old + RELATIONSHIP_SESSION_INCREMENT)
+        if new == old:
+            return
+        try:
+            self.db.update_npc_relationship(rel['id'], strength=new)
+        except Exception as e:
+            logging.error(f"Error updating relationship strength for {npc.name} & {other.name}: {e}")
+            return
+        logging.info(f"Relationship between {npc.name} and {other.name}: strength {old} -> {new}")
+        if old // RELATIONSHIP_NOTE_BOUNDARY != new // RELATIONSHIP_NOTE_BOUNDARY:
+            self._submit_relationship_update(rel, new, npc, other)
+
+    def _submit_relationship_update(self, rel, new_strength, npc, other):
+        """Queue the fire-and-forget boundary-crossing note/type refresh (M7).
+
+        The departing NPC's session buffer supplies fresh context; the M6
+        condensation may not have landed yet, so we don't read npc_memories.
+        """
+        n_sentences = _RELATIONSHIP_NOTE_SENTENCES.get(SALOON_DETAIL_LEVEL, 1)
+        if n_sentences == 0 or self.llm_client is None:
+            return
+        recent_events = list(getattr(npc, 'session_events', []))[-8:]
+        if self._relationship_executor is None:
+            self._relationship_executor = ThreadPoolExecutor(max_workers=1)
+        self._relationship_executor.submit(
+            self._generate_relationship_update,
+            rel['id'], rel['relationship_type'], rel['notes'], new_strength,
+            self._npc_tuple(npc), self._npc_tuple(other)[1:], recent_events, n_sentences,
+        )
+
+    def _generate_relationship_update(self, rel_id, rel_type, notes, strength,
+                                      npc_a, other, recent_events, n_sentences):
+        """Regenerate a relationship's note — and possibly its type — after a
+        boundary crossing (runs on the relationship worker)."""
+        id_a, name_a, archetype_a = npc_a
+        name_b, archetype_b = other
+        phrase = _RELATIONSHIP_PHRASES.get(rel_type, rel_type)
+        system = (
+            f"You are the narrator of {SALOON_NAME}, a saloon in the Old West town of "
+            f"{SALOON_TOWN}. You know everyone's history. Respond ONLY with valid JSON: "
+            '{"type": "friend" | "rival" | "complicated", "notes": "<text>"}'
+        )
+        events_block = ""
+        if recent_events:
+            events_block = ("Recently at the table:\n"
+                            + "\n".join(f"- {e}" for e in recent_events) + "\n\n")
+        user = (
+            f'{name_a} (a {archetype_a}) and {name_b} (a {archetype_b}) are {phrase} '
+            f'(bond strength {strength}/100). Current note about them: "{notes}"\n\n'
+            f"{events_block}"
+            f"They just shared another session at the tables. Rewrite the note in "
+            f"{n_sentences} sentence{'s' if n_sentences != 1 else ''}, reflecting how their "
+            'history has deepened. Keep "type" the same unless events clearly changed the '
+            "nature of the relationship."
+        )
+        try:
+            timeout = float(os.environ.get("LLM_TIMEOUT", "5")) * 3  # background call, no one waits
+            text, in_tok, out_tok = self.llm_client.complete(system=system, user=user, timeout=timeout)
+            self._log_usage(
+                'relationship_gen', self.llm_client.model, in_tok, out_tok,
+                npc_id=id_a, provider=self.llm_client.provider
+            )
+            result = json.loads(text)
+            new_type = result.get('type')
+            if new_type not in RELATIONSHIP_TYPES:
+                new_type = rel_type
+            new_notes = str(result.get('notes') or '').strip()
+            if not new_notes:
+                raise LLMError("empty relationship note")
+            self.db.update_npc_relationship(rel_id, relationship_type=new_type, notes=new_notes)
+            logging.info(
+                f"Refreshed relationship note for {name_a} & {name_b}"
+                + (f" (type -> {new_type})" if new_type != rel_type else "")
+            )
+        except Exception as e:
+            logging.warning(f"Relationship update failed for {name_a} & {name_b}: {e}")
+
     def _load_npc_limits(self):
         """Load npc_autofill_min/max from settings, clamping to valid range."""
         if self.db is None:
@@ -695,6 +817,7 @@ class Casino:
             except Exception as e:
                 logging.error(f"Error clearing NPC game for {player.name}: {e}")
         self._condense_npc_session(game.game_id, player)
+        self._update_relationships_on_departure(game, player)
 
     def _condense_npc_session(self, game_id, npc):
         """Kick off fire-and-forget session condensation for a departing LLM NPC.
@@ -761,6 +884,12 @@ class Casino:
             for player in game.players + game.players_waiting:
                 if isinstance(player, LLMBlackjackNPC):
                     self._condense_npc_session(game_id, player)
+            # Relationship effects also bypass the hook on this path (M7): nobody
+            # is removed here, so walk pairs explicitly to count each session once.
+            seated = game.players + game.players_waiting
+            for i, player in enumerate(seated):
+                if getattr(player, 'npc_db_id', None) is not None:
+                    self._update_relationships_on_departure(game, player, others=seated[i + 1:])
             for player in game.players + game.players_waiting + game.departed_players:
                 if isinstance(player, LLMBlackjackNPC):
                     # shutdown(wait=False) still runs already-queued work, so a

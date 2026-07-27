@@ -4,6 +4,7 @@ import os
 import random
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import redis
 
@@ -32,6 +33,32 @@ AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
 
 MAX_MEMORIES_PER_NPC = 20      # npc_memories retention cap, pruned on insert
 SESSION_MEMORY_MIN_EVENTS = 3  # skip condensation for sessions shorter than this
+
+# M7: NPC-NPC relationships. Absence of a row means strangers.
+RELATIONSHIP_CHANCE = 0.70        # chance a newly created NPC has any pre-existing relationships
+RELATIONSHIP_MIN_PARTNERS = 1
+RELATIONSHIP_MAX_PARTNERS = 3
+RELATIONSHIP_SAMPLE_POOL = 10     # roster NPCs sampled as potential partners
+RELATIONSHIP_TYPES = ('friend', 'rival', 'complicated')
+RELATIONSHIP_TYPE_WEIGHTS = (0.45, 0.30, 0.25)
+RELATIONSHIP_STRENGTH_MIN = 20    # initial strength range: passing acquaintances...
+RELATIONSHIP_STRENGTH_MAX = 60    # ...up to real history already baked in
+
+# Fallback notes written at creation so notes is never NULL; the LLM call
+# that replaces them is fire-and-forget and may never land.
+RELATIONSHIP_NOTE_TEMPLATES = {
+    'friend': "Old friends from way back.",
+    'rival': "Longtime rivals who never miss a chance to needle each other.",
+    'complicated': "There's history between these two — nobody's quite sure what kind.",
+}
+
+_RELATIONSHIP_PHRASES = {
+    'friend': "old friends",
+    'rival': "longtime rivals",
+    'complicated': "two people with a long, complicated history",
+}
+
+_RELATIONSHIP_NOTE_SENTENCES = {"low": 0, "medium": 1, "high": 2}
 
 WALLET_REPLENISH_INTERVAL = int(os.environ.get("WALLET_REPLENISH_INTERVAL", "300"))
 LLM_HEALTHCHECK_INTERVAL = int(os.environ.get("LLM_HEALTHCHECK_INTERVAL", "300"))
@@ -88,6 +115,9 @@ class Casino:
         self._last_wallet_replenish = 0
         self._last_llm_healthcheck = 0
         self._llm_health = {}  # provider -> {status, last_success_at, last_failure_at, last_error}
+        # Single worker for relationship note generation: unlike action/bet
+        # calls there's no per-NPC object to own the executor at creation time.
+        self._relationship_executor = None
 
     @property
     def llm_client(self):
@@ -455,6 +485,104 @@ class Casino:
             logging.error(f"Error loading NPC memories for {npc_db_id}: {e}")
             return []
 
+    def _maybe_create_relationships(self, npc_id, name, personality_name):
+        """Roll pre-existing relationships for a newly created NPC (M7).
+
+        70% chance of having any; if so, 1-3 partners sampled from up to
+        RELATIONSHIP_SAMPLE_POOL random roster NPCs.
+        """
+        if self.db is None or npc_id is None:
+            return
+        if random.random() >= RELATIONSHIP_CHANCE:
+            return
+        try:
+            pool = [n for n in self.db.get_all_npcs() if n['id'] != npc_id]
+        except Exception as e:
+            logging.error(f"Error fetching roster for relationship formation: {e}")
+            return
+        if not pool:
+            return
+        sample = random.sample(pool, min(RELATIONSHIP_SAMPLE_POOL, len(pool)))
+        n_partners = random.randint(RELATIONSHIP_MIN_PARTNERS, RELATIONSHIP_MAX_PARTNERS)
+        for partner in sample[:n_partners]:
+            self._create_relationship(
+                (npc_id, name, personality_name),
+                (partner['id'], partner['name'], partner['personality_name']),
+            )
+
+    def _create_relationship(self, npc_a, npc_b, strength=None):
+        """Create one relationship row between two (npc_id, name, archetype) tuples.
+
+        Rolls type (and strength, unless given), writes the template note, then
+        submits fire-and-forget LLM note generation. Returns the row id, or
+        None if the pair is already related or the write fails.
+        """
+        id_a, name_a, archetype_a = npc_a
+        id_b, name_b, archetype_b = npc_b
+        try:
+            if self.db.get_npc_relationship(id_a, id_b) is not None:
+                return None
+            rel_type = random.choices(RELATIONSHIP_TYPES, weights=RELATIONSHIP_TYPE_WEIGHTS)[0]
+            if strength is None:
+                strength = random.randint(RELATIONSHIP_STRENGTH_MIN, RELATIONSHIP_STRENGTH_MAX)
+            rel_id = self.db.create_npc_relationship(
+                id_a, id_b, rel_type, strength, RELATIONSHIP_NOTE_TEMPLATES[rel_type]
+            )
+        except Exception as e:
+            logging.error(f"Error creating relationship between {name_a} and {name_b}: {e}")
+            return None
+        logging.info(
+            f"New {rel_type} relationship (strength {strength}) between {name_a} and {name_b}"
+        )
+        self._submit_relationship_note(
+            rel_id, rel_type, (id_a, name_a, archetype_a), (name_b, archetype_b)
+        )
+        return rel_id
+
+    def _submit_relationship_note(self, rel_id, rel_type, npc_a, other):
+        """Queue fire-and-forget LLM note generation; the template note stays on failure.
+
+        Skipped entirely at low detail level or without an LLM (mirrors backstory).
+        """
+        n_sentences = _RELATIONSHIP_NOTE_SENTENCES.get(SALOON_DETAIL_LEVEL, 1)
+        if n_sentences == 0 or self.llm_client is None:
+            return
+        if self._relationship_executor is None:
+            self._relationship_executor = ThreadPoolExecutor(max_workers=1)
+        self._relationship_executor.submit(
+            self._generate_relationship_note, rel_id, rel_type, npc_a, other, n_sentences
+        )
+
+    def _generate_relationship_note(self, rel_id, rel_type, npc_a, other, n_sentences):
+        """Generate and persist a relationship note (runs on the relationship worker)."""
+        id_a, name_a, archetype_a = npc_a
+        name_b, archetype_b = other
+        phrase = _RELATIONSHIP_PHRASES.get(rel_type, rel_type)
+        system = (
+            f"You are the narrator of {SALOON_NAME}, a saloon in the Old West town of "
+            f"{SALOON_TOWN}. You know everyone's history. "
+            "Respond with only the requested text, no JSON."
+        )
+        user = (
+            f"{name_a} (a {archetype_a}) and {name_b} (a {archetype_b}) are {phrase}. "
+            f"In {n_sentences} sentence{'s' if n_sentences != 1 else ''}, describe the "
+            "specific shared history behind that. Be vivid and concrete."
+        )
+        try:
+            timeout = float(os.environ.get("LLM_TIMEOUT", "5")) * 3  # background call, no one waits
+            text, in_tok, out_tok = self.llm_client.complete(system=system, user=user, timeout=timeout)
+            note = text.strip()
+            if not note:
+                raise LLMError("empty relationship note")
+            self._log_usage(
+                'relationship_gen', self.llm_client.model, in_tok, out_tok,
+                npc_id=id_a, provider=self.llm_client.provider
+            )
+            self.db.update_npc_relationship(rel_id, notes=note)
+            logging.info(f"Generated relationship note for {name_a} & {name_b}")
+        except Exception as e:
+            logging.warning(f"Relationship note generation failed for {name_a} & {name_b}: {e}")
+
     def _load_npc_limits(self):
         """Load npc_autofill_min/max from settings, clamping to valid range."""
         if self.db is None:
@@ -485,7 +613,8 @@ class Casino:
         for _ in range(to_create):
             personality = get_random_personality()
             name = self._generate_npc_name()
-            self.db.create_npc(name, personality.name, personality.starting_wallet_cents)
+            npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet_cents)
+            self._maybe_create_relationships(npc_id, name, personality.name)
         logging.info(f"NPC roster: created {to_create} NPCs (roster was {current})")
 
     def _get_or_create_npcs(self, n, exclude_personalities):
@@ -515,6 +644,7 @@ class Casino:
             name = self._generate_npc_name()
             npc_id = self.db.create_npc(name, personality.name, personality.starting_wallet_cents)
             backstory = self._generate_backstory(npc_id, personality, name)
+            self._maybe_create_relationships(npc_id, name, personality.name)
             available.append({
                 'id': npc_id,
                 'name': name,

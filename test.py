@@ -603,6 +603,94 @@ class TestNpcRelationshipsDb(unittest.TestCase):
         self.assertFalse(self.db.update_npc_relationship(9999, strength=50))
 
 
+class TestNpcRelationshipFormation(unittest.TestCase):
+    """M7: creation-time relationship formation in the Casino."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.casino = Casino(redis_host="localhost", redis_port=6379, db=self.db)
+        self.casino.redis = MagicMock()
+        self.casino._llm_client_tried = True  # no LLM: note gen skipped, templates stay
+        self.ida = self.db.create_npc("Ada Boone", "Prospector", 20000)
+        self.idb = self.db.create_npc("Bea Colter", "Gunslinger", 20000)
+        self.idc = self.db.create_npc("Cal Dobbs", "Rancher", 20000)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_failed_roll_creates_nothing(self):
+        new_id = self.db.create_npc("Dee Ellis", "Drifter", 20000)
+        with patch('cardgames.casino.random.random', return_value=0.9):
+            self.casino._maybe_create_relationships(new_id, "Dee Ellis", "Drifter")
+        self.assertEqual(self.db.get_npc_relationships(new_id), [])
+
+    def test_successful_roll_creates_partners_with_template_notes(self):
+        from cardgames.casino import RELATIONSHIP_NOTE_TEMPLATES
+        new_id = self.db.create_npc("Dee Ellis", "Drifter", 20000)
+        with patch('cardgames.casino.random.random', return_value=0.1), \
+             patch('cardgames.casino.random.sample', side_effect=lambda pool, k: pool[:k]), \
+             patch('cardgames.casino.random.randint', side_effect=[2, 40, 55]), \
+             patch('cardgames.casino.random.choices', side_effect=[['friend'], ['rival']]):
+            self.casino._maybe_create_relationships(new_id, "Dee Ellis", "Drifter")
+        rels = self.db.get_npc_relationships(new_id)
+        self.assertEqual(len(rels), 2)
+        # strongest first: the rival at 55, then the friend at 40
+        self.assertEqual(rels[0]["relationship_type"], "rival")
+        self.assertEqual(rels[0]["strength"], 55)
+        self.assertEqual(rels[0]["notes"], RELATIONSHIP_NOTE_TEMPLATES["rival"])
+        self.assertEqual(rels[1]["relationship_type"], "friend")
+        self.assertEqual(rels[1]["strength"], 40)
+        self.assertEqual(rels[1]["notes"], RELATIONSHIP_NOTE_TEMPLATES["friend"])
+        # every row involves the new NPC
+        for rel in rels:
+            self.assertIn(new_id, (rel["npc_id_a"], rel["npc_id_b"]))
+
+    def test_empty_roster_creates_nothing(self):
+        db = SqliteDatabase(":memory:")
+        casino = Casino(redis_host="localhost", redis_port=6379, db=db)
+        casino._llm_client_tried = True
+        only_id = db.create_npc("Solo", "Drifter", 20000)
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            casino._maybe_create_relationships(only_id, "Solo", "Drifter")
+        self.assertEqual(db.get_npc_relationships(only_id), [])
+        db.close()
+
+    def test_existing_pair_not_duplicated(self):
+        rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 30, "Pals.")
+        result = self.casino._create_relationship(
+            (self.ida, "Ada Boone", "Prospector"), (self.idb, "Bea Colter", "Gunslinger")
+        )
+        self.assertIsNone(result)
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["id"], rel_id)
+        self.assertEqual(rel["notes"], "Pals.")
+
+    def test_note_generation_replaces_template_and_logs_usage(self):
+        from cardgames.llm_client import FakeClient
+        rel_id = self.db.create_npc_relationship(
+            self.ida, self.idb, "friend", 30, "Old friends from way back.")
+        self.casino._llm_client = FakeClient()
+        self.casino._generate_relationship_note(
+            rel_id, "friend",
+            (self.ida, "Ada Boone", "Prospector"), ("Bea Colter", "Gunslinger"),
+            n_sentences=1,
+        )
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertNotEqual(rel["notes"], "Old friends from way back.")
+        self.assertTrue(rel["notes"])
+        purposes = {r["purpose"] for r in self.db.get_llm_usage_summary(days=1)}
+        self.assertIn("relationship_gen", purposes)
+
+    def test_note_generation_skipped_at_low_detail(self):
+        from cardgames.llm_client import FakeClient
+        self.casino._llm_client = FakeClient()
+        with patch('cardgames.casino.SALOON_DETAIL_LEVEL', 'low'):
+            self.casino._submit_relationship_note(
+                1, "friend", (self.ida, "Ada Boone", "Prospector"), ("Bea Colter", "Gunslinger")
+            )
+        self.assertIsNone(self.casino._relationship_executor)
+
+
 class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()

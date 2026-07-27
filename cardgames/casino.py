@@ -349,6 +349,42 @@ class Casino:
             }
         )
 
+    def _handle_npc_relationships(self, request_id, target):
+        """Handle a get_npc_relationships request: look up an NPC by name
+        (case-insensitive) and publish its relationships (admin diagnostics)."""
+        npc = None
+        relationships = []
+        if self.db is not None:
+            try:
+                npc = self.db.find_npc_by_name(target)
+            except Exception as e:
+                logging.error(f"Error finding NPC {target!r}: {e}")
+            if npc is not None:
+                try:
+                    for row in self.db.get_npc_relationships(npc['id']):
+                        other_id = (row['npc_id_b'] if row['npc_id_a'] == npc['id']
+                                    else row['npc_id_a'])
+                        other = self.db.get_npc_by_id(other_id)
+                        relationships.append({
+                            'partner': other['name'] if other else f"NPC #{other_id}",
+                            'type': row['relationship_type'],
+                            'strength': row['strength'],
+                            'notes': row['notes'],
+                        })
+                except Exception as e:
+                    logging.error(f"Error loading relationships for {target!r}: {e}")
+
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'npc_relationships',
+                'request_id': request_id,
+                'target': target,
+                'npc_name': npc['name'] if npc else None,
+                'relationships': relationships,
+            }
+        )
+
     def _handle_set_wallet(self, request_id, target, mode, amount_cents):
         """Handle a set_wallet request: resolve target, apply change, publish wallet_set.
 
@@ -1411,6 +1447,11 @@ class Casino:
                     amount = data.get('amount', 0)
                     if request_id and target:
                         self._handle_set_wallet(request_id, target, mode, amount)
+                elif data['action'] == 'get_npc_relationships':
+                    request_id = data.get('request_id')
+                    target = data.get('target')
+                    if request_id and target:
+                        self._handle_npc_relationships(request_id, target)
                 elif data['action'] == 'npc_limits':
                     request_id = data.get('request_id')
                     if request_id:

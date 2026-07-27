@@ -705,6 +705,31 @@ class Casino:
         except Exception as e:
             logging.warning(f"Relationship update failed for {name_a} & {name_b}: {e}")
 
+    def _load_npc_relationships(self, npc_db_id):
+        """Fetch an NPC's relationships as partner/type/notes dicts for prompt injection.
+
+        Loaded once per seating (like memories); pairs can't change while both
+        NPCs stay seated, so there's nothing to refresh mid-session.
+        """
+        if npc_db_id is None or self.db is None or SALOON_DETAIL_LEVEL == 'low':
+            return []
+        try:
+            result = []
+            for row in self.db.get_npc_relationships(npc_db_id):
+                other_id = row['npc_id_b'] if row['npc_id_a'] == npc_db_id else row['npc_id_a']
+                other = self.db.get_npc_by_id(other_id)
+                if other is None:
+                    continue
+                result.append({
+                    'partner': other['name'],
+                    'type': row['relationship_type'],
+                    'notes': row['notes'],
+                })
+            return result
+        except Exception as e:
+            logging.error(f"Error loading NPC relationships for {npc_db_id}: {e}")
+            return []
+
     def _load_npc_limits(self):
         """Load npc_autofill_min/max from settings, clamping to valid range."""
         if self.db is None:
@@ -993,6 +1018,7 @@ class Casino:
                     table_context_fn=table_ctx,
                     usage_callback=self._log_usage,
                     memories=self._load_npc_memories(npc_db_id),
+                    relationships=self._load_npc_relationships(npc_db_id),
                 )
             else:
                 npc = SimpleBlackjackNPC(name, npc_db_id=npc_db_id, backstory=backstory)

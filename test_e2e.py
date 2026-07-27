@@ -125,6 +125,7 @@ class EndToEndTestCase(unittest.TestCase):
             'BLACKJACK_RESULT_PAUSE': '0',
             'BLACKJACK_NPC_DEPARTURE_BASE': '0',
             'BLACKJACK_NPC_DEPARTURE_RAMP': '0',
+            'BLACKJACK_AMBIENT_NPC_ACTION_DELAY': '0',
             'LLM_TIMEOUT': '1',
             'PYTHONUNBUFFERED': '1',
         })

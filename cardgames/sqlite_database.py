@@ -120,7 +120,28 @@ MIGRATIONS = [
         "ALTER TABLE llm_usage ADD COLUMN provider TEXT NULL",
         "ALTER TABLE llm_usage DROP COLUMN game_id",
     ],
+    [   # Migration 9: NPC-NPC relationships; absence of a row means strangers.
+        # Rows are stored with npc_id_a < npc_id_b, enforced by the unique pair index.
+        """CREATE TABLE IF NOT EXISTS npc_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            npc_id_a INTEGER NOT NULL,
+            npc_id_b INTEGER NOT NULL,
+            relationship_type TEXT NOT NULL,
+            strength INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_npc_relationships_pair"
+        " ON npc_relationships (npc_id_a, npc_id_b)",
+    ],
 ]
+
+
+def ordered_pair(npc_id_x, npc_id_y):
+    """Normalize an NPC id pair to (low, high) — the canonical storage order."""
+    a, b = int(npc_id_x), int(npc_id_y)
+    return (a, b) if a < b else (b, a)
 
 
 class SqliteDatabase:
@@ -623,6 +644,82 @@ class SqliteDatabase:
             return [dict(r) for r in cursor.fetchall()]
         except sqlite3.Error as e:
             logging.error(f"Error getting NPC memories {npc_id}: {e}")
+            raise
+
+    @_synchronized
+    def create_npc_relationship(self, npc_id_x, npc_id_y, relationship_type, strength, notes):
+        """Create a relationship row for an NPC pair (stored low-id-first). Returns the new row id."""
+        npc_id_a, npc_id_b = ordered_pair(npc_id_x, npc_id_y)
+        self._connect()
+        try:
+            cursor = self.connection.execute("""
+                INSERT INTO npc_relationships (npc_id_a, npc_id_b, relationship_type, strength, notes)
+                VALUES (?, ?, ?, ?, ?)
+            """, (npc_id_a, npc_id_b, relationship_type, int(strength), notes))
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            logging.error(f"Error creating NPC relationship ({npc_id_a},{npc_id_b}): {e}")
+            raise
+
+    @_synchronized
+    def get_npc_relationship(self, npc_id_x, npc_id_y):
+        """Get the relationship row for an NPC pair (order-insensitive). Returns dict or None."""
+        npc_id_a, npc_id_b = ordered_pair(npc_id_x, npc_id_y)
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT * FROM npc_relationships WHERE npc_id_a = ? AND npc_id_b = ?",
+                (npc_id_a, npc_id_b)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Error getting NPC relationship ({npc_id_a},{npc_id_b}): {e}")
+            raise
+
+    @_synchronized
+    def get_npc_relationships(self, npc_id):
+        """Get all relationship rows involving an NPC, strongest first. Returns list of dicts."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("""
+                SELECT * FROM npc_relationships
+                WHERE npc_id_a = ? OR npc_id_b = ?
+                ORDER BY strength DESC, id
+            """, (int(npc_id), int(npc_id)))
+            return [dict(r) for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logging.error(f"Error getting NPC relationships for {npc_id}: {e}")
+            raise
+
+    @_synchronized
+    def update_npc_relationship(self, relationship_id, strength=None, relationship_type=None, notes=None):
+        """Update the provided fields of a relationship row. Returns True if a row was updated."""
+        fields, params = [], []
+        if strength is not None:
+            fields.append("strength = ?")
+            params.append(int(strength))
+        if relationship_type is not None:
+            fields.append("relationship_type = ?")
+            params.append(relationship_type)
+        if notes is not None:
+            fields.append("notes = ?")
+            params.append(notes)
+        if not fields:
+            return False
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(int(relationship_id))
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                f"UPDATE npc_relationships SET {', '.join(fields)} WHERE id = ?",
+                params
+            )
+            self.connection.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Error updating NPC relationship {relationship_id}: {e}")
             raise
 
     @_synchronized

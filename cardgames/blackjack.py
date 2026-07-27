@@ -210,6 +210,10 @@ class Blackjack(CardGame):
     AMBIENT_SPEED_MULTIPLIER = float(os.getenv('BLACKJACK_AMBIENT_SPEED_MULTIPLIER', '2.0'))
     AMBIENT_TIME_BETWEEN_HANDS_MIN = int(os.getenv('BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN', '120'))
     AMBIENT_TIME_BETWEEN_HANDS_MAX = int(os.getenv('BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX', '300'))
+    # Minimum seconds between NPC bets/actions on an ambient table. This is the
+    # lever that actually slows in-hand pace: NPC decisions dominate a hand's
+    # wall-clock time, not the cosmetic _pause()s.
+    AMBIENT_NPC_ACTION_DELAY = float(os.getenv('BLACKJACK_AMBIENT_NPC_ACTION_DELAY', '5'))
 
     # Valid actions for each state
     VALID_ACTIONS = {
@@ -267,6 +271,16 @@ class Blackjack(CardGame):
     def _pause(self, base_seconds):
         multiplier = self.AMBIENT_SPEED_MULTIPLIER if self._is_ambient() else 1.0
         time.sleep(base_seconds * multiplier)
+
+    def _ambient_npc_gate(self):
+        """True when an ambient table should hold the next NPC bet/action.
+
+        Timestamp gating rather than sleep, so other games in the single-
+        threaded loop never block. Each bet/hit/stand refreshes
+        time_last_event, so NPC actions self-space by the delay.
+        """
+        return (self._is_ambient()
+                and time.time() < self.time_last_event + self.AMBIENT_NPC_ACTION_DELAY)
 
     def _output_player_result(self, player, result):
         """Output a player's result with their current wallet balance."""
@@ -773,10 +787,15 @@ class Blackjack(CardGame):
             self.time_first_player_joined = None
             return
 
-        # Auto-bet for any NPCs that haven't bet yet; drop broke ones immediately
+        # Auto-bet for any NPCs that haven't bet yet; drop broke ones immediately.
+        # Ambient tables space bets out via the gate: each landed bet refreshes
+        # time_last_event, so at most one lands per delay window.
+        ambient = self._is_ambient()
         broke_npcs = []
         for player in self.players:
             if player.is_npc and player.name not in self.bets:
+                if self._ambient_npc_gate():
+                    break
                 wallet = self.casino.get_wallet(player)
                 if wallet < self.MIN_BET:
                     broke_npcs.append(player)
@@ -799,8 +818,12 @@ class Blackjack(CardGame):
         # Check if all players have bet
         all_bet = all(player.name in self.bets for player in self.players)
 
-        # Check if betting time has expired
-        time_expired = time.time() > self.time_betting_started + self.TIME_FOR_BETTING
+        # Check if betting time has expired. Ambient tables don't enforce the
+        # timeout: it exists to bench idle humans, and paced NPC bets always
+        # land eventually (broke NPCs are dropped, LLM timeouts fall back to
+        # the minimum bet) — benching them would just strand the table.
+        time_expired = (not ambient
+                        and time.time() > self.time_betting_started + self.TIME_FOR_BETTING)
 
         if all_bet or time_expired:
             if all_bet:
@@ -830,8 +853,10 @@ class Blackjack(CardGame):
         """Handle PLAYING state: auto-play NPCs, remind humans."""
         current_player = self.players[self.current_player_idx]
 
-        # Auto-play NPC turns
+        # Auto-play NPC turns (spaced out on ambient tables)
         if current_player.is_npc:
+            if self._ambient_npc_gate():
+                return
             score = self.get_score(current_player)
             dealer_visible_card = self.dealer.hand[0]
             action = current_player.decide_action(

@@ -36,6 +36,8 @@ Blackjack.RESULT_PAUSE = 0
 # Disable the random NPC departure roll; roll tests re-enable it per instance
 Blackjack.NPC_DEPARTURE_BASE = 0
 Blackjack.NPC_DEPARTURE_RAMP = 0
+# Disable ambient NPC action spacing; pacing tests re-enable it per instance
+Blackjack.AMBIENT_NPC_ACTION_DELAY = 0
 
 
 class TestMoney(unittest.TestCase):
@@ -422,6 +424,86 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.game.dealer_turn()
         self.game.end_hand()
         self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
+
+
+class TestAmbientNpcActionPacing(unittest.TestCase):
+    """Ambient tables space NPC bets/actions via timestamp gating, not sleeps."""
+
+    def setUp(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 100000
+        mock_casino.update_wallet.return_value = True
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
+        self.game.AMBIENT_NPC_ACTION_DELAY = 100  # re-enable gating for this game
+
+    def _start_betting_with(self, *players):
+        for p in players:
+            self.game.players_waiting.append(p)
+        self.game.tick()  # WAITING -> BETTING (moves waiting players in)
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_ambient_bets_are_spaced_one_per_window(self):
+        self._start_betting_with(SimpleBlackjackNPC("Bot1"), SimpleBlackjackNPC("Bot2"))
+        self.game.time_last_event = time.time()
+        self.game.tick()
+        self.assertEqual(len(self.game.bets), 0)  # gate holds: too soon
+
+        self.game.time_last_event = time.time() - 101
+        self.game.tick()
+        self.assertEqual(len(self.game.bets), 1)  # one bet lands, refreshing the gate
+
+        self.game.tick()
+        self.assertEqual(len(self.game.bets), 1)  # second still gated
+
+        self.game.time_last_event = time.time() - 101
+        self.game.tick()
+        self.assertEqual(len(self.game.bets), 2)
+
+    def test_human_table_bets_all_npcs_immediately(self):
+        self._start_betting_with(
+            Player("Human"), SimpleBlackjackNPC("Bot1"), SimpleBlackjackNPC("Bot2"))
+        self.game.time_last_event = time.time()
+        self.game.tick()
+        self.assertEqual(len(self.game.bets), 2)  # both NPC bets, no gating
+
+    def test_ambient_betting_timeout_not_enforced(self):
+        self._start_betting_with(SimpleBlackjackNPC("Bot1"), SimpleBlackjackNPC("Bot2"))
+        self.game.time_last_event = time.time()  # gate closed: nobody can bet yet
+        self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 5
+        self.game.tick()
+        # Nobody benched, hand not dealt without bets, still betting
+        self.assertEqual(self.game.state, HandState.BETTING)
+        self.assertEqual(len(self.game.players), 2)
+
+    def test_human_table_betting_timeout_still_enforced(self):
+        self._start_betting_with(Player("Human"), SimpleBlackjackNPC("Bot1"))
+        self.game.time_betting_started = time.time() - self.game.TIME_FOR_BETTING - 5
+        self.game.tick()  # NPC bets; human benched by timeout; hand deals
+        self.assertNotEqual(self.game.state, HandState.BETTING)
+
+    def test_ambient_playing_action_gated(self):
+        npc1, npc2 = SimpleBlackjackNPC("Bot1"), SimpleBlackjackNPC("Bot2")
+        self._start_betting_with(npc1, npc2)
+        self.game.time_last_event = time.time() - 101
+        self.game.tick()  # first bet
+        self.game.time_last_event = time.time() - 101
+        self.game.tick()  # second bet -> cards dealt, PLAYING
+        self.assertEqual(self.game.state, HandState.PLAYING)
+
+        self.game.time_last_event = time.time()
+        idx_before = self.game.current_player_idx
+        cards_before = sum(len(p.hand) for p in self.game.players)
+        self.game.tick()
+        self.assertEqual(self.game.current_player_idx, idx_before)  # gate held
+        self.assertEqual(sum(len(p.hand) for p in self.game.players), cards_before)
+
+        self.game.time_last_event = time.time() - 101
+        self.game.tick()  # NPC acts (hits or stands)
+        acted = (self.game.current_player_idx != idx_before
+                 or sum(len(p.hand) for p in self.game.players) > cards_before
+                 or self.game.state != HandState.PLAYING)
+        self.assertTrue(acted, "NPC should act once the gate opens")
 
 
 class TestDatabaseIntegration(unittest.TestCase):

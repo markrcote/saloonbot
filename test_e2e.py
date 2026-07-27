@@ -1200,6 +1200,12 @@ class TestNPCLimits(EndToEndTestCase):
         self.assertIsNotNone(resp)
         self.assertFalse(resp['ok'])
 
+    def tearDown(self):
+        # Reset autofill limits: they persist in `settings` and are loaded by
+        # every subsequently started server, so leftovers leak into later classes.
+        self._casino_request('npc_limits', min=0, max=4)
+        super().tearDown()
+
     def test_autofill_fills_to_min(self):
         """With npc_min=2, a new game gains 2 NPCs via autofill within ~30s."""
         # Set min=2 so autofill kicks in
@@ -1652,6 +1658,123 @@ class TestNPCDepartureE2E(EndToEndTestCase):
             self.assertEqual(row[0], game_id)
         finally:
             pubsub.close()
+
+
+class TestNPCRelationships(EndToEndTestCase):
+    """E2E tests for M7 NPC-NPC relationships, using the fake LLM provider.
+
+    NPC_RELATIONSHIP_CHANCE=1.0 makes creation-time formation deterministic:
+    every NPC created after the first picks 1-3 partners from the roster.
+    """
+
+    EXTRA_ENV = {'LLM_PROVIDER': 'fake', 'NPC_RELATIONSHIP_CHANCE': '1.0'}
+
+    def setUp(self):
+        super().setUp()
+        self.game_id = None
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM npc_relationships")
+        cursor.execute("DELETE FROM npc_memories")
+        cursor.execute("DELETE FROM npcs")
+        cursor.execute("DELETE FROM llm_usage")
+        self.db.commit()
+        cursor.close()
+        # Autofill limits persist in `settings` across classes (the server loads
+        # them at startup); pin them to 0 so only num_bots seats NPCs here.
+        self._casino_request('npc_limits', min=0, max=4)
+
+    def tearDown(self):
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def _seat_npcs(self, num_bots):
+        """Create a game with pending bots and a human whose join spawns them."""
+        game_id = self.create_game(num_bots=num_bots)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'RelHuman')
+            msgs = self.collect_messages(pubsub, timeout=10, stop_on='New arrivals')
+            self.assertTrue(any('New arrivals' in m for m in msgs),
+                            f"Expected NPC arrivals. Messages: {msgs}")
+        finally:
+            pubsub.close()
+        return game_id
+
+    def _seed_relationship(self, rel_type, strength, notes):
+        """Replace any auto-formed rows with one known relationship between the
+        two seated NPCs. Returns their (id, name) rows ordered by id."""
+        self.db.commit()
+        cursor = self.db.cursor()
+        cursor.execute(
+            "SELECT id, name FROM npcs WHERE current_game_id = %s ORDER BY id",
+            (self.game_id,))
+        npcs = cursor.fetchall()
+        self.assertEqual(len(npcs), 2)
+        cursor.execute("DELETE FROM npc_relationships")
+        cursor.execute(
+            "INSERT INTO npc_relationships (npc_id_a, npc_id_b, relationship_type, strength, notes)"
+            " VALUES (%s, %s, %s, %s, %s)",
+            (npcs[0][0], npcs[1][0], rel_type, strength, notes))
+        self.db.commit()
+        cursor.close()
+        return npcs
+
+    def test_npc_relationships_table_exists(self):
+        """Migration 9 was applied on server startup."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT COUNT(*) FROM npc_relationships")
+        cursor.fetchone()
+        cursor.close()
+
+    def test_new_npcs_form_relationships_with_notes(self):
+        """Freshly created roster NPCs arrive with relationship rows whose notes
+        are never empty (per-type template, later replaced by the fake LLM)."""
+        self._seat_npcs(3)
+        row = self.poll_db(
+            "SELECT relationship_type, strength, notes FROM npc_relationships LIMIT 1",
+            (), timeout=10)
+        self.assertIsNotNone(row, "Expected relationship rows for newly created NPCs")
+        self.assertIn(row[0], ('friend', 'rival', 'complicated'))
+        self.assertTrue(20 <= row[1] <= 60, f"Initial strength out of range: {row[1]}")
+        self.assertTrue(row[2], "notes must never be empty")
+
+    def test_shared_session_departure_increments_strength(self):
+        """Removing one of two related seated NPCs awards the +5 session bump."""
+        self._seat_npcs(2)
+        self._seed_relationship('rival', 30, 'Bad blood.')
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'npc_action',
+            'action': 'remove_npc',
+            'game_id': self.game_id,
+        }))
+        row = self.poll_db(
+            "SELECT strength FROM npc_relationships",
+            (), predicate=lambda r: r[0] == 35, timeout=10)
+        self.assertIsNotNone(row, "Expected strength 30 -> 35 after the shared session")
+
+    def test_admin_relationship_lookup(self):
+        """The get_npc_relationships casino action resolves an NPC by name and
+        returns its relationships; unknown names return npc_name None."""
+        self._seat_npcs(2)
+        npcs = self._seed_relationship('friend', 40, 'Rode together for years.')
+
+        resp = self._casino_request('get_npc_relationships', target=npcs[0][1])
+        self.assertIsNotNone(resp, "Expected a npc_relationships response")
+        self.assertEqual(resp['event_type'], 'npc_relationships')
+        self.assertEqual(resp['npc_name'], npcs[0][1])
+        self.assertEqual(len(resp['relationships']), 1)
+        rel = resp['relationships'][0]
+        self.assertEqual(rel['partner'], npcs[1][1])
+        self.assertEqual(rel['type'], 'friend')
+        self.assertEqual(rel['strength'], 40)
+        self.assertEqual(rel['notes'], 'Rode together for years.')
+
+        miss = self._casino_request('get_npc_relationships', target='Nobody Nowhere')
+        self.assertIsNotNone(miss)
+        self.assertIsNone(miss['npc_name'])
+        self.assertEqual(miss['relationships'], [])
 
 
 if __name__ == "__main__":

@@ -67,6 +67,7 @@ python cli.py   # name: Dave, bots: 0
 - [ ] After joining: `addnpc 1` → roster NPC joins and announces in-channel
 - [ ] NPC auto-bets and plays; `quit` after hand resolves
 - [ ] `addnpc 2` → two more NPCs join; `removenpc` (no name) → one NPC leaves (no crash)
+- [ ] Relationships: `sqlite3 saloonbot.db "SELECT * FROM npc_relationships"` shows rows with non-empty notes (~70% of new NPCs have some); after a removenpc with a related NPC still seated, server log shows `strength X -> Y`. In Discord, `/npcrelationships <name>` lists them.
 
 ---
 

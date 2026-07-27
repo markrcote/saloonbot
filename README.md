@@ -36,6 +36,7 @@ Slash commands:
 * `/setwallet <target> <amount>` *(admin)* — set a player's or NPC's wallet to an exact amount.
 * `/givechips <target> <amount>` *(admin)* — adjust a player's or NPC's wallet by a delta (negative takes chips away).
 * `/npclimits [min] [max]` *(admin)* — view or set the NPC autofill min/max per table. With `min > 0`, tables stay populated with NPCs even when no humans are present.
+* `/npcrelationships <npc>` *(admin)* — list an NPC's relationships (partner, type, strength, and the story behind them).
 * `/addnpc [count]` *(admin)* — add one or more roster NPCs to the current game (default: 1).
 * `/removenpc [name]` *(admin)* — remove an NPC from the current game; omit name to remove any NPC.
 * `/usage [days]` *(admin)* — show a summary of LLM token usage (default 7 days, up to 90), broken down by purpose, model, and provider.
@@ -60,6 +61,10 @@ Bots are drawn from a pool of 15 archetypes and 4 historical figures, each with 
 ### NPC memory
 
 AI bots remember their nights at the table. While seated, each bot keeps track of what happens around it — bets, busts, wins, and banter — and when it leaves (including deciding on its own to "call it a night"), it condenses the session into a short memory that persists in the database. The next time that NPC sits down, its recent memories feed into its prompts, so a regular NPC can reference past sessions and the people it played with. Memory depth follows `SALOON_DETAIL_LEVEL`: `low` disables the feature, `medium` recalls 1 recent session, `high` recalls 3.
+
+### NPC relationships
+
+Roster NPCs have history with each other. A newly created NPC has a 70% chance of arriving with 1–3 pre-existing relationships to other roster NPCs — friendships, rivalries, or something more complicated — each with an LLM-written backstory note. Relationships also form and deepen through play: sharing a table strengthens a pair's bond (+5 per session), strangers who play together have a small chance of striking up a new relationship, and every 20 strength points the relationship's note is rewritten (and its type can shift — a friendship can sour into something complicated). When two related NPCs sit at the same table, both play with their shared history in their prompts, gated by `SALOON_DETAIL_LEVEL`: `low` omits it, `medium` injects the type and a one-sentence note, `high` the full note. Admins can inspect any NPC's relationships with `/npcrelationships`.
 
 ### Configuration
 

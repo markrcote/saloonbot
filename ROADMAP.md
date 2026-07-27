@@ -4,7 +4,7 @@
 
 [VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
-**Current state:** M1–M6 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, idle broke NPCs slowly rebuild their wallets between sessions, and NPCs now accumulate session memories: table events are buffered while seated, condensed into persistent first-person summaries on departure, and recalled into future prompts. Still missing: no relationships — with each other or with returning players — and the world is inert when no humans are present (no world loop, no ambient NPC-only play). **M7 (NPC–NPC Relationships) is next up.**
+**Current state:** M1–M7 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, idle broke NPCs slowly rebuild their wallets between sessions, NPCs accumulate session memories (buffered while seated, condensed into persistent first-person summaries on departure, recalled into future prompts), and NPCs now have relationships with each other: formed at creation and organically through play, strengthened by shared sessions, evolved by LLM note/type refreshes, and injected into prompts when related NPCs share a table. Still missing: no PC–NPC relationships (NPCs don't remember individual returning players beyond fame), and the world is inert when no humans are present (no world loop, no scheduled ambient NPC-only play). **M8 (PC–NPC Relationships) is next up.**
 
 **What exists that can be reused:**
 - `personalities.py` — 19 rich personality definitions with system prompts
@@ -124,7 +124,7 @@
 
 ---
 
-## Milestone 7: NPC–NPC Relationships
+## Milestone 7: NPC–NPC Relationships ✓ DONE
 
 **Goal:** Regular NPCs have history with each other. Two old rivals play differently when they share a table.
 
@@ -140,6 +140,8 @@
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/llm_npc.py`, `bot.py`
 
 **Verification:** Unit tests with seeded RNG for creation probabilities/pairing, strength/boundary logic, and prompt injection via a fake LLM client; plus one e2e test that runs without an API key and asserts relationship rows are created via the template path. Manually: seed two NPCs as rivals, confirm both LLM prompts include the relationship context, play shared sessions, and check the +5 increments and a note regeneration at the first boundary crossing.
+
+**Implementation notes (as built):** All of the above shipped as designed, plus two additions. (1) **Organic formation** (user-requested during implementation): the roadmap as written only created rows at NPC-creation time, so an established roster would have stayed all-strangers forever — now, when an NPC departs, each still-seated *stranger* NPC pair also rolls a 15% chance (`ORGANIC_RELATIONSHIP_CHANCE`, initial strength 20) to form a brand-new relationship. (2) The two formation chances are env-overridable (`NPC_RELATIONSHIP_CHANCE`, `NPC_ORGANIC_RELATIONSHIP_CHANCE`) so e2e tests can pin them for determinism, mirroring the departure-roll constants. Details that follow existing patterns: `_delete_game` (stop/reap) bypasses the M4 hook, so it walks seated NPC pairs explicitly (counting each shared session once); the boundary-crossing refresh feeds the departing NPC's live session buffer to the LLM rather than `npc_memories` (the M6 condensation is async and may not have landed yet); note generation runs on a dedicated single-worker executor in `Casino` since no per-NPC executor exists at creation time; the table also carries `created_at`/`updated_at`; and relationships load once at seating (both spawn and restore paths) — pairs can't change while both NPCs stay seated.
 
 ---
 
@@ -241,4 +243,4 @@ M1 (Persistent NPCs)
 │       └── M8 (PC–NPC Relationships)    ← requires M1 + M3 + M6
 ```
 
-M1 is the critical prerequisite. M2, M3, M4, and M5 built on it and are all done, as is M6 — the session-condensation mechanism M7's and M8's relationship notes are generated from. With M1–M6 complete, **M7 is unblocked and next**; M8 is also unblocked (M1+M3+M6 all done) but M7 comes first in the plan. M9a and M9b both follow M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.
+M1 is the critical prerequisite. M2–M7 are all done. With M1–M7 complete, **M8 is unblocked and next** (M1+M3+M6 requirements all met), as are M9a and M9b, which follow M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.

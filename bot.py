@@ -153,6 +153,7 @@ class BlackjackCog(commands.Cog):
         self._pending_checkwallet_interactions = {}  # request_id -> interaction
         self._pending_setwallet_interactions = {}  # request_id -> interaction (set + adjust)
         self._pending_npclimits_interactions = {}  # request_id -> interaction
+        self._pending_npcrel_interactions = {}  # request_id -> interaction
 
     def cog_unload(self):
         self.listen.stop()
@@ -636,6 +637,59 @@ class BlackjackCog(commands.Cog):
         else:
             await interaction.followup.send(f"❌ {msg}", ephemeral=True)
 
+    async def _handle_npc_relationships_response(self, interaction, data):
+        """Format and send an NPC's relationships as an ephemeral followup."""
+        target = data.get('target', '?')
+        npc_name = data.get('npc_name')
+        relationships = data.get('relationships') or []
+
+        if npc_name is None:
+            await interaction.followup.send(
+                f"⚠️ No NPC named **{target}** found.", ephemeral=True
+            )
+            return
+
+        if not relationships:
+            await interaction.followup.send(
+                f"🤠 **{npc_name}** doesn't have history with anyone yet.", ephemeral=True
+            )
+            return
+
+        type_emoji = {'friend': '🤝', 'rival': '⚔️', 'complicated': '🌪️'}
+        lines = []
+        for rel in relationships:
+            emoji = type_emoji.get(rel.get('type'), '❔')
+            lines.append(
+                f"{emoji} **{rel.get('partner')}** — {rel.get('type')} "
+                f"(strength {rel.get('strength')}/100)\n{rel.get('notes')}"
+            )
+        embed = nextcord.Embed(
+            title=f"🫂 {npc_name}'s Relationships",
+            description="\n\n".join(lines)[:4000],
+            color=0xc8a96e,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @nextcord.slash_command(name="npcrelationships", guild_ids=GUILD_IDS,
+                            description="List an NPC's relationships (admin only)",
+                            default_member_permissions=nextcord.Permissions(administrator=True))
+    async def npc_relationships(self, interaction: nextcord.Interaction, npc: str):
+        await interaction.response.defer(ephemeral=True)
+        request_id = str(uuid.uuid4())
+        self._pending_npcrel_interactions[request_id] = interaction
+        message = {
+            'event_type': 'casino_action',
+            'action': 'get_npc_relationships',
+            'request_id': request_id,
+            'target': npc,
+        }
+        try:
+            await self.redis.publish("casino", json.dumps(message))
+        except Exception as e:
+            logging.error(f"Redis publish error for get_npc_relationships: {e}")
+            self._pending_npcrel_interactions.pop(request_id, None)
+            await interaction.followup.send("❌ Could not reach game server.", ephemeral=True)
+
     @nextcord.slash_command(name="npclimits", guild_ids=GUILD_IDS,
                             description="View or set NPC autofill min/max per table (admin only)",
                             default_member_permissions=nextcord.Permissions(administrator=True))
@@ -774,6 +828,7 @@ class BlackjackCog(commands.Cog):
             "`/setwallet <target> <amount>` — Set a wallet to an exact amount\n"
             "`/givechips <target> <amount>` — Adjust a wallet by a delta\n"
             "`/npclimits [min] [max]` — View or set NPC autofill limits per table\n"
+            "`/npcrelationships <npc>` — List an NPC's relationships\n"
             "`/addnpc [count]` — Add NPC(s) to the current game\n"
             "`/removenpc [name]` — Remove an NPC from the current game\n"
             "`/usage` — LLM token usage for the past 7 days\n"
@@ -1024,6 +1079,11 @@ class BlackjackCog(commands.Cog):
                 interaction = self._pending_npclimits_interactions.pop(request_id, None)
                 if interaction:
                     await self._handle_npc_limits_response(interaction, data)
+            elif data.get("event_type") == "npc_relationships":
+                request_id = data.get("request_id")
+                interaction = self._pending_npcrel_interactions.pop(request_id, None)
+                if interaction:
+                    await self._handle_npc_relationships_response(interaction, data)
         else:
             for game in self.games:
                 if game.topic() == topic:

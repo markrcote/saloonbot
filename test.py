@@ -787,6 +787,26 @@ class TestNpcRelationshipEvolution(unittest.TestCase):
         purposes = {r["purpose"] for r in self.db.get_llm_usage_summary(days=1)}
         self.assertIn("relationship_gen", purposes)
 
+    def test_handle_npc_relationships_publishes_rows(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "rival", 45, "Bad blood.")
+        self.casino.publish_event = MagicMock()
+        self.casino._handle_npc_relationships("req-1", "ada boone")
+        topic, event = self.casino.publish_event.call_args[0]
+        self.assertEqual(topic, "casino_update")
+        self.assertEqual(event["event_type"], "npc_relationships")
+        self.assertEqual(event["request_id"], "req-1")
+        self.assertEqual(event["npc_name"], "Ada Boone")
+        self.assertEqual(event["relationships"], [{
+            'partner': 'Bea Colter', 'type': 'rival', 'strength': 45, 'notes': 'Bad blood.',
+        }])
+
+    def test_handle_npc_relationships_unknown_npc(self):
+        self.casino.publish_event = MagicMock()
+        self.casino._handle_npc_relationships("req-2", "Nobody")
+        _, event = self.casino.publish_event.call_args[0]
+        self.assertIsNone(event["npc_name"])
+        self.assertEqual(event["relationships"], [])
+
     def test_generate_relationship_update_rejects_invalid_type(self):
         rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 40, "Pals.")
         fake_client = MagicMock()

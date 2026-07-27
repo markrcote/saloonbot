@@ -150,9 +150,17 @@ def hunt(n_runs, filter_classes=None):
         test_e2e.TestAdminWallet,
         test_e2e.TestNPCLimits,
         test_e2e.TestManualNPC,
+        test_e2e.TestNPCWalletReplenishment,
+        test_e2e.TestNPCSessionMemory,
+        test_e2e.TestMetricsEndpoint,
+        test_e2e.TestNPCDepartureE2E,
+        test_e2e.TestNPCRelationships,
     ]
     if filter_classes:
         all_classes = [c for c in all_classes if c.__name__ in filter_classes]
+        unknown = set(filter_classes) - {c.__name__ for c in all_classes}
+        if unknown:
+            raise SystemExit(f"Unknown test class(es): {', '.join(sorted(unknown))}")
 
     results = {}  # "Class::method" -> {passes, fails, errors[]}
 

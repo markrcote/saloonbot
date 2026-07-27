@@ -691,6 +691,119 @@ class TestNpcRelationshipFormation(unittest.TestCase):
         self.assertIsNone(self.casino._relationship_executor)
 
 
+class TestNpcRelationshipEvolution(unittest.TestCase):
+    """M7: shared-session strength bumps, boundary refreshes, organic formation."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.casino = Casino(redis_host="localhost", redis_port=6379, db=self.db)
+        self.casino.redis = MagicMock()
+        self.casino._llm_client_tried = True
+        self.ida = self.db.create_npc("Ada Boone", "Prospector", 20000)
+        self.idb = self.db.create_npc("Bea Colter", "Gunslinger", 20000)
+        self.npc_a = SimpleBlackjackNPC("Ada Boone", npc_db_id=self.ida)
+        self.npc_b = SimpleBlackjackNPC("Bea Colter", npc_db_id=self.idb)
+        self.game = MagicMock()
+        self.game.players = [self.npc_b]  # b still seated when a departs
+        self.game.players_waiting = []
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_departure_increments_shared_pair(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 30, "Pals.")
+        self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["strength"], 35)
+
+    def test_strength_capped_at_100(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 98, "Inseparable.")
+        self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["strength"], 100)
+        # a second session at the cap changes nothing
+        self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        self.assertEqual(self.db.get_npc_relationship(self.ida, self.idb)["strength"], 100)
+
+    def test_boundary_crossing_submits_refresh(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 38, "Pals.")
+        self.casino._submit_relationship_update = MagicMock()
+        self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        self.casino._submit_relationship_update.assert_called_once()
+        self.assertEqual(self.casino._submit_relationship_update.call_args[0][1], 43)
+
+    def test_no_refresh_without_boundary_crossing(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 30, "Pals.")
+        self.casino._submit_relationship_update = MagicMock()
+        self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        self.casino._submit_relationship_update.assert_not_called()
+
+    def test_organic_formation_on_lucky_roll(self):
+        with patch('cardgames.casino.random.random', return_value=0.05), \
+             patch('cardgames.casino.random.choices', return_value=['rival']):
+            self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertIsNotNone(rel)
+        self.assertEqual(rel["relationship_type"], "rival")
+        self.assertEqual(rel["strength"], 20)
+
+    def test_no_organic_formation_on_failed_roll(self):
+        with patch('cardgames.casino.random.random', return_value=0.5):
+            self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        self.assertIsNone(self.db.get_npc_relationship(self.ida, self.idb))
+
+    def test_human_players_ignored(self):
+        self.game.players = [Player("Maverick")]
+        with patch('cardgames.casino.random.random', return_value=0.0):
+            self.casino._update_relationships_on_departure(self.game, self.npc_a)
+        self.assertEqual(self.db.get_npc_relationships(self.ida), [])
+
+    def test_delete_game_counts_each_pair_once(self):
+        self.db.create_npc_relationship(self.ida, self.idb, "friend", 30, "Pals.")
+        game_id = self.casino.new_game()
+        game = self.casino.games[game_id]
+        game.join(self.npc_a, announce=False)
+        game.join(self.npc_b, announce=False)
+        self.casino._delete_game(game_id)
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["strength"], 35)  # one shared session, not two
+
+    def test_generate_relationship_update_applies_type_change(self):
+        rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 40, "Pals.")
+        fake_client = MagicMock()
+        fake_client.model = "test-model"
+        fake_client.provider = "test"
+        fake_client.complete.return_value = (
+            '{"type": "complicated", "notes": "That last hand changed things."}', 12, 8)
+        self.casino._llm_client = fake_client
+        self.casino._generate_relationship_update(
+            rel_id, "friend", "Pals.", 40,
+            (self.ida, "Ada Boone", "Prospector"), ("Bea Colter", "Gunslinger"),
+            recent_events=["Ada Boone won big"], n_sentences=1,
+        )
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["relationship_type"], "complicated")
+        self.assertEqual(rel["notes"], "That last hand changed things.")
+        purposes = {r["purpose"] for r in self.db.get_llm_usage_summary(days=1)}
+        self.assertIn("relationship_gen", purposes)
+
+    def test_generate_relationship_update_rejects_invalid_type(self):
+        rel_id = self.db.create_npc_relationship(self.ida, self.idb, "friend", 40, "Pals.")
+        fake_client = MagicMock()
+        fake_client.model = "test-model"
+        fake_client.provider = "test"
+        fake_client.complete.return_value = ('{"type": "nemesis", "notes": "Sworn foes."}', 12, 8)
+        self.casino._llm_client = fake_client
+        self.casino._generate_relationship_update(
+            rel_id, "friend", "Pals.", 40,
+            (self.ida, "Ada Boone", "Prospector"), ("Bea Colter", "Gunslinger"),
+            recent_events=[], n_sentences=1,
+        )
+        rel = self.db.get_npc_relationship(self.ida, self.idb)
+        self.assertEqual(rel["relationship_type"], "friend")  # invalid type ignored
+        self.assertEqual(rel["notes"], "Sworn foes.")
+
+
 class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()

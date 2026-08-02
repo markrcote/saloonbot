@@ -10,7 +10,7 @@ import redis
 from . import metrics
 from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
-from .llm_client import create_llm_client, LLMError
+from .llm_client import create_llm_client, get_configured_provider, LLMError
 from .llm_npc import LLMBlackjackNPC, MEMORY_RECALL_BY_DETAIL
 from .money import format_cents
 from .personalities import get_personality, get_random as get_random_personality
@@ -35,6 +35,9 @@ SESSION_MEMORY_MIN_EVENTS = 3  # skip condensation for sessions shorter than thi
 
 WALLET_REPLENISH_INTERVAL = int(os.environ.get("WALLET_REPLENISH_INTERVAL", "300"))
 LLM_HEALTHCHECK_INTERVAL = int(os.environ.get("LLM_HEALTHCHECK_INTERVAL", "300"))
+# Seconds a probe must keep failing before it's reported as down for alerting
+# (absorbs transient blips like boot-time DNS not being ready yet).
+LLM_DOWN_GRACE_PERIOD = int(os.environ.get("LLM_DOWN_GRACE_PERIOD", "120"))
 REPLENISH_PROB_MIN = 0.15         # chance per cycle at the low wealth reference point
 REPLENISH_PROB_RANGE = 0.35       # added on top of REPLENISH_PROB_MIN at the high reference point
 REPLENISH_PROB_LOW_CENTS = 7500   # $75 reference point (not the personalities' actual minimum)
@@ -77,6 +80,7 @@ class Casino:
         self._dirty_games = set()  # game_ids pending a DB write
         self._llm_client = None
         self._llm_client_tried = False
+        self._llm_provider_disabled = False
         self._name_generator = WildWestNames()
         self.npc_min = DEFAULT_NPC_AUTOFILL_MIN
         self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
@@ -89,6 +93,11 @@ class Casino:
     def llm_client(self):
         if not self._llm_client_tried:
             self._llm_client_tried = True
+            provider = get_configured_provider()
+            if provider == "none":
+                self._llm_provider_disabled = True
+                logging.info("LLM disabled (LLM_PROVIDER=none); bot players will use simple strategy.")
+                return None
             try:
                 client = create_llm_client()
                 client.probe()
@@ -100,33 +109,49 @@ class Casino:
                 self._set_llm_health(client.provider, up=True)
             except Exception as e:
                 logging.warning(f"LLM client unavailable: {e}. Bot players will use simple strategy.")
-                provider = os.environ.get("LLM_PROVIDER", "").lower() or "unknown"
                 self._set_llm_health(provider, up=False, error=e)
         return self._llm_client
 
     def _set_llm_health(self, provider, up, error=None):
-        """Record a probe/creation outcome for a provider, for /debug and /metrics."""
-        provider = provider or "unknown"
+        """Record a probe/creation outcome for a provider, for /debug and /metrics.
+
+        The internal status (used by /debug) flips immediately so an outage is
+        visible right away and NPCs fall back to simple strategy without delay.
+        The Prometheus gauge that LlmProviderDown alerts on is debounced
+        separately: it only reports down once failures persist past
+        LLM_DOWN_GRACE_PERIOD, so a single transient probe failure (e.g. DNS
+        not ready yet right after a container boot) never triggers an alert.
+        """
         state = self._llm_health.setdefault(provider, {
-            "status": "unknown", "last_success_at": None, "last_failure_at": None, "last_error": None,
+            "status": "unknown", "last_success_at": None, "last_failure_at": None,
+            "last_error": None, "first_failure_at": None,
         })
         now = time.time()
         if up:
             state["status"] = "up"
             state["last_success_at"] = now
             state["last_error"] = None
+            state["first_failure_at"] = None
+            metrics.set_llm_provider_status(provider, True)
         else:
             state["status"] = "down"
             state["last_failure_at"] = now
             state["last_error"] = str(error) if error else None
-        metrics.set_llm_provider_status(provider, up)
+            if state["first_failure_at"] is None:
+                state["first_failure_at"] = now
+            metrics.record_llm_probe_failure(provider)
+            if now - state["first_failure_at"] >= LLM_DOWN_GRACE_PERIOD:
+                metrics.set_llm_provider_status(provider, False)
 
     def _check_llm_health(self):
         """Periodically re-probe the LLM provider so outages and recoveries (e.g. API
         credits running out or being topped up) are picked up without a server restart.
 
-        Throttled to at most once per LLM_HEALTHCHECK_INTERVAL seconds.
+        Throttled to at most once per LLM_HEALTHCHECK_INTERVAL seconds. No-op when
+        LLM_PROVIDER=none, since there's no client to probe or recover.
         """
+        if self._llm_provider_disabled:
+            return
         now = time.time()
         if now - self._last_llm_healthcheck < LLM_HEALTHCHECK_INTERVAL:
             return
@@ -153,8 +178,10 @@ class Casino:
                     " Bot players will use AI strategy."
                 )
                 self._set_llm_health(client.provider, up=True)
-            except Exception:
-                pass  # still unavailable; already logged when it first failed
+            except Exception as e:
+                # Still unavailable; already logged when it first failed. Still record
+                # the failure (silently) so grace-period timing keeps accumulating.
+                self._set_llm_health(get_configured_provider(), up=False, error=e)
 
     def get_wallet(self, player):
         """Get a player's wallet balance in cents (routes to users or npcs table)."""

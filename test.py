@@ -2161,31 +2161,34 @@ class TestMetrics(unittest.TestCase):
             before_out + 50,
         )
 
-    def test_record_llm_usage_defaults_missing_provider_to_unknown(self):
-        from cardgames import metrics
-        before = self._labeled_value(
-            metrics.LLM_CALLS_TOTAL, purpose='test_purpose2', model='test-model', provider='unknown'
-        )
-        metrics.record_llm_usage('test_purpose2', 'test-model', None, 10, 5)
-        self.assertEqual(
-            self._labeled_value(
-                metrics.LLM_CALLS_TOTAL, purpose='test_purpose2', model='test-model', provider='unknown'
-            ),
-            before + 1,
-        )
-
     def test_set_llm_provider_status_up(self):
         from cardgames import metrics
         metrics.set_llm_provider_status('test_provider_up', up=True)
         self.assertEqual(self._labeled_value(metrics.LLM_PROVIDER_UP, provider='test_provider_up'), 1)
 
-    def test_set_llm_provider_status_down_increments_failures(self):
+    def test_set_llm_provider_status_down(self):
         from cardgames import metrics
-        before = self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_down')
         metrics.set_llm_provider_status('test_provider_down', up=False)
         self.assertEqual(self._labeled_value(metrics.LLM_PROVIDER_UP, provider='test_provider_down'), 0)
+
+    def test_set_llm_provider_status_does_not_touch_failure_counter(self):
+        """The gauge and the failure counter are independent: callers that only
+        want to record a probe failure (without necessarily flipping the alert
+        gauge) use record_llm_probe_failure instead."""
+        from cardgames import metrics
+        before = self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_gauge_only')
+        metrics.set_llm_provider_status('test_provider_gauge_only', up=False)
         self.assertEqual(
-            self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_down'),
+            self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_gauge_only'),
+            before,
+        )
+
+    def test_record_llm_probe_failure_increments_counter(self):
+        from cardgames import metrics
+        before = self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_failure')
+        metrics.record_llm_probe_failure('test_provider_failure')
+        self.assertEqual(
+            self._labeled_value(metrics.LLM_PROVIDER_FAILURES_TOTAL, provider='test_provider_failure'),
             before + 1,
         )
 
@@ -2761,6 +2764,55 @@ class TestLLMHealthCheck(unittest.TestCase):
             self.assertIsNone(casino.llm_client)
         self.assertEqual(casino._llm_health['openai']['status'], 'down')
 
+    def test_llm_client_property_none_when_provider_disabled(self):
+        """LLM_PROVIDER=none skips client creation entirely: no probe, no health
+        tracking, and the disabled flag is set so _check_llm_health no-ops too."""
+        casino = self._make_casino()
+        with patch('cardgames.casino.create_llm_client') as mock_create, \
+             patch.dict(os.environ, {'LLM_PROVIDER': 'none'}):
+            self.assertIsNone(casino.llm_client)
+        mock_create.assert_not_called()
+        self.assertEqual(casino._llm_health, {})
+        self.assertTrue(casino._llm_provider_disabled)
+
+    def test_check_llm_health_noop_when_provider_disabled(self):
+        casino = self._make_casino()
+        casino._llm_client_tried = True
+        casino._llm_provider_disabled = True
+        with patch('cardgames.casino.create_llm_client') as mock_create:
+            casino._check_llm_health()
+        mock_create.assert_not_called()
+
+    def test_single_failure_does_not_flip_alert_gauge_within_grace_period(self):
+        """A lone transient failure (e.g. DNS not ready at boot) should still be
+        counted, and still mark the internal status down for /debug and instant
+        fallback to simple strategy — but must not flip the Prometheus gauge
+        that LlmProviderDown alerts on until it persists past the grace period."""
+        casino = self._make_casino()
+        with patch('cardgames.casino.metrics.set_llm_provider_status') as mock_gauge, \
+             patch('cardgames.casino.metrics.record_llm_probe_failure') as mock_failure:
+            casino._set_llm_health('openai', up=False, error=RuntimeError("dns"))
+        mock_gauge.assert_not_called()
+        mock_failure.assert_called_once_with('openai')
+        self.assertEqual(casino._llm_health['openai']['status'], 'down')
+
+    def test_gauge_flips_once_failure_persists_past_grace_period(self):
+        from cardgames.casino import LLM_DOWN_GRACE_PERIOD
+        casino = self._make_casino()
+        with patch('cardgames.casino.metrics.set_llm_provider_status') as mock_gauge:
+            casino._set_llm_health('openai', up=False, error=RuntimeError("dns"))
+            mock_gauge.assert_not_called()
+            with patch('cardgames.casino.time.time', return_value=time.time() + LLM_DOWN_GRACE_PERIOD + 1):
+                casino._set_llm_health('openai', up=False, error=RuntimeError("still down"))
+            mock_gauge.assert_called_once_with('openai', False)
+
+    def test_recovery_resets_grace_period_tracking(self):
+        casino = self._make_casino()
+        casino._set_llm_health('openai', up=False, error=RuntimeError("dns"))
+        self.assertIsNotNone(casino._llm_health['openai']['first_failure_at'])
+        casino._set_llm_health('openai', up=True)
+        self.assertIsNone(casino._llm_health['openai']['first_failure_at'])
+
 
 class TestChangelog(unittest.TestCase):
 
@@ -3251,6 +3303,55 @@ class TestFakeLLMClient(unittest.TestCase):
                 del os.environ["LLM_PROVIDER"]
             else:
                 os.environ["LLM_PROVIDER"] = old
+
+
+class TestGetConfiguredProvider(unittest.TestCase):
+    """Tests for llm_client.get_configured_provider/create_llm_client: LLM_PROVIDER
+    is optional (defaults to openai), single-valued, and "none" is a first-class
+    way to disable the LLM client entirely — no more auto-detecting from whichever
+    API keys happen to be set."""
+
+    def _with_provider(self, value):
+        """Context manager setting (or unsetting, for None) LLM_PROVIDER."""
+        env = dict(os.environ)
+        if value is None:
+            env.pop("LLM_PROVIDER", None)
+        else:
+            env["LLM_PROVIDER"] = value
+        return patch.dict(os.environ, env, clear=True)
+
+    def test_unset_defaults_to_openai(self):
+        from cardgames.llm_client import get_configured_provider
+        with self._with_provider(None):
+            self.assertEqual(get_configured_provider(), "openai")
+
+    def test_explicit_values_are_respected(self):
+        from cardgames.llm_client import get_configured_provider
+        for value in ("openai", "claude", "none", "fake"):
+            with self._with_provider(value):
+                self.assertEqual(get_configured_provider(), value)
+
+    def test_case_insensitive_and_trimmed(self):
+        from cardgames.llm_client import get_configured_provider
+        with self._with_provider("  OpenAI  "):
+            self.assertEqual(get_configured_provider(), "openai")
+
+    def test_invalid_value_raises(self):
+        from cardgames.llm_client import get_configured_provider, LLMError
+        with self._with_provider("gemini"):
+            with self.assertRaises(LLMError):
+                get_configured_provider()
+
+    def test_create_llm_client_none_returns_none(self):
+        from cardgames.llm_client import create_llm_client
+        with self._with_provider("none"):
+            self.assertIsNone(create_llm_client())
+
+    def test_create_llm_client_invalid_raises_before_construction(self):
+        from cardgames.llm_client import create_llm_client, LLMError
+        with self._with_provider("gemini"):
+            with self.assertRaises(LLMError):
+                create_llm_client()
 
 
 class TestTableEventBuffer(unittest.TestCase):

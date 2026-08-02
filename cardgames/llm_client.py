@@ -142,24 +142,33 @@ class FakeClient(LLMClient):
         pass
 
 
-def create_llm_client() -> LLMClient:
-    explicit = os.environ.get("LLM_PROVIDER", "").lower()
-    if explicit == "claude":
-        return ClaudeClient()
-    elif explicit == "openai":
-        return OpenAIClient()
-    elif explicit == "fake":
-        return FakeClient()
-    elif explicit:
-        raise LLMError(f"Unknown LLM_PROVIDER: {explicit!r}. Expected 'claude', 'openai', or 'fake'.")
+_VALID_PROVIDERS = ("openai", "claude", "none", "fake")
 
-    has_anthropic = bool(_read_key("ANTHROPIC_API_KEY"))
-    has_openai = bool(_read_key("OPENAI_API_KEY"))
-    if has_anthropic and not has_openai:
+
+def get_configured_provider() -> str:
+    """Resolve the single configured LLM provider.
+
+    LLM_PROVIDER is optional and defaults to "openai". "none" explicitly
+    disables the LLM client (NPCs always use the built-in simple strategy).
+    Any other value is a configuration error, raised immediately rather than
+    guessed at from whichever API keys happen to be present.
+    """
+    value = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if not value:
+        return "openai"
+    if value not in _VALID_PROVIDERS:
+        raise LLMError(f"Invalid LLM_PROVIDER: {value!r}. Expected one of {_VALID_PROVIDERS}.")
+    return value
+
+
+def create_llm_client() -> LLMClient | None:
+    """Create the configured LLM client, or None if LLM_PROVIDER=none."""
+    provider = get_configured_provider()
+    if provider == "none":
+        return None
+    elif provider == "claude":
         return ClaudeClient()
-    elif has_openai and not has_anthropic:
+    elif provider == "openai":
         return OpenAIClient()
-    elif has_anthropic and has_openai:
-        return ClaudeClient()
     else:
-        raise LLMError("No LLM API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+        return FakeClient()

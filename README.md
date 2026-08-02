@@ -65,18 +65,19 @@ AI bots remember their nights at the table. While seated, each bot keeps track o
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `claude` | LLM provider: `claude`, `openai`, or `fake` (deterministic offline provider for testing) |
+| `LLM_PROVIDER` | `openai` | LLM provider: `openai`, `claude`, `none` (disables the LLM client entirely — bots always use basic strategy), or `fake` (deterministic offline provider for testing) |
 | `ANTHROPIC_API_KEY` | — | API key for Claude; supports `ANTHROPIC_API_KEY_FILE` |
 | `OPENAI_API_KEY` | — | API key for OpenAI; supports `OPENAI_API_KEY_FILE` |
 | `LLM_MODEL` | provider default | Override model (`claude-haiku-4-5` / `gpt-4o-mini`) |
 | `LLM_TIMEOUT` | `5` | Seconds before falling back to basic strategy |
 | `LLM_HEALTHCHECK_INTERVAL` | `300` | Seconds between periodic re-checks of the LLM provider (detects credit exhaustion/outages and recovery without a restart) |
+| `LLM_DOWN_GRACE_PERIOD` | `120` | Seconds a provider must keep failing before it's reported down for alerting/metrics — absorbs transient blips (e.g. DNS not ready right after a restart) without paging |
 | `LLM_SESSION_MEMORY_TIMEOUT` | `15` | Seconds allowed for the background session-memory call |
 | `BLACKJACK_NPC_DEPARTURE_BASE` | `0.02` | Baseline per-hand chance an NPC calls it a night |
 | `BLACKJACK_NPC_DEPARTURE_RAMP` | `0.28` | Extra departure chance once an NPC has seen a full session |
 | `METRICS_PORT` | `9400` | Port for the Prometheus `/metrics` endpoint |
 
-API keys are optional. If unset or invalid, bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
+Exactly one provider is active at a time, chosen by `LLM_PROVIDER` (default `openai`) — the corresponding API key is required for `openai`/`claude`; an unset or invalid key (or `LLM_PROVIDER=none`) means bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
 
 All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) resolve in priority order: direct env var → `<VAR>_FILE` path → `/run/secrets/<lowercase_var>` → unset. Docker secrets mounted at `/run/secrets/` are picked up automatically with no extra configuration.
 

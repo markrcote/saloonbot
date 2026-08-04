@@ -732,6 +732,7 @@ class Database:
     def get_llm_usage_summary(self, days=7):
         """Return token totals grouped by purpose/model/provider for the past N days."""
         self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
         cursor = None
         try:
             cursor = self.connection.cursor(dictionary=True)

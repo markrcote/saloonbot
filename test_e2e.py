@@ -1116,6 +1116,38 @@ class TestAdminWallet(EndToEndTestCase):
         self.assertEqual(row[0], 5000)
 
 
+class TestUsageStats(EndToEndTestCase):
+    """E2E tests for the admin get_usage request against real MySQL."""
+
+    def setUp(self):
+        super().setUp()
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM llm_usage")
+        self.db.commit()
+        cursor.close()
+
+    def test_get_usage_returns_summary_with_int_totals(self):
+        """get_usage must serialize MySQL's Decimal SUM() totals (regression: crashed the server)."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT INTO llm_usage (purpose, model, provider, input_tokens, output_tokens) "
+            "VALUES ('npc_action', 'gpt-4o-mini', 'openai', 100, 50), "
+            "('npc_action', 'gpt-4o-mini', 'openai', 200, 80)"
+        )
+        self.db.commit()
+        cursor.close()
+
+        resp = self._casino_request('get_usage', days=7)
+        self.assertIsNotNone(resp, "No usage_stats response — server may have crashed")
+        self.assertEqual(resp['event_type'], 'usage_stats')
+        self.assertEqual(resp['days'], 7)
+        row = next(r for r in resp['rows']
+                   if r['purpose'] == 'npc_action' and r['provider'] == 'openai')
+        self.assertEqual(row['total_input'], 300)
+        self.assertEqual(row['total_output'], 130)
+        self.assertEqual(row['call_count'], 2)
+
+
 class TestNPCLimits(EndToEndTestCase):
     """E2E tests for NPC autofill min/max (AM3)."""
 

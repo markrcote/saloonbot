@@ -1,7 +1,7 @@
 anthropic>=0.120.2
 pytest>=9.1.1
 pytest-timeout>=2.4.0
-openai>=2.51.0
+openai>=3.0.0
 prometheus-client>=0.26.0
 aioconsole==0.8.2
 aiohappyeyeballs==2.7.1

@@ -27,5 +27,5 @@ requests==2.34.2
 setuptools==83.0.0
 typing_extensions==4.16.0
 urllib3==2.7.0
-wheel==0.47.0
+wheel==0.48.0
 yarl==1.24.5

@@ -1549,6 +1549,119 @@ class TestNPCSessionMemory(EndToEndTestCase):
             pubsub.close()
 
 
+class TestPcNpcRelationships(EndToEndTestCase):
+    """E2E tests for M8 PC-NPC relationships, using the fake LLM provider."""
+
+    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+
+    def setUp(self):
+        super().setUp()
+        self.game_id = None
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM pc_npc_relationships")
+        cursor.execute("DELETE FROM npc_memories")
+        cursor.execute("DELETE FROM npcs")
+        self.db.commit()
+        cursor.close()
+
+    def tearDown(self):
+        if self.game_id:
+            self._stop_game(self.game_id)
+        super().tearDown()
+
+    def _remove_npc(self, game_id):
+        self.redis.publish("casino", json.dumps({
+            'event_type': 'npc_action',
+            'action': 'remove_npc',
+            'game_id': game_id,
+        }))
+
+    def _play_one_hand(self, game_id, pubsub, player_name):
+        """Bet and stand through one hand, returning when the hand resolves."""
+        self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
+        self.place_bet(game_id, player_name, 1000)
+        pre = self.collect_messages(
+            pubsub, timeout=10, stop_on=[f"{player_name}, you're up", 'dust settles'])
+        if not any('dust settles' in m for m in pre):
+            self.assertTrue(
+                any(f"{player_name}, you're up" in m for m in pre),
+                f"{player_name} should be prompted for their turn. Messages: {pre}")
+            self.player_action(game_id, player_name, 'stand')
+            self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+
+    def test_first_session_creates_relationship_row(self):
+        """Seat an LLM NPC with a human, play a hand, remove the NPC: a
+        pc_npc_relationships row lands with times_met=1 and a generated note."""
+        game_id = self.create_game(num_bots=1, deck=TestNPCSessionMemory.MEMORY_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'RelHuman')
+            self._play_one_hand(game_id, pubsub, 'RelHuman')
+            self._remove_npc(game_id)
+
+            row = self.poll_db(
+                "SELECT times_met, sessions_played, npc_notes_on_player "
+                "FROM pc_npc_relationships WHERE player_name = %s",
+                ('RelHuman',), timeout=10)
+            self.assertIsNotNone(row, "Expected a pc_npc_relationships row after NPC removal")
+            self.assertEqual(row[0], 1)
+            self.assertEqual(row[1], 1)
+
+            note = self.poll_db(
+                "SELECT npc_notes_on_player FROM pc_npc_relationships WHERE player_name = %s",
+                ('RelHuman',), predicate=lambda r: r[0] is not None, timeout=10)
+            self.assertIsNotNone(note, "Expected a generated note")
+            self.assertIn("1 time now", note[0])  # fake provider echoes times_met
+
+            usage = self.poll_db(
+                "SELECT COUNT(*) FROM llm_usage WHERE purpose = 'pc_npc_summary'",
+                (), predicate=lambda r: r[0] > 0, timeout=5)
+            self.assertIsNotNone(usage, "Expected a pc_npc_summary llm_usage row")
+        finally:
+            pubsub.close()
+
+    def test_second_session_increments_and_rewrites_note(self):
+        """Reseat the same NPC with the same human: times_met increments and
+        the note is regenerated (observably different — the fake provider
+        echoes the fresh times_met count into the note text)."""
+        game_id = self.create_game(num_bots=1, deck=TestNPCSessionMemory.MEMORY_DECK)
+        self.game_id = game_id
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'RelHuman')
+            self._play_one_hand(game_id, pubsub, 'RelHuman')
+            self._remove_npc(game_id)
+            first = self.poll_db(
+                "SELECT times_met FROM pc_npc_relationships WHERE player_name = %s",
+                ('RelHuman',), timeout=10)
+            self.assertIsNotNone(first)
+            self.assertEqual(first[0], 1)
+
+            # Reseat: the only roster NPC is available again.
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'npc_action',
+                'action': 'add_npc',
+                'game_id': game_id,
+            }))
+            self._play_one_hand(game_id, pubsub, 'RelHuman')
+            self._remove_npc(game_id)
+
+            second = self.poll_db(
+                "SELECT times_met, sessions_played, npc_notes_on_player "
+                "FROM pc_npc_relationships WHERE player_name = %s",
+                ('RelHuman',), predicate=lambda r: r[0] == 2, timeout=10)
+            self.assertIsNotNone(second, "Expected times_met to reach 2")
+            self.assertEqual(second[1], 2)
+
+            note = self.poll_db(
+                "SELECT npc_notes_on_player FROM pc_npc_relationships WHERE player_name = %s",
+                ('RelHuman',), predicate=lambda r: r[0] and "2 time" in r[0], timeout=10)
+            self.assertIsNotNone(note, "Expected the note to be rewritten referencing the 2nd meeting")
+        finally:
+            pubsub.close()
+
+
 class TestMetricsEndpoint(EndToEndTestCase):
     """E2E: the Prometheus /metrics endpoint exposes LLM usage and health series."""
 

@@ -4135,6 +4135,22 @@ class TestFakeLLMClient(unittest.TestCase):
         self.assertNotIn("{", text)
         self.assertTrue(len(text) > 20)
 
+    def test_pc_npc_note_prompt_echoes_times_met(self):
+        """M8: the PC-NPC note fake response is distinguishable across meetings,
+        so e2e coverage can assert the note actually changed session to session."""
+        text, _, _ = self.client.complete(
+            "You are a gambler.",
+            "You just shared a session with Alice (met 3 times now).\n\n"
+            "Write your note on Alice in 1 sentence: plain text only.", 5)
+        self.assertIn("3 time", text)
+
+    def test_pc_npc_note_prompt_singular_meeting(self):
+        text, _, _ = self.client.complete(
+            "You are a gambler.",
+            "You just shared a session with Alice (met 1 time now).\n\n"
+            "Write your note on Alice in 1 sentence: plain text only.", 5)
+        self.assertIn("1 time now", text)
+
     def test_probe_is_noop(self):
         self.client.probe()  # must not raise
 

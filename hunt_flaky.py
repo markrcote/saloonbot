@@ -155,6 +155,7 @@ def hunt(n_runs, filter_classes=None):
         test_e2e.TestMetricsEndpoint,
         test_e2e.TestNPCDepartureE2E,
         test_e2e.TestNPCRelationships,
+        test_e2e.TestPcNpcRelationships,
     ]
     if filter_classes:
         all_classes = [c for c in all_classes if c.__name__ in filter_classes]

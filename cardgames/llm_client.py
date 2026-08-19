@@ -131,6 +131,10 @@ class FakeClient(LLMClient):
             range_match = re.search(r"range is \$(\d+)", user)
             amount = int(range_match.group(1)) if range_match else 5
             text = json.dumps({"amount": amount, "quip": "Easin' in slow tonight."})
+        elif "Write your note on" in user:
+            met_match = re.search(r"met (\d+) times? now", user)
+            times_met = int(met_match.group(1)) if met_match else 1
+            text = f"Met them {times_met} time{'s' if times_met != 1 else ''} now, a steady sort."
         else:
             text = (
                 "Played a few hands at the table tonight. "

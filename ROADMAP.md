@@ -156,7 +156,14 @@
 - NPCs greet returning players differently ("Back again, partner?" on 2nd meeting; more familiar tone on 5th+)
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/llm_npc.py`
 
-**Verification:** Play two sessions with the same NPC; confirm 2nd session quips reference prior meeting. Check `pc_npc_relationships` table updates in DB.
+**Verification (automated, e2e):** New `TestPcNpcRelationships` class in `test_e2e.py`, following the `TestNPCSessionMemory`/`TestNPCRelationships` pattern (`LLM_PROVIDER=fake` for deterministic output, `poll_db` for async writes):
+1. `create_game(num_bots=1, deck=...)`, join one human, play a hand, then end the NPC's session (`remove_npc` or a forced departure roll) — the path that should write `pc_npc_relationships`.
+2. `poll_db` for a `pc_npc_relationships` row keyed by `(player_id, npc_id)`; assert `times_met == 1`, `sessions_played == 1`, `npc_notes_on_player` non-empty.
+3. Reseat the same NPC with the same human, play a second hand, end the session again.
+4. `poll_db` and assert `times_met == 2` and that `npc_notes_on_player` was rewritten (not just left stale) for the second session.
+5. Fake-provider tweak (small addition, mirrors the existing `"Played a few hands"` marker in the session-memory fake output): when `npc_notes_on_player` context is present in a prompt, the fake client echoes a recognizable marker in its response. Assert on that marker in the NPC's in-game quip/message to confirm the relationship record was actually injected into context, not just persisted to the DB — this is how the manual "2nd session quips reference prior meeting" check becomes assertable without a real LLM.
+
+Manual spot-check (optional, not required for CI): play two sessions with the same NPC against a real LLM provider and read the quips for a natural-language callback to the prior meeting.
 
 ---
 

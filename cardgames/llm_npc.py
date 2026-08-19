@@ -21,6 +21,12 @@ SESSION_EVENT_BUFFER_SIZE = 40
 # How many recent session memories to surface in prompts, by detail level.
 MEMORY_RECALL_BY_DETAIL = {'low': 0, 'medium': 1, 'high': 3}
 
+# How many sentences to write for a PC-NPC note, by detail level (M8) —
+# mirrors casino.py's _RELATIONSHIP_NOTE_SENTENCES. 'low' is never reached
+# here since Casino._condense_npc_session already skips condensation (and
+# thus this follow-up) entirely at low detail.
+PC_NOTE_SENTENCES_BY_DETAIL = {'low': 0, 'medium': 1, 'high': 2}
+
 # How many of the latest buffered table events to recap in prompts.
 RECENT_EVENTS_IN_PROMPT = 5
 
@@ -262,17 +268,26 @@ class LLMBlackjackNPC(NPCPlayer):
             logger.warning("LLM bet fallback for %s after %.1fs: %s", self.name, time.time() - t0, e)
             return {"amount": min_bet, "quip": None}
 
-    def submit_session_condensation(self, game_id, save_callback):
+    def submit_session_condensation(self, game_id, save_callback, co_players=None, pc_npc_callback=None):
         """Fire-and-forget: summarize this session's event buffer into a short
         first-person memory and hand it to save_callback(npc_db_id, game_id, text).
+
+        co_players (M8), if given, is a list of {'name', 'existing_notes',
+        'times_met'} dicts for human players who shared this session; once the
+        summary lands, one follow-up note-generation call fires per co-player
+        and the result is handed to pc_npc_callback(npc_db_id, player_name,
+        note) — reusing this same fire-and-forget worker rather than opening a
+        new attachment point.
 
         Runs on this NPC's own single-worker executor; nothing blocks on the
         result — the seat frees up regardless of whether the write finishes.
         """
         events = list(self._session_events)
-        self._executor.submit(self._condense_session, game_id, events, save_callback)
+        self._executor.submit(
+            self._condense_session, game_id, events, save_callback, co_players or [], pc_npc_callback
+        )
 
-    def _condense_session(self, game_id, events, save_callback):
+    def _condense_session(self, game_id, events, save_callback, co_players, pc_npc_callback):
         timeout = float(os.environ.get("LLM_SESSION_MEMORY_TIMEOUT", "15"))
         system = self.personality.system_prompt
         marker = "Respond ONLY with valid JSON:"
@@ -305,6 +320,57 @@ class LLMBlackjackNPC(NPCPlayer):
             save_callback(self.npc_db_id, game_id, summary)
         except Exception as e:
             logger.warning("Session condensation failed for %s after %.1fs: %s", self.name, time.time() - t0, e)
+            return
+
+        if pc_npc_callback and co_players:
+            self._generate_pc_npc_notes(summary, co_players, pc_npc_callback)
+
+    def _generate_pc_npc_notes(self, summary, co_players, pc_npc_callback):
+        """Follow-up call per human co-player, reading the summary just produced
+        above (M8) — one player's failure doesn't block the others'."""
+        n_sentences = PC_NOTE_SENTENCES_BY_DETAIL.get(self._detail_level, 1)
+        if n_sentences == 0:
+            return
+        for co_player in co_players:
+            try:
+                note = self._generate_pc_npc_note(summary, co_player, n_sentences)
+                pc_npc_callback(self.npc_db_id, co_player['name'], note)
+            except Exception as e:
+                logger.warning(
+                    "PC-NPC note generation failed for %s on %s: %s",
+                    self.name, co_player.get('name'), e
+                )
+
+    def _generate_pc_npc_note(self, summary, co_player, n_sentences):
+        timeout = float(os.environ.get("LLM_SESSION_MEMORY_TIMEOUT", "15"))
+        name = co_player['name']
+        times_met = co_player.get('times_met', 1)
+        existing = co_player.get('existing_notes')
+        system = self.personality.system_prompt
+        marker = "Respond ONLY with valid JSON:"
+        idx = system.rfind(marker)
+        if idx >= 0:
+            system = system[:idx].rstrip()
+        system += f" You keep track of the regulars at {self._saloon_name} in {self._saloon_town}."
+        existing_block = f' Your current note on them: "{existing}"\n\n' if existing else ""
+        user_msg = (
+            f"You just shared a session with {name} (met {times_met} "
+            f"time{'s' if times_met != 1 else ''} now).\n\n"
+            f"{existing_block}"
+            f"Here's what happened this session, from your point of view: {summary}\n\n"
+            f"Write your note on {name} in {n_sentences} sentence{'s' if n_sentences != 1 else ''}: "
+            "what kind of player they are and how you feel about them. Respond with plain text only."
+        )
+        t0 = time.time()
+        raw, in_tok, out_tok = self._llm_client.complete(system=system, user=user_msg, timeout=timeout)
+        note = raw.strip()
+        if not note:
+            raise LLMError("empty PC-NPC note")
+        logger.info(
+            "LLM PC-NPC note for %s on %s: %.1fs, %d chars", self.name, name, time.time() - t0, len(note)
+        )
+        self._record_usage('pc_npc_summary', in_tok, out_tok)
+        return note
 
     def _record_usage(self, purpose, input_tokens, output_tokens):
         if self._usage_callback is not None:

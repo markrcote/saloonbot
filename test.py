@@ -1035,6 +1035,60 @@ class TestPcNpcMeetingTracking(unittest.TestCase):
         self.assertIsNotNone(self.db.get_pc_npc_relationship("Bob", self.npc_id))
 
 
+class TestPcNpcNoteContext(unittest.TestCase):
+    """M8: _collect_pc_npc_context / _save_pc_npc_note, the Casino-side halves
+    of the fire-and-forget note-generation flow."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.casino = Casino(redis_host="localhost", redis_port=6379, db=self.db)
+        self.casino.redis = MagicMock()
+        self.casino._llm_client_tried = True
+        self.npc_id = self.db.create_npc("Ada Boone", "Prospector", 20000)
+        self.npc = SimpleBlackjackNPC("Ada Boone", npc_db_id=self.npc_id)
+        self.human = Player("Alice")
+        self.game = MagicMock()
+        self.game.players = [self.human]
+        self.game.players_waiting = []
+        self.casino.games = {"game-1": self.game}
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_collect_context_defaults_for_stranger(self):
+        co_players = self.casino._collect_pc_npc_context("game-1", self.npc)
+        self.assertEqual(co_players, [{'name': 'Alice', 'existing_notes': None, 'times_met': 1}])
+
+    def test_collect_context_reflects_existing_relationship(self):
+        rel_id = self.db.create_pc_npc_relationship("Alice", self.npc_id, times_met=3, sessions_played=3)
+        self.db.update_pc_npc_relationship(rel_id, notes="Plays it cautious.")
+        co_players = self.casino._collect_pc_npc_context("game-1", self.npc)
+        self.assertEqual(co_players, [
+            {'name': 'Alice', 'existing_notes': 'Plays it cautious.', 'times_met': 3}
+        ])
+
+    def test_collect_context_excludes_npcs(self):
+        other_npc = SimpleBlackjackNPC("Bea Colter", npc_db_id=99)
+        self.game.players.append(other_npc)
+        co_players = self.casino._collect_pc_npc_context("game-1", self.npc)
+        self.assertEqual([c['name'] for c in co_players], ['Alice'])
+
+    def test_collect_context_missing_game_returns_empty(self):
+        self.assertEqual(self.casino._collect_pc_npc_context("no-such-game", self.npc), [])
+
+    def test_save_note_updates_existing_row(self):
+        self.db.create_pc_npc_relationship("Alice", self.npc_id)
+        self.casino._save_pc_npc_note(self.npc_id, "Alice", "Tips well, plays loose.")
+        rel = self.db.get_pc_npc_relationship("Alice", self.npc_id)
+        self.assertEqual(rel["npc_notes_on_player"], "Tips well, plays loose.")
+
+    def test_save_note_missing_row_is_noop(self):
+        # Row should always exist by the time a note lands (meetings are
+        # credited before condensation), but a missing row must not raise.
+        self.casino._save_pc_npc_note(self.npc_id, "Ghost Player", "A note.")
+        self.assertIsNone(self.db.get_pc_npc_relationship("Ghost Player", self.npc_id))
+
+
 class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()
@@ -3445,6 +3499,81 @@ class TestSessionCondensation(unittest.TestCase):
             self._drain_executor(npc)
         save_callback.assert_not_called()
 
+    def test_condense_triggers_pc_npc_note(self):
+        """M8: after the summary lands, one follow-up call per co-player writes a note."""
+        npc, mock_llm, usage_callback = self._make_npc(llm_response="A quiet night at the table.")
+        mock_llm.complete.side_effect = [
+            ("A quiet night at the table.", 80, 40),
+            ("Alice plays it cautious but tips well.", 20, 10),
+        ]
+        save_callback = MagicMock()
+        pc_npc_callback = MagicMock()
+        co_players = [{'name': 'Alice', 'existing_notes': None, 'times_met': 2}]
+        npc.submit_session_condensation("game-9", save_callback, co_players, pc_npc_callback)
+        self._drain_executor(npc)
+        save_callback.assert_called_once()
+        pc_npc_callback.assert_called_once_with(
+            npc.npc_db_id, 'Alice', "Alice plays it cautious but tips well."
+        )
+        note_call = [c for c in mock_llm.complete.call_args_list if 'Alice' in c.kwargs['user']][0]
+        self.assertIn("met 2 times now", note_call.kwargs['user'])
+        purposes = [c.args[0] for c in usage_callback.call_args_list]
+        self.assertEqual(purposes, ['session_memory', 'pc_npc_summary'])
+
+    def test_condense_note_includes_existing_notes(self):
+        npc, mock_llm, _ = self._make_npc()
+        mock_llm.complete.side_effect = [
+            ("Fine night.", 80, 40),
+            ("Updated note.", 20, 10),
+        ]
+        co_players = [{'name': 'Alice', 'existing_notes': 'Plays it cautious.', 'times_met': 3}]
+        npc.submit_session_condensation("game-9", MagicMock(), co_players, MagicMock())
+        self._drain_executor(npc)
+        note_call = mock_llm.complete.call_args_list[1]
+        self.assertIn("Plays it cautious.", note_call.kwargs['user'])
+
+    def test_condense_notes_skipped_without_pc_npc_callback(self):
+        """co_players with no callback (the pre-M8 call shape) generates no extra calls."""
+        npc, mock_llm, _ = self._make_npc()
+        co_players = [{'name': 'Alice', 'existing_notes': None, 'times_met': 1}]
+        npc.submit_session_condensation("game-9", MagicMock(), co_players)
+        self._drain_executor(npc)
+        self.assertEqual(mock_llm.complete.call_count, 1)  # summary only
+
+    def test_condense_notes_skipped_at_low_detail(self):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = ("Fine night.", 80, 40)
+        npc = LLMBlackjackNPC(
+            "Low Detail NPC", get_personality("The Grizzled Prospector"), mock_llm,
+            npc_db_id=7, detail_level='low',
+        )
+        for i in range(5):
+            npc.observe_table_event(f"event {i}")
+        co_players = [{'name': 'Alice', 'existing_notes': None, 'times_met': 1}]
+        npc.submit_session_condensation("game-9", MagicMock(), co_players, MagicMock())
+        self._drain_executor(npc)
+        self.assertEqual(mock_llm.complete.call_count, 1)  # summary only, no note follow-up
+
+    def test_one_co_player_note_failure_does_not_block_another(self):
+        from cardgames.llm_client import LLMError
+        npc, mock_llm, _ = self._make_npc()
+        mock_llm.complete.side_effect = [
+            ("Fine night.", 80, 40),
+            LLMError("API down"),
+            ("Bob's note.", 20, 10),
+        ]
+        pc_npc_callback = MagicMock()
+        co_players = [
+            {'name': 'Alice', 'existing_notes': None, 'times_met': 1},
+            {'name': 'Bob', 'existing_notes': None, 'times_met': 1},
+        ]
+        with self.assertLogs('cardgames.llm_npc', level='WARNING'):
+            npc.submit_session_condensation("game-9", MagicMock(), co_players, pc_npc_callback)
+            self._drain_executor(npc)
+        pc_npc_callback.assert_called_once_with(npc.npc_db_id, 'Bob', "Bob's note.")
+
     def test_casino_gating_skips_simple_npc(self):
         mock_casino = MagicMock()
         Casino._condense_npc_session(mock_casino, "g", SimpleBlackjackNPC("Slim", npc_db_id=3))
@@ -3476,8 +3605,11 @@ class TestSessionCondensation(unittest.TestCase):
         npc, _, _ = self._make_npc(events=10)
         npc.submit_session_condensation = MagicMock()
         mock_casino = MagicMock()
+        mock_casino._collect_pc_npc_context.return_value = []
         Casino._condense_npc_session(mock_casino, "game-1", npc)
-        npc.submit_session_condensation.assert_called_once_with("game-1", mock_casino._save_npc_memory)
+        npc.submit_session_condensation.assert_called_once_with(
+            "game-1", mock_casino._save_npc_memory, [], mock_casino._save_pc_npc_note
+        )
 
     def test_save_npc_memory_applies_retention_cap(self):
         from cardgames.casino import MAX_MEMORIES_PER_NPC

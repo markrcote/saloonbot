@@ -910,9 +910,11 @@ class Casino:
                 self.db.clear_npc_game(npc_db_id)
             except Exception as e:
                 logging.error(f"Error clearing NPC game for {player.name}: {e}")
-        self._condense_npc_session(game.game_id, player)
+        # Meetings are credited before condensation so the fresh times_met is
+        # available to the PC-NPC note-generation prompt (M8 step 3).
         self._update_relationships_on_departure(game, player)
         self._update_pc_npc_meeting(game, player)
+        self._condense_npc_session(game.game_id, player)
 
     def _condense_npc_session(self, game_id, npc):
         """Kick off fire-and-forget session condensation for a departing LLM NPC.
@@ -929,7 +931,8 @@ class Casino:
         if len(npc.session_events) < SESSION_MEMORY_MIN_EVENTS:
             logging.info(f"Skipping session condensation for {npc.name}: session too short")
             return
-        npc.submit_session_condensation(game_id, self._save_npc_memory)
+        co_players = self._collect_pc_npc_context(game_id, npc)
+        npc.submit_session_condensation(game_id, self._save_npc_memory, co_players, self._save_pc_npc_note)
 
     def _save_npc_memory(self, npc_db_id, game_id, summary):
         """Persist a condensed session memory (called from an NPC worker thread)."""
@@ -938,6 +941,46 @@ class Casino:
             logging.info(f"Saved session memory for NPC {npc_db_id}")
         except Exception as e:
             logging.error(f"Error saving session memory for NPC {npc_db_id}: {e}")
+
+    def _collect_pc_npc_context(self, game_id, npc):
+        """Gather human co-players' prior notes for the PC-NPC note follow-up (M8).
+
+        Read on the main thread before submission — cheap, and keeps the
+        departing NPC's own worker thread free of DB reads until it needs to
+        write the result back via _save_pc_npc_note.
+        """
+        game = self.games.get(game_id)
+        if game is None or npc.npc_db_id is None or self.db is None:
+            return []
+        result = []
+        for p in game.players + game.players_waiting:
+            if getattr(p, 'is_npc', False):
+                continue
+            try:
+                rel = self.db.get_pc_npc_relationship(p.name, npc.npc_db_id)
+            except Exception as e:
+                logging.error(f"Error loading PC-NPC relationship for {p.name} & {npc.name}: {e}")
+                rel = None
+            result.append({
+                'name': p.name,
+                'existing_notes': rel['npc_notes_on_player'] if rel else None,
+                'times_met': rel['times_met'] if rel else 1,
+            })
+        return result
+
+    def _save_pc_npc_note(self, npc_db_id, player_name, note):
+        """Persist a generated PC-NPC note (called from an NPC worker thread)."""
+        try:
+            rel = self.db.get_pc_npc_relationship(player_name, npc_db_id)
+            if rel is None:
+                logging.warning(
+                    f"No PC-NPC relationship row for {player_name}/{npc_db_id}; skipping note save"
+                )
+                return
+            self.db.update_pc_npc_relationship(rel['id'], notes=note)
+            logging.info(f"Saved PC-NPC note for NPC {npc_db_id} on {player_name}")
+        except Exception as e:
+            logging.error(f"Error saving PC-NPC note for {player_name}/{npc_db_id}: {e}")
 
     def _mark_dirty(self, game_id):
         """Mark a game as needing a DB write on the next flush."""
@@ -973,19 +1016,21 @@ class Casino:
 
         game = self.games.get(game_id)
         if game is not None:
+            # Relationship/meeting effects bypass the hook on this path (M7/M8):
+            # nobody is removed here, so walk pairs explicitly to count each
+            # session once. Runs before condensation below so the fresh
+            # times_met is available to the PC-NPC note-generation prompt.
+            seated = game.players + game.players_waiting
+            for i, player in enumerate(seated):
+                if getattr(player, 'npc_db_id', None) is not None:
+                    self._update_relationships_on_departure(game, player, others=seated[i + 1:])
+                    self._update_pc_npc_meeting(game, player, others=seated)
             # Seated NPCs never went through leave() on this path (stop_game,
             # empty-game reap), so condense their sessions here.
             # departed_players already condensed via the departure hook.
             for player in game.players + game.players_waiting:
                 if isinstance(player, LLMBlackjackNPC):
                     self._condense_npc_session(game_id, player)
-            # Relationship effects also bypass the hook on this path (M7/M8): nobody
-            # is removed here, so walk pairs explicitly to count each session once.
-            seated = game.players + game.players_waiting
-            for i, player in enumerate(seated):
-                if getattr(player, 'npc_db_id', None) is not None:
-                    self._update_relationships_on_departure(game, player, others=seated[i + 1:])
-                    self._update_pc_npc_meeting(game, player, others=seated)
             for player in game.players + game.players_waiting + game.departed_players:
                 if isinstance(player, LLMBlackjackNPC):
                     # shutdown(wait=False) still runs already-queued work, so a

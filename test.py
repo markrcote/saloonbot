@@ -2959,6 +2959,73 @@ class TestM3PlayerStatsFame(unittest.TestCase):
         self.assertEqual(result[0]['fame'], None)
         mock_db.get_player_stats.assert_not_called()
 
+    # --- M8: PC-NPC history in table context ---
+
+    def test_table_context_includes_pc_npc_history_for_known_player(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.get_player_stats.return_value = None
+        mock_db.get_pc_npc_relationship.return_value = {
+            'times_met': 3, 'sessions_played': 3, 'npc_notes_on_player': 'Plays it cautious.',
+        }
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        human = Player("grace")
+        game.players = [human]
+        game.players_waiting = []
+        casino.games['g1'] = game
+        ctx_fn = casino._make_table_context_fn('g1', 'SomeNPC', npc_db_id=42)
+        result = ctx_fn()
+        self.assertEqual(result[0]['times_met'], 3)
+        self.assertEqual(result[0]['pc_notes'], 'Plays it cautious.')
+        mock_db.get_pc_npc_relationship.assert_called_once_with('grace', 42)
+
+    def test_table_context_pc_npc_history_none_for_stranger(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.get_player_stats.return_value = None
+        mock_db.get_pc_npc_relationship.return_value = None
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        human = Player("grace")
+        game.players = [human]
+        game.players_waiting = []
+        casino.games['g1'] = game
+        ctx_fn = casino._make_table_context_fn('g1', 'SomeNPC', npc_db_id=42)
+        result = ctx_fn()
+        self.assertIsNone(result[0]['times_met'])
+        self.assertIsNone(result[0]['pc_notes'])
+
+    def test_table_context_pc_npc_history_none_without_npc_db_id(self):
+        from cardgames.casino import Casino
+        mock_db = MagicMock()
+        mock_db.get_player_stats.return_value = None
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        human = Player("grace")
+        game.players = [human]
+        game.players_waiting = []
+        casino.games['g1'] = game
+        ctx_fn = casino._make_table_context_fn('g1', 'SomeNPC')  # no npc_db_id
+        result = ctx_fn()
+        self.assertIsNone(result[0]['times_met'])
+        mock_db.get_pc_npc_relationship.assert_not_called()
+
+    def test_table_context_pc_npc_history_none_for_npc(self):
+        from cardgames.casino import Casino
+        from cardgames.simple_npc import SimpleBlackjackNPC
+        mock_db = MagicMock()
+        casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
+        game = MagicMock()
+        npc = SimpleBlackjackNPC("Bot")
+        game.players = [npc]
+        game.players_waiting = []
+        casino.games['g2'] = game
+        ctx_fn = casino._make_table_context_fn('g2', 'SomeOtherNPC', npc_db_id=42)
+        result = ctx_fn()
+        self.assertIsNone(result[0]['times_met'])
+        mock_db.get_pc_npc_relationship.assert_not_called()
+
 
 class TestNPCAutofill(unittest.TestCase):
     """AM3: NPC autofill limit clamping and _autofill_npcs count logic."""
@@ -3914,6 +3981,52 @@ class TestRelationshipPromptInjection(unittest.TestCase):
         with patch('cardgames.casino.SALOON_DETAIL_LEVEL', 'low'):
             self.assertEqual(casino._load_npc_relationships(ida), [])
         db.close()
+
+
+class TestPcNpcHistoryPromptInjection(unittest.TestCase):
+    """M8: times_met/pc_notes surface in _build_context_block per detail level."""
+
+    def _make_npc(self, detail_level, times_met=3, pc_notes='Plays it cautious.'):
+        from cardgames.llm_npc import LLMBlackjackNPC
+        from cardgames.personalities import get_personality
+        return LLMBlackjackNPC(
+            "Winifred Cobb", get_personality("The Grizzled Prospector"), MagicMock(),
+            detail_level=detail_level,
+            table_context_fn=lambda: [
+                {'name': 'Alice', 'archetype': None, 'fame': None,
+                 'times_met': times_met, 'pc_notes': pc_notes},
+                {'name': 'Stranger', 'archetype': None, 'fame': None,
+                 'times_met': None, 'pc_notes': None},
+            ],
+        )
+
+    def test_medium_detail_shows_times_met_without_notes(self):
+        block = self._make_npc('medium')._build_context_block()
+        self.assertIn("Alice — you've met 3 times before", block)
+        self.assertNotIn("Plays it cautious", block)
+
+    def test_high_detail_shows_full_note(self):
+        block = self._make_npc('high')._build_context_block()
+        self.assertIn("Alice — you've met 3 times before: Plays it cautious.", block)
+
+    def test_high_detail_falls_back_without_note_text(self):
+        block = self._make_npc('high', pc_notes=None)._build_context_block()
+        self.assertIn("Alice — you've met 3 times before", block)
+        self.assertNotIn(": Plays it cautious", block)
+
+    def test_singular_meeting_phrasing(self):
+        block = self._make_npc('medium', times_met=1)._build_context_block()
+        self.assertIn("Alice — you've met 1 time before", block)
+        self.assertNotIn("1 times", block)
+
+    def test_stranger_gets_no_history_cue(self):
+        block = self._make_npc('high')._build_context_block()
+        self.assertIn("Stranger", block)
+        self.assertNotIn("Stranger — you've met", block)
+
+    def test_low_detail_omits_history_entirely(self):
+        block = self._make_npc('low')._build_context_block()
+        self.assertNotIn("met", block)
 
 
 class TestNPCMemories(unittest.TestCase):

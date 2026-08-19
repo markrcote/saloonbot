@@ -184,11 +184,19 @@ class LLMBlackjackNPC(NPCPlayer):
                 for p in table_players:
                     archetype = p.get('archetype')
                     fame = p.get('fame') if self._detail_level == 'high' else None
+                    times_met = p.get('times_met')
                     desc = p['name']
                     if archetype:
                         desc += f" ({archetype})"
                     if fame:
                         desc += f", a {fame}"
+                    if times_met:
+                        plural = 's' if times_met != 1 else ''
+                        pc_notes = p.get('pc_notes') if self._detail_level == 'high' else None
+                        if pc_notes:
+                            desc += f" — you've met {times_met} time{plural} before: {pc_notes}"
+                        else:
+                            desc += f" — you've met {times_met} time{plural} before"
                     descriptions.append(desc)
                 parts.append(f"Others at the table: {', '.join(descriptions)}.")
 

@@ -492,7 +492,7 @@ class Casino:
             }
         )
 
-    def _make_table_context_fn(self, game_id, npc_name):
+    def _make_table_context_fn(self, game_id, npc_name, npc_db_id=None):
         """Return a callable that yields other players at the table when invoked."""
         def get_table_context():
             game = self.games.get(game_id)
@@ -504,6 +504,8 @@ class Casino:
                     continue
                 archetype = getattr(getattr(p, 'personality', None), 'name', None)
                 fame = None
+                times_met = None
+                pc_notes = None
                 if not getattr(p, 'is_npc', False) and self.db is not None:
                     try:
                         player_stats = self.db.get_player_stats(p.name)
@@ -511,7 +513,18 @@ class Casino:
                             fame = _fame_label(player_stats['games_played'])
                     except Exception:
                         pass
-                result.append({'name': p.name, 'archetype': archetype, 'fame': fame})
+                    if npc_db_id is not None:
+                        try:
+                            rel = self.db.get_pc_npc_relationship(p.name, npc_db_id)
+                            if rel:
+                                times_met = rel['times_met']
+                                pc_notes = rel['npc_notes_on_player']
+                        except Exception:
+                            pass
+                result.append({
+                    'name': p.name, 'archetype': archetype, 'fame': fame,
+                    'times_met': times_met, 'pc_notes': pc_notes,
+                })
             return result
         return get_table_context
 
@@ -1125,7 +1138,7 @@ class Casino:
                 personality = get_random_personality(exclude_names=used_personalities)
 
             if llm_client is not None:
-                table_ctx = self._make_table_context_fn(game_id, name)
+                table_ctx = self._make_table_context_fn(game_id, name, npc_db_id)
                 npc = LLMBlackjackNPC(
                     name, personality, llm_client,
                     npc_db_id=npc_db_id, backstory=backstory,

@@ -982,6 +982,59 @@ class TestNpcRelationshipEvolution(unittest.TestCase):
         self.assertEqual(rel["notes"], "Sworn foes.")
 
 
+class TestPcNpcMeetingTracking(unittest.TestCase):
+    """M8: _update_pc_npc_meeting credits shared sessions between humans and NPCs."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.casino = Casino(redis_host="localhost", redis_port=6379, db=self.db)
+        self.casino.redis = MagicMock()
+        self.casino._llm_client_tried = True
+        self.npc_id = self.db.create_npc("Ada Boone", "Prospector", 20000)
+        self.npc = SimpleBlackjackNPC("Ada Boone", npc_db_id=self.npc_id)
+        self.human = Player("Alice")
+        self.game = MagicMock()
+        self.game.players = [self.human]  # human still seated when the NPC departs
+        self.game.players_waiting = []
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_first_meeting_creates_row(self):
+        self.casino._update_pc_npc_meeting(self.game, self.npc)
+        rel = self.db.get_pc_npc_relationship("Alice", self.npc_id)
+        self.assertIsNotNone(rel)
+        self.assertEqual(rel["times_met"], 1)
+        self.assertEqual(rel["sessions_played"], 1)
+
+    def test_second_meeting_increments_existing_row(self):
+        self.casino._update_pc_npc_meeting(self.game, self.npc)
+        self.casino._update_pc_npc_meeting(self.game, self.npc)
+        rel = self.db.get_pc_npc_relationship("Alice", self.npc_id)
+        self.assertEqual(rel["times_met"], 2)
+        self.assertEqual(rel["sessions_played"], 2)
+
+    def test_npc_only_table_touches_nothing(self):
+        """No human present: no pc_npc_relationships row for anyone."""
+        other_npc_id = self.db.create_npc("Bea Colter", "Gunslinger", 20000)
+        other_npc = SimpleBlackjackNPC("Bea Colter", npc_db_id=other_npc_id)
+        self.game.players = [other_npc]
+        self.casino._update_pc_npc_meeting(self.game, self.npc)
+        self.assertEqual(self.db.get_pc_npc_relationships_for_npc(self.npc_id), [])
+
+    def test_unrostered_npc_is_noop(self):
+        unrostered = SimpleBlackjackNPC("No Roster", npc_db_id=None)
+        self.casino._update_pc_npc_meeting(self.game, unrostered)
+        self.assertIsNone(self.db.get_pc_npc_relationship("Alice", self.npc_id))
+
+    def test_others_override_used_by_delete_game_path(self):
+        second_human = Player("Bob")
+        self.game.players = []  # nobody in players; override supplies both humans
+        self.casino._update_pc_npc_meeting(self.game, self.npc, others=[self.human, second_human])
+        self.assertIsNotNone(self.db.get_pc_npc_relationship("Alice", self.npc_id))
+        self.assertIsNotNone(self.db.get_pc_npc_relationship("Bob", self.npc_id))
+
+
 class TestBlackjackBetting(unittest.TestCase):
     def setUp(self):
         mock_casino = MagicMock()
@@ -3440,6 +3493,15 @@ class TestSessionCondensation(unittest.TestCase):
         Casino._on_npc_departed(mock_casino, game, npc)
         mock_casino._condense_npc_session.assert_called_once_with("game-2", npc)
 
+    def test_departure_hook_triggers_pc_npc_meeting_update(self):
+        """M8: the shared departure hook also credits PC-NPC meetings."""
+        npc, _, _ = self._make_npc(events=10)
+        mock_casino = MagicMock()
+        game = MagicMock()
+        game.game_id = "game-2"
+        Casino._on_npc_departed(mock_casino, game, npc)
+        mock_casino._update_pc_npc_meeting.assert_called_once_with(game, npc)
+
     def test_delete_game_condenses_seated_npcs_before_shutdown(self):
         """stop_game/quit_game/empty-reap all funnel through _delete_game, which
         bypasses leave() — seated LLM NPCs must still get their sessions condensed."""
@@ -3466,6 +3528,16 @@ class TestSessionCondensation(unittest.TestCase):
         seated.shutdown.assert_called_once()
         waiting.shutdown.assert_called_once()
         departed.shutdown.assert_called_once()
+
+        # M8: PC-NPC meetings are walked explicitly too, once per seated NPC,
+        # against the full seated list (the departed NPC never appears here).
+        meeting_calls = mock_casino._update_pc_npc_meeting.call_args_list
+        meeting_npcs = [call.args[1] for call in meeting_calls]
+        self.assertIn(seated, meeting_npcs)
+        self.assertIn(waiting, meeting_npcs)
+        self.assertNotIn(departed, meeting_npcs)
+        for call in meeting_calls:
+            self.assertEqual(call.kwargs['others'], game.players + game.players_waiting)
 
     def test_queued_condensation_survives_executor_shutdown(self):
         """shutdown(wait=False) must not cancel a just-submitted condensation."""

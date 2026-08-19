@@ -745,6 +745,35 @@ class Casino:
         except Exception as e:
             logging.warning(f"Relationship update failed for {name_a} & {name_b}: {e}")
 
+    def _update_pc_npc_meeting(self, game, npc, others=None):
+        """Credit a departing NPC's shared session with every still-seated human (M8).
+
+        Same shape as _update_relationships_on_departure: the hook fires
+        after removal, so each shared session is counted exactly once;
+        `others` overrides the still-seated list for `_delete_game`, where
+        nobody is removed so every human present is walked explicitly.
+        """
+        npc_db_id = getattr(npc, 'npc_db_id', None)
+        if npc_db_id is None or self.db is None:
+            return
+        if others is None:
+            others = game.players + game.players_waiting
+        for other in others:
+            if getattr(other, 'is_npc', False):
+                continue
+            try:
+                rel = self.db.get_pc_npc_relationship(other.name, npc_db_id)
+                if rel is None:
+                    self.db.create_pc_npc_relationship(other.name, npc_db_id)
+                else:
+                    self.db.update_pc_npc_relationship(
+                        rel['id'],
+                        times_met=rel['times_met'] + 1,
+                        sessions_played=rel['sessions_played'] + 1,
+                    )
+            except Exception as e:
+                logging.error(f"Error updating PC-NPC meeting for {other.name} & {npc.name}: {e}")
+
     def _load_npc_relationships(self, npc_db_id):
         """Fetch an NPC's relationships as partner/type/notes dicts for prompt injection.
 
@@ -883,6 +912,7 @@ class Casino:
                 logging.error(f"Error clearing NPC game for {player.name}: {e}")
         self._condense_npc_session(game.game_id, player)
         self._update_relationships_on_departure(game, player)
+        self._update_pc_npc_meeting(game, player)
 
     def _condense_npc_session(self, game_id, npc):
         """Kick off fire-and-forget session condensation for a departing LLM NPC.
@@ -949,12 +979,13 @@ class Casino:
             for player in game.players + game.players_waiting:
                 if isinstance(player, LLMBlackjackNPC):
                     self._condense_npc_session(game_id, player)
-            # Relationship effects also bypass the hook on this path (M7): nobody
+            # Relationship effects also bypass the hook on this path (M7/M8): nobody
             # is removed here, so walk pairs explicitly to count each session once.
             seated = game.players + game.players_waiting
             for i, player in enumerate(seated):
                 if getattr(player, 'npc_db_id', None) is not None:
                     self._update_relationships_on_departure(game, player, others=seated[i + 1:])
+                    self._update_pc_npc_meeting(game, player, others=seated)
             for player in game.players + game.players_waiting + game.departed_players:
                 if isinstance(player, LLMBlackjackNPC):
                     # shutdown(wait=False) still runs already-queued work, so a

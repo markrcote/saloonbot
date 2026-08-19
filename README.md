@@ -66,6 +66,10 @@ AI bots remember their nights at the table. While seated, each bot keeps track o
 
 Roster NPCs have history with each other. A newly created NPC has a 70% chance of arriving with 1–3 pre-existing relationships to other roster NPCs — friendships, rivalries, or something more complicated — each with an LLM-written backstory note. Relationships also form and deepen through play: sharing a table strengthens a pair's bond (+5 per session), strangers who play together have a small chance of striking up a new relationship, and every 20 strength points the relationship's note is rewritten (and its type can shift — a friendship can sour into something complicated). When two related NPCs sit at the same table, both play with their shared history in their prompts, gated by `SALOON_DETAIL_LEVEL`: `low` omits it, `medium` injects the type and a one-sentence note, `high` the full note. Admins can inspect any NPC's relationships with `/npcrelationships`.
 
+### Returning players
+
+NPCs remember you, too. Each time a human and an NPC share a table, the NPC's count of times met with that player goes up, and after the session it writes (or rewrites) a short note on what kind of player you are, based on what happened at the table. The next time you sit down together, that history feeds into the NPC's prompt, so a regular gets a different reception than a stranger — no scripted greeting, just the NPC noticing how many times it's seen you before. Gated by `SALOON_DETAIL_LEVEL` like everything else: `low` omits it, `medium` surfaces the meeting count, `high` adds the full note.
+
 ### Configuration
 
 | Variable | Default | Description |

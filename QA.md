@@ -68,6 +68,7 @@ python cli.py   # name: Dave, bots: 0
 - [ ] NPC auto-bets and plays; `quit` after hand resolves
 - [ ] `addnpc 2` → two more NPCs join; `removenpc` (no name) → one NPC leaves (no crash)
 - [ ] Relationships: `sqlite3 saloonbot.db "SELECT * FROM npc_relationships"` shows rows with non-empty notes (~70% of new NPCs have some); after a removenpc with a related NPC still seated, server log shows `strength X -> Y`. In Discord, `/npcrelationships <name>` lists them.
+- [ ] PC–NPC memory: after `quit` and rejoining with the same NPC still on the roster (`addnpc` again), `sqlite3 saloonbot.db "SELECT * FROM pc_npc_relationships"` shows a row for Dave with `times_met=1` and a non-empty `npc_notes_on_player`; after a second session, `times_met=2` and the note has changed.
 
 ---
 

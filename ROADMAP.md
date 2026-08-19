@@ -4,7 +4,7 @@
 
 [VISION.md](/VISION.md) describes an atmospheric, continuously-running frontier casino simulator. NPCs should have persistent identities, backstories, and relationships — with each other and with returning players. The saloon never closes; the world evolves whether or not anyone is at the table. Fame is mechanical, not flavor: a notorious player gets a different game.
 
-**Current state:** M1–M7 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, idle broke NPCs slowly rebuild their wallets between sessions, NPCs accumulate session memories (buffered while seated, condensed into persistent first-person summaries on departure, recalled into future prompts), and NPCs now have relationships with each other: formed at creation and organically through play, strengthened by shared sessions, evolved by LLM note/type refreshes, and injected into prompts when related NPCs share a table. Still missing: no PC–NPC relationships (NPCs don't remember individual returning players beyond fame), and the world is inert when no humans are present (no world loop, no scheduled ambient NPC-only play). **M8 (PC–NPC Relationships) is next up.**
+**Current state:** M1–M8 are done: NPCs persist across games as a permanent roster with LLM-generated backstories and names drawn from `wwnames.py`, the saloon has a name/identity injected into LLM context, player stats/fame are tracked, every NPC-departure path routes through one shared hook, idle broke NPCs slowly rebuild their wallets between sessions, NPCs accumulate session memories (buffered while seated, condensed into persistent first-person summaries on departure, recalled into future prompts), NPCs have relationships with each other (formed at creation and organically through play, strengthened by shared sessions, evolved by LLM note/type refreshes, and injected into prompts when related NPCs share a table), and NPCs now remember individual returning players too: shared-session counts and an LLM-authored note per (player, NPC) pair, generated as a follow-up to each session's M6 condensation and surfaced back into prompts so a regular gets a different reception than a stranger. Still missing: the world is inert when no humans are present (no world loop, no scheduled ambient NPC-only play). **M9a and M9b are next up** (both only require M7, and are independent of each other).
 
 **What exists that can be reused:**
 - `personalities.py` — 19 rich personality definitions with system prompts
@@ -145,7 +145,7 @@
 
 ---
 
-## Milestone 8: PC–NPC Relationships
+## Milestone 8: PC–NPC Relationships ✓ DONE
 
 **Goal:** NPCs remember you. A player who has sat across from Winifred Cobb three times gets a different reception than a stranger.
 
@@ -156,14 +156,11 @@
 - NPCs greet returning players differently ("Back again, partner?" on 2nd meeting; more familiar tone on 5th+)
 - Files: `cardgames/database.py`, `cardgames/sqlite_database.py`, `cardgames/casino.py`, `cardgames/llm_npc.py`
 
-**Verification (automated, e2e):** New `TestPcNpcRelationships` class in `test_e2e.py`, following the `TestNPCSessionMemory`/`TestNPCRelationships` pattern (`LLM_PROVIDER=fake` for deterministic output, `poll_db` for async writes):
-1. `create_game(num_bots=1, deck=...)`, join one human, play a hand, then end the NPC's session (`remove_npc` or a forced departure roll) — the path that should write `pc_npc_relationships`.
-2. `poll_db` for a `pc_npc_relationships` row keyed by `(player_id, npc_id)`; assert `times_met == 1`, `sessions_played == 1`, `npc_notes_on_player` non-empty.
-3. Reseat the same NPC with the same human, play a second hand, end the session again.
-4. `poll_db` and assert `times_met == 2` and that `npc_notes_on_player` was rewritten (not just left stale) for the second session.
-5. Fake-provider tweak (small addition, mirrors the existing `"Played a few hands"` marker in the session-memory fake output): when `npc_notes_on_player` context is present in a prompt, the fake client echoes a recognizable marker in its response. Assert on that marker in the NPC's in-game quip/message to confirm the relationship record was actually injected into context, not just persisted to the DB — this is how the manual "2nd session quips reference prior meeting" check becomes assertable without a real LLM.
+**Verification (automated, e2e):** `TestPcNpcRelationships` in `test_e2e.py`, following the `TestNPCSessionMemory`/`TestNPCRelationships` pattern (`LLM_PROVIDER=fake` for deterministic output, `poll_db` for async writes): seat an LLM NPC with a human, play a hand, end the NPC's session (`remove_npc`), and poll for a `pc_npc_relationships` row (`times_met=1`, `sessions_played=1`, a generated note); reseat the same NPC and human for a second session and confirm `times_met`/`sessions_played` reach 2 and the note was rewritten. `FakeClient` gained a branch for the note-generation prompt that echoes the `times_met` count back into its response, so the note is observably different session to session instead of the fixed generic prose every other fallback prompt gets.
 
 Manual spot-check (optional, not required for CI): play two sessions with the same NPC against a real LLM provider and read the quips for a natural-language callback to the prior meeting.
+
+**Implementation notes (as built):** All of the above shipped as designed, plus a few deviations settled during implementation. (1) **Keyed by `player_name`, not `player_id`**: every other human-player accessor (`get_player_stats`, `update_wallet`, `update_player_stats`) already takes the username string rather than `users.id`, so `pc_npc_relationships` follows that convention instead of introducing the first FK-by-id lookup in the player-facing path. (2) **`npc_notes_on_player` is nullable, no template fallback** (unlike M7's `notes NOT NULL` + template): only `high` detail level ever reads the note text — `medium` shows just a times-met cue — so an absent note degrades the same way an empty memory/relationship list already does; no LLM, low detail, or a call still in flight just means no note yet. (3) **Note generation is literally chained onto M6's condensation call** rather than a new departure-hook attachment point: `LLMBlackjackNPC.submit_session_condensation` gained optional `co_players`/`pc_npc_callback` params, and after `_condense_session` produces the M6 summary it fires one follow-up LLM call per human co-player (purpose `pc_npc_summary`) using that summary plus the player's prior note as input — one co-player's failure doesn't block another's. `Casino._update_pc_npc_meeting` (times_met/sessions_played, synchronous) now runs *before* condensation in both `_on_npc_departed` and `_delete_game` so the freshly incremented count is available to the note prompt. (4) **"Greet returning players differently" is prompt-driven, not templated**: `Casino._make_table_context_fn` attaches `times_met`/notes per human live (like fame already does, since who's present changes as humans join/leave — not cached at seating like NPC–NPC relationships), and `_build_context_block` surfaces a times-met cue at `medium` and the full note at `high`; the LLM decides the greeting tone itself, exactly like fame already steers tone without a hardcoded string.
 
 ---
 
@@ -250,4 +247,4 @@ M1 (Persistent NPCs)
 │       └── M8 (PC–NPC Relationships)    ← requires M1 + M3 + M6
 ```
 
-M1 is the critical prerequisite. M2–M7 are all done. With M1–M7 complete, **M8 is unblocked and next** (M1+M3+M6 requirements all met), as are M9a and M9b, which follow M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.
+M1 is the critical prerequisite. M2–M8 are all done. **M9a and M9b are next up** — both follow only M7 and are independent of each other — M9b's event pass piggybacks on the existing tick rather than M9a's world loop, though the "restless" event only gains mechanical effect once M9a's availability model exists.

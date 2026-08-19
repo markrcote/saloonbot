@@ -141,6 +141,20 @@ MIGRATIONS = [
             UNIQUE KEY idx_npc_relationships_pair (npc_id_a, npc_id_b)
         )""",
     ],
+    [   # Migration 10: PC-NPC relationships; absence of a row means the NPC
+        # has never shared a table with that player.
+        """CREATE TABLE IF NOT EXISTS pc_npc_relationships (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            player_name VARCHAR(255) NOT NULL,
+            npc_id INT NOT NULL,
+            times_met INT NOT NULL DEFAULT 0,
+            sessions_played INT NOT NULL DEFAULT 0,
+            npc_notes_on_player TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY idx_pc_npc_relationships_pair (player_name, npc_id)
+        )""",
+    ],
 ]
 
 
@@ -817,6 +831,83 @@ class Database:
             )
             return cursor.rowcount > 0
         return self._execute_write(fn, f"update_npc_relationship({relationship_id})")
+
+    @_synchronized
+    def get_pc_npc_relationship(self, player_name, npc_id):
+        """Get a player's relationship with an NPC. Returns dict or None."""
+        self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM pc_npc_relationships WHERE player_name = %s AND npc_id = %s",
+                (player_name, int(npc_id))
+            )
+            return cursor.fetchone()
+        except Error as e:
+            logging.error(f"Error getting PC-NPC relationship ({player_name},{npc_id}): {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
+
+    @_synchronized
+    def create_pc_npc_relationship(self, player_name, npc_id, times_met=1, sessions_played=1):
+        """Create a PC-NPC relationship row on a player's first shared session with an
+        NPC. Returns the new row id."""
+        def fn(cursor):
+            cursor.execute("""
+                INSERT INTO pc_npc_relationships (player_name, npc_id, times_met, sessions_played)
+                VALUES (%s, %s, %s, %s)
+            """, (player_name, int(npc_id), int(times_met), int(sessions_played)))
+            return cursor.lastrowid
+        return self._execute_write(fn, f"create_pc_npc_relationship({player_name},{npc_id})")
+
+    @_synchronized
+    def update_pc_npc_relationship(self, relationship_id, times_met=None, sessions_played=None, notes=None):
+        """Update the provided fields of a PC-NPC relationship row. Returns True if the row exists."""
+        fields, params = [], []
+        if times_met is not None:
+            fields.append("times_met = %s")
+            params.append(int(times_met))
+        if sessions_played is not None:
+            fields.append("sessions_played = %s")
+            params.append(int(sessions_played))
+        if notes is not None:
+            fields.append("npc_notes_on_player = %s")
+            params.append(notes)
+        if not fields:
+            return False
+        params.append(int(relationship_id))
+
+        def fn(cursor):
+            cursor.execute(
+                f"UPDATE pc_npc_relationships SET {', '.join(fields)} WHERE id = %s",
+                params
+            )
+            return cursor.rowcount > 0
+        return self._execute_write(fn, f"update_pc_npc_relationship({relationship_id})")
+
+    @_synchronized
+    def get_pc_npc_relationships_for_npc(self, npc_id):
+        """Get all PC-NPC relationship rows for an NPC, newest relationship first. List of dicts."""
+        self._connect()
+        self.connection.commit()  # end any open txn so we read the latest committed data
+        cursor = None
+        try:
+            cursor = self.connection.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM pc_npc_relationships WHERE npc_id = %s ORDER BY id DESC",
+                (int(npc_id),)
+            )
+            return cursor.fetchall()
+        except Error as e:
+            logging.error(f"Error getting PC-NPC relationships for NPC {npc_id}: {e}")
+            raise
+        finally:
+            if cursor:
+                cursor.close()
 
     @_synchronized
     def log_llm_usage(self, purpose, model, input_tokens, output_tokens, npc_id=None, provider=None):

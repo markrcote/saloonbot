@@ -135,6 +135,21 @@ MIGRATIONS = [
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_npc_relationships_pair"
         " ON npc_relationships (npc_id_a, npc_id_b)",
     ],
+    [   # Migration 10: PC-NPC relationships; absence of a row means the NPC
+        # has never shared a table with that player.
+        """CREATE TABLE IF NOT EXISTS pc_npc_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_name TEXT NOT NULL,
+            npc_id INTEGER NOT NULL,
+            times_met INTEGER NOT NULL DEFAULT 0,
+            sessions_played INTEGER NOT NULL DEFAULT 0,
+            npc_notes_on_player TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_pc_npc_relationships_pair"
+        " ON pc_npc_relationships (player_name, npc_id)",
+    ],
 ]
 
 
@@ -720,6 +735,80 @@ class SqliteDatabase:
             return cursor.rowcount > 0
         except sqlite3.Error as e:
             logging.error(f"Error updating NPC relationship {relationship_id}: {e}")
+            raise
+
+    @_synchronized
+    def get_pc_npc_relationship(self, player_name, npc_id):
+        """Get a player's relationship with an NPC. Returns dict or None."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT * FROM pc_npc_relationships WHERE player_name = ? AND npc_id = ?",
+                (player_name, int(npc_id))
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as e:
+            logging.error(f"Error getting PC-NPC relationship ({player_name},{npc_id}): {e}")
+            raise
+
+    @_synchronized
+    def create_pc_npc_relationship(self, player_name, npc_id, times_met=1, sessions_played=1):
+        """Create a PC-NPC relationship row on a player's first shared session with an
+        NPC. Returns the new row id."""
+        self._connect()
+        try:
+            cursor = self.connection.execute("""
+                INSERT INTO pc_npc_relationships (player_name, npc_id, times_met, sessions_played)
+                VALUES (?, ?, ?, ?)
+            """, (player_name, int(npc_id), int(times_met), int(sessions_played)))
+            self.connection.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            logging.error(f"Error creating PC-NPC relationship ({player_name},{npc_id}): {e}")
+            raise
+
+    @_synchronized
+    def update_pc_npc_relationship(self, relationship_id, times_met=None, sessions_played=None, notes=None):
+        """Update the provided fields of a PC-NPC relationship row. Returns True if a row was updated."""
+        fields, params = [], []
+        if times_met is not None:
+            fields.append("times_met = ?")
+            params.append(int(times_met))
+        if sessions_played is not None:
+            fields.append("sessions_played = ?")
+            params.append(int(sessions_played))
+        if notes is not None:
+            fields.append("npc_notes_on_player = ?")
+            params.append(notes)
+        if not fields:
+            return False
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(int(relationship_id))
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                f"UPDATE pc_npc_relationships SET {', '.join(fields)} WHERE id = ?",
+                params
+            )
+            self.connection.commit()
+            return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logging.error(f"Error updating PC-NPC relationship {relationship_id}: {e}")
+            raise
+
+    @_synchronized
+    def get_pc_npc_relationships_for_npc(self, npc_id):
+        """Get all PC-NPC relationship rows for an NPC, newest relationship first. List of dicts."""
+        self._connect()
+        try:
+            cursor = self.connection.execute(
+                "SELECT * FROM pc_npc_relationships WHERE npc_id = ? ORDER BY id DESC",
+                (int(npc_id),)
+            )
+            return [dict(r) for r in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logging.error(f"Error getting PC-NPC relationships for NPC {npc_id}: {e}")
             raise
 
     @_synchronized

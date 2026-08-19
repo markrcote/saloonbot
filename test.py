@@ -685,6 +685,82 @@ class TestNpcRelationshipsDb(unittest.TestCase):
         self.assertFalse(self.db.update_npc_relationship(9999, strength=50))
 
 
+class TestPcNpcRelationshipsDb(unittest.TestCase):
+    """M8: pc_npc_relationships table accessors."""
+
+    def setUp(self):
+        self.db = SqliteDatabase(":memory:")
+        self.npc_id = self.db.create_npc("Winifred Cobb", "Prospector", 20000)
+        self.other_npc_id = self.db.create_npc("Dusty Pete", "Gunslinger", 20000)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_get_missing_pair_returns_none(self):
+        self.assertIsNone(self.db.get_pc_npc_relationship("Annie", self.npc_id))
+
+    def test_create_and_get(self):
+        rel_id = self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        rel = self.db.get_pc_npc_relationship("Annie", self.npc_id)
+        self.assertIsNotNone(rel)
+        self.assertEqual(rel["id"], rel_id)
+        self.assertEqual(rel["player_name"], "Annie")
+        self.assertEqual(rel["npc_id"], self.npc_id)
+        self.assertEqual(rel["times_met"], 1)
+        self.assertEqual(rel["sessions_played"], 1)
+        self.assertIsNone(rel["npc_notes_on_player"])
+
+    def test_create_with_explicit_counts(self):
+        self.db.create_pc_npc_relationship("Annie", self.npc_id, times_met=3, sessions_played=3)
+        rel = self.db.get_pc_npc_relationship("Annie", self.npc_id)
+        self.assertEqual(rel["times_met"], 3)
+        self.assertEqual(rel["sessions_played"], 3)
+
+    def test_same_player_distinct_per_npc(self):
+        self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        self.assertIsNone(self.db.get_pc_npc_relationship("Annie", self.other_npc_id))
+
+    def test_same_npc_distinct_per_player(self):
+        self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        self.assertIsNone(self.db.get_pc_npc_relationship("Bob", self.npc_id))
+
+    def test_duplicate_pair_rejected(self):
+        self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.create_pc_npc_relationship("Annie", self.npc_id)
+
+    def test_update_fields(self):
+        rel_id = self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        self.assertTrue(self.db.update_pc_npc_relationship(rel_id, times_met=2, sessions_played=2))
+        rel = self.db.get_pc_npc_relationship("Annie", self.npc_id)
+        self.assertEqual(rel["times_met"], 2)
+        self.assertEqual(rel["sessions_played"], 2)
+        self.assertIsNone(rel["npc_notes_on_player"])
+        self.assertTrue(self.db.update_pc_npc_relationship(rel_id, notes="Plays it cautious."))
+        rel = self.db.get_pc_npc_relationship("Annie", self.npc_id)
+        self.assertEqual(rel["npc_notes_on_player"], "Plays it cautious.")
+        # earlier fields untouched by a notes-only update
+        self.assertEqual(rel["times_met"], 2)
+
+    def test_update_no_fields_returns_false(self):
+        rel_id = self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        self.assertFalse(self.db.update_pc_npc_relationship(rel_id))
+
+    def test_update_missing_row_returns_false(self):
+        self.assertFalse(self.db.update_pc_npc_relationship(9999, times_met=5))
+
+    def test_get_relationships_for_npc_newest_first(self):
+        self.db.create_pc_npc_relationship("Annie", self.npc_id)
+        self.db.create_pc_npc_relationship("Bob", self.npc_id)
+        rels = self.db.get_pc_npc_relationships_for_npc(self.npc_id)
+        self.assertEqual(len(rels), 2)
+        self.assertEqual(rels[0]["player_name"], "Bob")  # created second
+        self.assertEqual(rels[1]["player_name"], "Annie")
+        # a relationship with a different NPC never shows up here
+        self.db.create_pc_npc_relationship("Annie", self.other_npc_id)
+        self.assertEqual(len(self.db.get_pc_npc_relationships_for_npc(self.npc_id)), 2)
+
+
 class TestNpcRelationshipFormation(unittest.TestCase):
     """M7: creation-time relationship formation in the Casino."""
 

@@ -21,5 +21,9 @@ export REDIS_HOST=localhost
 export REDIS_PORT=6379
 export USE_SQLITE=1
 export SALOONBOT_DEBUG=1
+# Default local runs to the deterministic fake LLM provider so testing never
+# hits a real (billed) API by accident. Export LLM_PROVIDER=openai/claude
+# yourself beforehand if you specifically want to exercise the real client.
+export LLM_PROVIDER="${LLM_PROVIDER:-fake}"
 
 python server.py

@@ -152,7 +152,7 @@ This starts the server and redis containers (server uses SQLite), then runs the 
 ```bash
 ./dev-server.sh
 ```
-This starts the bot and redis containers, then runs the server locally with SQLite. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container.
+This starts the bot and redis containers, then runs the server locally with SQLite. Requires `discord_token.txt` and `discord_guilds.txt` files for the bot container. Defaults `LLM_PROVIDER=fake` so local runs never hit a real (billed) API by accident — export `LLM_PROVIDER=openai`/`claude` yourself beforehand to test the real client.
 
 #### Run both components locally (redis only in Docker)
 ```bash
@@ -166,9 +166,10 @@ export DISCORD_TOKEN="your-token" DISCORD_GUILDS="your-guild-ids"
 python bot.py
 
 # Terminal 2
-export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1
+export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1 LLM_PROVIDER=fake
 python server.py
 ```
+`LLM_PROVIDER=fake` avoids hitting a real, billed API — set it to `openai`/`claude` yourself if you specifically want to test the real client.
 
 ### Manual Usage
 

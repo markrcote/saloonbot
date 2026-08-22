@@ -15,8 +15,9 @@ docker compose -f compose.dev-redis-only.yml up -d
 echo "Redis running on localhost:6379"
 echo ""
 echo "Run server locally with:"
-echo "  export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1"
+echo "  export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1 LLM_PROVIDER=fake"
 echo "  python server.py"
+echo "(LLM_PROVIDER=fake avoids hitting a real, billed API; set it to openai/claude yourself to test the real client)"
 echo ""
 echo "Press Ctrl+C to stop redis and exit"
 

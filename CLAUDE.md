@@ -39,9 +39,10 @@ export REDIS_HOST=localhost REDIS_PORT=6379 SALOONBOT_DEBUG=1
 export DISCORD_TOKEN="..." DISCORD_GUILDS="..."
 python bot.py
 
-export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1
+export REDIS_HOST=localhost REDIS_PORT=6379 USE_SQLITE=1 SALOONBOT_DEBUG=1 LLM_PROVIDER=fake
 python server.py
 ```
+(`LLM_PROVIDER=fake` avoids hitting a real, billed API — set it to `openai`/`claude` to test the real client.)
 
 **Run bot locally (server in Docker):** `./dev-bot.sh`
 

@@ -25,6 +25,7 @@ from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
 
+from llm_cost_report import compute_costs, extrapolate, format_report
 from wwnames.wwnames import WildWestNames
 
 # Remove join-delay so tests can tick WAITING→BETTING immediately
@@ -3912,6 +3913,76 @@ class TestTableEventBuffer(unittest.TestCase):
         self.assertIn("the dealer stood at 17", events)
         self.assertIn("Buffer NPC won $20.00", events)
         self.assertIn("Alice won $20.00", events)
+
+
+class TestLLMCostReport(unittest.TestCase):
+
+    PRICING = {
+        ('claude', 'claude-haiku-4-5'): (1.00, 5.00),
+        ('claude', 'claude-sonnet-5'): (3.00, 15.00),
+    }
+
+    def test_compute_costs_single_row(self):
+        rows = [{'purpose': 'npc_decision', 'model': 'claude-haiku-4-5', 'provider': 'claude',
+                 'total_input': 1_000_000, 'total_output': 500_000, 'call_count': 10}]
+        breakdown, total_cost, unpriced = compute_costs(rows, pricing=self.PRICING)
+        # 1M input @ $1/M + 0.5M output @ $5/M == $1.00 + $2.50
+        self.assertAlmostEqual(breakdown[0]['cost'], 3.50)
+        self.assertAlmostEqual(total_cost, 3.50)
+        self.assertEqual(unpriced, [])
+
+    def test_compute_costs_sums_multiple_rows(self):
+        rows = [
+            {'purpose': 'npc_decision', 'model': 'claude-haiku-4-5', 'provider': 'claude',
+             'total_input': 500_000, 'total_output': 0, 'call_count': 5},
+            {'purpose': 'session_memory', 'model': 'claude-sonnet-5', 'provider': 'claude',
+             'total_input': 0, 'total_output': 100_000, 'call_count': 2},
+        ]
+        breakdown, total_cost, unpriced = compute_costs(rows, pricing=self.PRICING)
+        # $0.50 (haiku input) + $1.50 (sonnet output)
+        self.assertAlmostEqual(total_cost, 2.00)
+        self.assertEqual(unpriced, [])
+
+    def test_compute_costs_unknown_model_excluded_from_total(self):
+        rows = [
+            {'purpose': 'npc_decision', 'model': 'claude-haiku-4-5', 'provider': 'claude',
+             'total_input': 1_000_000, 'total_output': 0, 'call_count': 1},
+            {'purpose': 'npc_decision', 'model': 'some-future-model', 'provider': 'claude',
+             'total_input': 1_000_000, 'total_output': 1_000_000, 'call_count': 1},
+        ]
+        breakdown, total_cost, unpriced = compute_costs(rows, pricing=self.PRICING)
+        # Only the priced row contributes; the unknown model is flagged, not crashed on.
+        self.assertAlmostEqual(total_cost, 1.00)
+        self.assertIsNone(breakdown[1]['cost'])
+        self.assertEqual(unpriced, [('claude', 'some-future-model')])
+
+    def test_compute_costs_empty_rows(self):
+        breakdown, total_cost, unpriced = compute_costs([], pricing=self.PRICING)
+        self.assertEqual(breakdown, [])
+        self.assertEqual(total_cost, 0.0)
+        self.assertEqual(unpriced, [])
+
+    def test_extrapolate_projects_from_daily_rate(self):
+        rates = extrapolate(7.00, days=7)  # $1.00/day
+        self.assertAlmostEqual(rates['day'], 1.00)
+        self.assertAlmostEqual(rates['week'], 7.00)
+        self.assertAlmostEqual(rates['month'], 30.00)
+        self.assertAlmostEqual(rates['year'], 365.00)
+
+    def test_extrapolate_zero_days_returns_zero(self):
+        rates = extrapolate(5.00, days=0)
+        self.assertEqual(rates, {'day': 0.0, 'week': 0.0, 'month': 0.0, 'year': 0.0})
+
+    def test_format_report_empty(self):
+        report = format_report([], days=1)
+        self.assertIn("No LLM usage recorded", report)
+
+    def test_format_report_includes_total_and_run_rates(self):
+        rows = [{'purpose': 'npc_decision', 'model': 'claude-haiku-4-5', 'provider': 'claude',
+                 'total_input': 1_000_000, 'total_output': 0, 'call_count': 1}]
+        report = format_report(rows, days=1)
+        self.assertIn("Total cost this window: $1.0000", report)
+        self.assertIn("per week:  $7.00", report)
 
 
 if __name__ == '__main__':

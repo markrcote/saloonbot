@@ -80,9 +80,15 @@ Roster NPCs have history with each other. A newly created NPC has a 70% chance o
 | `LLM_SESSION_MEMORY_TIMEOUT` | `15` | Seconds allowed for the background session-memory call |
 | `BLACKJACK_NPC_DEPARTURE_BASE` | `0.02` | Baseline per-hand chance an NPC calls it a night |
 | `BLACKJACK_NPC_DEPARTURE_RAMP` | `0.28` | Extra departure chance once an NPC has seen a full session |
+| `BLACKJACK_AMBIENT_SPEED_MULTIPLIER` | `2.0` | Multiplier applied to dramatic/dealer-card/result pauses on a table with no human players |
+| `BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN` | `120` | Minimum seconds between hands on an all-NPC ambient table |
+| `BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX` | `300` | Maximum seconds between hands on an all-NPC ambient table (actual delay is randomized within this range) |
+| `WALLET_REPLENISH_INTERVAL` | `300` | Seconds between idle-NPC wallet replenishment passes |
 | `METRICS_PORT` | `9400` | Port for the Prometheus `/metrics` endpoint |
 
 Exactly one provider is active at a time, chosen by `LLM_PROVIDER` (default `openai`) — the corresponding API key is required for `openai`/`claude`; an unset or invalid key (or `LLM_PROVIDER=none`) means bot players still join the game but use basic blackjack strategy instead of AI decisions. The provider is periodically re-checked while running, so credits running out or being topped up are picked up automatically.
+
+NPC autofill (`/npclimits [min] [max]`) is a runtime setting, not an environment variable — see the `/npclimits` entry above. With `min > 0`, a table stays populated with NPCs indefinitely, running at the ambient pace above whenever no human is seated.
 
 All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) resolve in priority order: direct env var → `<VAR>_FILE` path → `/run/secrets/<lowercase_var>` → unset. Docker secrets mounted at `/run/secrets/` are picked up automatically with no extra configuration.
 
@@ -291,3 +297,27 @@ python hunt_flaky.py --runs 20
 ```
 
 Options: `--runs N` (default 10), `--output FILE` (JSON results), `--class ClassName` (limit to specific test class).
+
+## Measuring LLM Cost
+
+Two operator scripts turn SaloonBot's existing token-usage tracking (`/usage`, the `llm_usage` DB table) into an actual `$` estimate of what running an NPC-only ("ambient") table costs — useful for finding the floor cost of running the saloon 24/7 with nobody playing.
+
+`start_ambient_table.py` stands up (or tears down) a headless NPC-only table — it sets NPC autofill limits and creates a game with no `guild_id`/`channel_id`, so nothing posts to Discord:
+
+```bash
+export REDIS_HOST=localhost REDIS_PORT=6379
+python start_ambient_table.py --min 3 --max 5
+# ... let it run ...
+python start_ambient_table.py --teardown --game-id <id>
+```
+
+NPC autofill limits are casino-wide, not per-table — run this against a server with no other active games for a clean measurement.
+
+`llm_cost_report.py` connects to the same DB the server uses and applies a small built-in pricing table to `get_llm_usage_summary()`'s token totals, printing a per-purpose/model/provider cost breakdown plus extrapolated day/week/month/year run rates:
+
+```bash
+export USE_SQLITE=1 SQLITE_PATH=saloonbot.db   # or the MySQL_* vars, matching the server
+python llm_cost_report.py --days 1
+```
+
+The pricing table is hardcoded and dated in the script — check it's current before trusting the numbers for a real budgeting decision.

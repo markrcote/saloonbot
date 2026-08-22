@@ -62,6 +62,13 @@ python cli.py
 ```
 Standalone async client for testing game logic without Discord.
 
+### Measuring LLM Cost
+```bash
+python start_ambient_table.py --min 3 --max 5   # headless NPC-only table, no Discord posting
+python llm_cost_report.py --days 1              # $ cost report from tracked token usage
+```
+`start_ambient_table.py` publishes `casino_action`/`npc_limits` + `new_game` (no `guild_id`/`channel_id`) directly to Redis, and `--teardown --game-id <id>` reverses it (`npc_limits` 0/0 + `stop_game`). `llm_cost_report.py` applies a small hardcoded (and dated) pricing table to `get_llm_usage_summary()` and extrapolates day/week/month/year run rates — see README.md's "Measuring LLM Cost" section for the full workflow.
+
 ## Architecture
 
 ```

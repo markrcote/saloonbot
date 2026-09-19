@@ -1,4 +1,4 @@
-"""Prometheus metrics for LLM usage and provider health.
+"""Prometheus metrics for LLM usage, provider health, and hands played.
 
 Centralizes all Prometheus objects so callers update metrics through a
 small function API rather than importing prometheus_client directly.
@@ -20,6 +20,9 @@ LLM_PROVIDER_UP = Gauge(
 LLM_PROVIDER_FAILURES_TOTAL = Counter(
     "saloonbot_llm_provider_failures_total", "Total LLM provider probe/creation failures", ["provider"]
 )
+HANDS_TOTAL = Counter(
+    "saloonbot_hands_total", "Total blackjack hands completed", ["ambient"]
+)
 
 
 def record_llm_usage(purpose, model, provider, input_tokens, output_tokens):
@@ -37,6 +40,14 @@ def set_llm_provider_status(provider, up):
 def record_llm_probe_failure(provider):
     """Count a failed probe/creation attempt, independent of the alert gauge."""
     LLM_PROVIDER_FAILURES_TOTAL.labels(provider=provider).inc()
+
+
+def record_hand(ambient):
+    """Count one completed hand, labeled by whether the table was all-NPC (ambient).
+
+    The denominator for cost per hand: divide LLM token/call counters by this.
+    """
+    HANDS_TOTAL.labels(ambient="true" if ambient else "false").inc()
 
 
 def start_metrics_server(port):

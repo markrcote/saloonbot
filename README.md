@@ -94,7 +94,7 @@ All four secret variables (`DISCORD_TOKEN`, `DISCORD_GUILDS`, `ANTHROPIC_API_KEY
 
 ### Metrics
 
-The server exposes a Prometheus-format `/metrics` endpoint on `METRICS_PORT` (default `9400`): LLM call/token counters (`saloonbot_llm_calls_total`, `saloonbot_llm_input_tokens_total`, `saloonbot_llm_output_tokens_total`, labeled by purpose/model/provider) and provider health (`saloonbot_llm_provider_up` gauge, `saloonbot_llm_provider_failures_total` counter). This repo only exposes the metrics — scraping, dashboards, and alerting are configured in whatever external Prometheus/Grafana setup you point at it.
+The server exposes a Prometheus-format `/metrics` endpoint on `METRICS_PORT` (default `9400`): LLM call/token counters (`saloonbot_llm_calls_total`, `saloonbot_llm_input_tokens_total`, `saloonbot_llm_output_tokens_total`, labeled by purpose/model/provider) provider health (`saloonbot_llm_provider_up` gauge, `saloonbot_llm_provider_failures_total` counter), and hands played (`saloonbot_hands_total`, labelled `ambient="true"` for all-NPC tables and `"false"` when a human is seated — the denominator for cost per hand). This repo only exposes the metrics — scraping, dashboards, and alerting are configured in whatever external Prometheus/Grafana setup you point at it.
 
 ## CLI
 
@@ -319,5 +319,15 @@ NPC autofill limits are casino-wide, not per-table — run this against a server
 export USE_SQLITE=1 SQLITE_PATH=saloonbot.db   # or the MySQL_* vars, matching the server
 python llm_cost_report.py --days 1
 ```
+
+`llm_cost_report.py` only takes whole-day windows and has no hand count. To price a shorter, exact window (e.g. a few hours of an ambient trial) and get cost per hand, query Prometheus over that window `W` instead, then apply the provider's per-million-token rates by hand:
+
+```promql
+sum by (purpose, model, provider) (increase(saloonbot_llm_input_tokens_total[W]))
+sum by (purpose, model, provider) (increase(saloonbot_llm_output_tokens_total[W]))
+sum(increase(saloonbot_hands_total{ambient="true"}[W]))
+```
+
+Divide the priced token totals by the hand count for cost per ambient hand, or by `N × hours` for cost per NPC-hour at a constant `N` NPCs.
 
 The pricing table is hardcoded and dated in the script — check it's current before trusting the numbers for a real budgeting decision.

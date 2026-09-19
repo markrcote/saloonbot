@@ -1713,12 +1713,17 @@ class TestMetricsEndpoint(EndToEndTestCase):
         deadline = time.time() + 10
         while time.time() < deadline:
             body = _fetch_metrics()
-            if 'saloonbot_llm_calls_total' in body:
+            # The hand counter ticks at the end of end_hand(), after the result pauses
+            # that follow the "dust settles" message, so wait for it too. Match the
+            # labelled sample, not the bare name: the HELP/TYPE lines exist from startup.
+            if 'saloonbot_llm_calls_total' in body and 'saloonbot_hands_total{' in body:
                 break
             time.sleep(0.5)
 
         self.assertIsNotNone(body)
         self.assertIn('saloonbot_llm_calls_total', body)
+        # A human is seated, so this is not an ambient hand.
+        self.assertIn('saloonbot_hands_total{ambient="false"}', body)
         self.assertIn('saloonbot_llm_input_tokens_total', body)
         self.assertIn('saloonbot_llm_output_tokens_total', body)
         self.assertIn('provider="fake"', body)

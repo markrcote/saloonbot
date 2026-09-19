@@ -474,6 +474,52 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.game.end_hand()
         self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
 
+    @staticmethod
+    def _hands_counted(ambient):
+        from cardgames import metrics
+        return metrics.HANDS_TOTAL.labels(ambient=ambient)._value.get()
+
+    def _finish_hand(self, player):
+        self.game.bets[player.name] = self.game.MIN_BET
+        self.game.stand(player)
+        self.game.dealer_turn()
+        self.game.end_hand()
+
+    def test_end_hand_counts_ambient_hand(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        npc = SimpleBlackjackNPC("Bot1")
+        self.game.players.append(npc)
+        self.game.new_hand()
+        before_ambient, before_human = self._hands_counted("true"), self._hands_counted("false")
+        self._finish_hand(npc)
+        self.assertEqual(self._hands_counted("true"), before_ambient + 1)
+        self.assertEqual(self._hands_counted("false"), before_human)
+
+    def test_end_hand_counts_human_hand(self):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        player = Player("Human")
+        self.game.players.append(player)
+        self.game.new_hand()
+        before_ambient, before_human = self._hands_counted("true"), self._hands_counted("false")
+        self._finish_hand(player)
+        self.assertEqual(self._hands_counted("false"), before_human + 1)
+        self.assertEqual(self._hands_counted("true"), before_ambient)
+
+    def test_end_hand_counts_dealer_blackjack_hand(self):
+        # Dealer natural skips PLAYING (new_hand goes straight to RESOLVING) but the
+        # hand still ends via end_hand(), so it must be counted exactly once.
+        self.game.deck = [Card("D", 5), Card("D", 6), Card("H", 13), Card("H", 14)]
+        npc = SimpleBlackjackNPC("Bot1")
+        self.game.players.append(npc)
+        self.game.new_hand()
+        self.assertEqual(self.game.state, HandState.RESOLVING)
+        self.game.bets[npc.name] = self.game.MIN_BET
+        before = self._hands_counted("true")
+        self.game.end_hand()
+        self.assertEqual(self._hands_counted("true"), before + 1)
+
 
 class TestAmbientNpcActionPacing(unittest.TestCase):
     """Ambient tables space NPC bets/actions via timestamp gating, not sleeps."""
@@ -2649,6 +2695,16 @@ class TestMetrics(unittest.TestCase):
             ),
             before_out + 50,
         )
+
+    def test_record_hand_labels_by_ambient(self):
+        from cardgames import metrics
+        before_true = self._labeled_value(metrics.HANDS_TOTAL, ambient='true')
+        before_false = self._labeled_value(metrics.HANDS_TOTAL, ambient='false')
+        metrics.record_hand(True)
+        metrics.record_hand(False)
+        metrics.record_hand(False)
+        self.assertEqual(self._labeled_value(metrics.HANDS_TOTAL, ambient='true'), before_true + 1)
+        self.assertEqual(self._labeled_value(metrics.HANDS_TOTAL, ambient='false'), before_false + 2)
 
     def test_set_llm_provider_status_up(self):
         from cardgames import metrics

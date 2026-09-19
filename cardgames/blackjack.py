@@ -4,6 +4,7 @@ import random
 import time
 from enum import Enum
 
+from . import metrics
 from .card_game import Card, CardGame, CardGameError
 from .money import format_cents
 from .player import Player
@@ -583,6 +584,7 @@ class Blackjack(CardGame):
         self.current_player_idx = None
         self.state = HandState.BETWEEN_HANDS
         self.time_last_hand_ended = time.time()
+        metrics.record_hand(ambient)
         if ambient:
             self.time_between_hands_duration = random.uniform(
                 self.AMBIENT_TIME_BETWEEN_HANDS_MIN, self.AMBIENT_TIME_BETWEEN_HANDS_MAX

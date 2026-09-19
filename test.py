@@ -533,6 +533,10 @@ class TestAmbientNpcActionPacing(unittest.TestCase):
 
     def test_ambient_playing_action_gated(self):
         npc1, npc2 = SimpleBlackjackNPC("Bot1"), SimpleBlackjackNPC("Bot2")
+        # Deals pop from the end: dealer 10+7, Bot1 10+6, Bot2 10+6, then hit cards.
+        # Pinned so a random dealer blackjack can't skip PLAYING and flake the test.
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("C", 6), Card("C", 10),
+                          Card("H", 6), Card("H", 10), Card("D", 7), Card("D", 10)]
         self._start_betting_with(npc1, npc2)
         self.game.time_last_event = time.time() - 101
         self.game.tick()  # first bet

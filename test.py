@@ -1382,6 +1382,31 @@ class TestNPCDepartureHook(unittest.TestCase):
         self.assertTrue(any("tapped out" in m for m in messages))
 
 
+class TestCasinoGameIds(unittest.TestCase):
+    def setUp(self):
+        self.casino = Casino(redis_host="localhost", redis_port=6379)
+        self.casino.redis = MagicMock()
+        self.casino.db = MagicMock()
+
+    def test_new_game_uses_a_memorable_id(self):
+        game_id = self.casino.new_game()
+        self.assertRegex(game_id, r"^[a-z]+-[a-z]+(-\d+)?$")
+        self.assertIn(game_id, self.casino.games)
+        self.assertEqual(self.casino.games[game_id].game_id, game_id)
+
+    def test_new_game_ids_are_distinct(self):
+        game_ids_made = [self.casino.new_game() for _ in range(100)]
+        self.assertEqual(len(set(game_ids_made)), 100)
+        self.assertEqual(set(self.casino.games), set(game_ids_made))
+
+    def test_new_game_avoids_ids_already_in_use(self):
+        with patch.object(game_ids, "_random_pair", side_effect=["dusty-saloon", "dusty-saloon", "wild-spur"]):
+            first = self.casino.new_game()
+            second = self.casino.new_game()
+        self.assertEqual(first, "dusty-saloon")
+        self.assertEqual(second, "wild-spur")
+
+
 class TestCasinoErrorHandling(unittest.TestCase):
     def setUp(self):
         self.mock_redis = MagicMock()

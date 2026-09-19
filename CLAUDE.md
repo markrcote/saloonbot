@@ -99,7 +99,7 @@ Discord Users
 ### Casino Protocol (published to "casino")
 
 **Casino actions** (`event_type: "casino_action"`):
-- `new_game` - Create a new game; optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
+- `new_game` - Create a new game (the server assigns a memorable `adjective-noun` game ID, e.g. `dusty-saloon`, with a numeric suffix only on collision); optional `guild_id`/`channel_id` for bot recovery, optional `num_bots` (0–4) to spawn bot players (AI-powered if an API key is configured, otherwise simple strategy), optional `deck` list to inject a specific card order (testing only)
 - `list_games` - Request list of all active games (used by bot on startup for recovery)
 - `get_usage` - Request an LLM usage summary; optional `days` (default 7, clamped 1–90) (admin; bot sends with `request_id`, server responds via `usage_stats`)
 - `get_debug` - Request full internal state dump (admin; bot sends with `request_id`, server responds via `debug_state`)
@@ -120,7 +120,7 @@ Discord Users
 
 ### Casino Update Protocol (published to "casino_update")
 
-- `new_game` response - includes `game_id`, `request_id`, and optional channel info
+- `new_game` response - includes `game_id` (a memorable word-pair ID, see `game_ids.py`; older games restored from the DB may still have UUIDs), `request_id`, and optional channel info
 - `list_games` response - includes `request_id` and `games` list (each entry: `game_id`, `state`, `guild_id`, `channel_id`)
 - `usage_stats` response - includes `request_id`, `days`, and `rows` list (each entry: `purpose`, `model`, `provider`, `total_input`, `total_output`, `call_count`)
 - `debug_state` response - includes `request_id`, a `games` list (per-game state, players, pending bots, dirty flag), the `npcs` roster, the `dirty_games` list, `llm_health` (per-provider status/last success/last failure/last error), and `llm_active` (bool — whether NPCs are currently using AI vs. simple fallback strategy) (admin diagnostics)
@@ -137,6 +137,7 @@ Discord Users
 - `blackjack.py` - Main game logic with states: WAITING → BETTING → PLAYING → DEALER_TURN → RESOLVING → BETWEEN_HANDS; supports `to_dict()`/`from_dict()` for persistence; broadcasts short table-event strings (bets, actions, outcomes, quips) to seated players via `_notify_table_event`; rolls the per-hand NPC departure chance on entry to BETWEEN_HANDS
 - `casino.py` - Redis pub/sub coordinator, manages game instances; loads persisted games on startup; handles bot-recovery/admin requests (`list_games`, `get_usage`, `get_debug`, `get_stats`, `get_wallet`), game termination (`stop_game`), and `npc_action` add/remove; spawns NPC players via `num_bots` param (LLM-backed if API key available, otherwise simple strategy); reads saloon config from env; generates NPC backstories via LLM on first creation; condenses departing LLM NPCs' sessions into `npc_memories` (fire-and-forget, capped at `MAX_MEMORIES_PER_NPC=20` per NPC) and loads them back at seating via `_load_npc_memories`; manages NPC–NPC relationships (creation-time and organic formation, +5-per-shared-session strength, boundary-crossing note/type refreshes — see M7 in Key Patterns) and loads them at seating via `_load_npc_relationships`; logs LLM usage to DB and Prometheus (`metrics.record_llm_usage`) and tracks per-provider health state (`_llm_health`, updated via `_set_llm_health`) for `/debug` and `/metrics`
 - `card_game.py` - Base class for card games (deck, shuffle, deal)
+- `game_ids.py` - Memorable game IDs: `generate_game_id(exists)` returns an Old West `adjective-noun` pair (two 40-word lists, ~1,600 combinations) that `exists` reports unused, falling back to `adjective-noun-N` (widening N as needed) so it always terminates; `Casino.new_game` calls it with a check against `self.games`. IDs are lowercase a-z plus hyphens, safe for Redis topic names
 - `player.py` - Base player class
 - `npc_player.py` - NPC base class; `simple_npc.py` uses basic strategy; `llm_npc.py` wraps LLM client for AI-driven play, buffers table events per session (`deque(maxlen=40)`), condenses them into a first-person memory on departure (`submit_session_condensation`), and injects seated partners' relationships into its context block (detail-level gated)
 - `llm_client.py` - LLM provider abstraction (Claude / OpenAI / deterministic fake for testing); `complete()` returns `(text, input_tokens, output_tokens)` tuple; falls back to basic strategy on timeout; `get_configured_provider()` resolves `LLM_PROVIDER` to exactly one of `openai`/`claude`/`none`/`fake` (default `openai`, no auto-detection from which API keys happen to be set), raising `LLMError` immediately on anything else; `create_llm_client()` builds the corresponding client, or returns `None` for `none`

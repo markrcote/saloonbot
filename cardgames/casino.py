@@ -3,7 +3,6 @@ import logging
 import os
 import random
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import redis
@@ -11,6 +10,7 @@ import redis
 from . import metrics
 from .blackjack import Blackjack, HandState, deserialize_hand
 from .card_game import CardGameError
+from .game_ids import generate_game_id
 from .llm_client import create_llm_client, get_configured_provider, LLMError
 from .llm_npc import LLMBlackjackNPC, MEMORY_RECALL_BY_DETAIL
 from .money import format_cents
@@ -977,10 +977,7 @@ class Casino:
             logging.error(f"Error deleting game {game_id}: {e}")
 
     def new_game(self, guild_id=None, channel_id=None, num_bots=0, initial_deck=None):
-        while True:
-            game_id = str(uuid.uuid4())
-            if game_id not in self.games.keys():
-                break
+        game_id = generate_game_id(lambda candidate: candidate in self.games)
         self.games[game_id] = Blackjack(
             game_id, self, initial_deck=initial_deck, on_npc_departed=self._on_npc_departed
         )

@@ -411,6 +411,7 @@ class TestGameCreation(EndToEndTestCase):
             self.assertEqual(response['request_id'], request_id)
             self.assertIn('game_id', response)
             self.assertIsInstance(response['game_id'], str)
+            self.assertRegex(response['game_id'], r'^[a-z]+-[a-z]+(-\d+)?$')
         finally:
             pubsub.close()
 

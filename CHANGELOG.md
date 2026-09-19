@@ -2,6 +2,10 @@
 
 Notable changes to SaloonBot, for players and server admins. Dates are when each change shipped.
 
+## 2026-09-19 — Memorable game names
+
+- Games now get a memorable Old West name like `dusty-saloon` or `rusty-posse` instead of a long random ID, both when a game is created and in `/debug`. Games already running keep their old IDs until they end.
+
 ## 2026-07-22 — /stopgame refunds bets
 
 - `/stopgame` now returns any unresolved bets to players when it ends a game. The redundant `/quitgame` command has been removed.

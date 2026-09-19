@@ -13,10 +13,15 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
+from unittest import mock
 
 import mysql.connector
 import redis
 import requests
+
+from cardgames import database as database_module
+from cardgames.blackjack import Blackjack
 
 # Configure logging
 logging.basicConfig(
@@ -408,6 +413,113 @@ class TestGameCreation(EndToEndTestCase):
             self.assertIsInstance(response['game_id'], str)
         finally:
             pubsub.close()
+
+
+class TestGameIdColumnMigration(unittest.TestCase):
+    """Migration 10 widens the game-ID columns from VARCHAR(36) on a real MySQL.
+
+    Runs against a scratch database (created as root) rather than the shared `saloonbot`
+    schema, so it can start from schema version 9 with UUID-era rows in place.
+    """
+
+    SCRATCH_DB = 'saloonbot_migration_test'
+    # (table, column) pairs that hold a game ID.
+    GAME_ID_COLUMNS = [
+        ('games', 'game_id'),
+        ('game_channels', 'game_id'),
+        ('npcs', 'current_game_id'),
+        ('npc_memories', 'game_id'),
+    ]
+
+    def setUp(self):
+        self.root = mysql.connector.connect(
+            host='localhost', port=3306, user='root', password='root_password'
+        )
+        self.addCleanup(self._drop_scratch_db)
+        cursor = self.root.cursor()
+        cursor.execute(f"DROP DATABASE IF EXISTS {self.SCRATCH_DB}")
+        cursor.execute(f"CREATE DATABASE {self.SCRATCH_DB}")
+        cursor.close()
+
+    def _drop_scratch_db(self):
+        cursor = self.root.cursor()
+        cursor.execute(f"DROP DATABASE IF EXISTS {self.SCRATCH_DB}")
+        cursor.close()
+        self.root.close()
+
+    def _open_db(self):
+        return database_module.Database('localhost', 3306, 'root', 'root_password', self.SCRATCH_DB)
+
+    def _column_width(self, table, column):
+        self.root.commit()  # end any open snapshot so we see the ALTERs
+        cursor = self.root.cursor()
+        cursor.execute(
+            "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (self.SCRATCH_DB, table, column),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        return row[0]
+
+    def _fk_delete_rule(self):
+        self.root.commit()
+        cursor = self.root.cursor()
+        cursor.execute(
+            "SELECT DELETE_RULE, REFERENCED_TABLE_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'game_channels'",
+            (self.SCRATCH_DB,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+
+    @staticmethod
+    def _game_dict(game_id):
+        return Blackjack(game_id=game_id, casino=mock.MagicMock()).to_dict()
+
+    def test_migration_widens_game_id_columns_and_keeps_existing_rows(self):
+        uuid_game_id = str(uuid.uuid4())
+
+        # Bring the scratch schema to version 9 and seed a UUID-era game.
+        with mock.patch.object(database_module, 'MIGRATIONS', database_module.MIGRATIONS[:9]):
+            old_db = self._open_db()
+        try:
+            for table, column in self.GAME_ID_COLUMNS:
+                self.assertEqual(self._column_width(table, column), 36, f"{table}.{column} before migration")
+            old_db.save_game(uuid_game_id, self._game_dict(uuid_game_id))
+            old_db.save_game_channel(uuid_game_id, 111, 222)
+            npc_id = old_db.create_npc("Winifred Cobb", "The Grizzled Prospector", 15000)
+            old_db.set_npc_game(npc_id, uuid_game_id)
+            old_db.add_npc_memory(npc_id, uuid_game_id, "A quiet night.", max_rows=20)
+        finally:
+            old_db.close()
+
+        # Reopening with the full migration list applies migration 10.
+        db = self._open_db()
+        try:
+            for table, column in self.GAME_ID_COLUMNS:
+                self.assertEqual(self._column_width(table, column), 255, f"{table}.{column} after migration")
+
+            # The cascading FK from game_channels to games survived the drop/re-add.
+            self.assertEqual(self._fk_delete_rule(), [('CASCADE', 'games')])
+
+            # UUID-era rows are untouched.
+            self.assertIsNotNone(db.load_game(uuid_game_id))
+            self.assertEqual([c['game_id'] for c in db.load_game_channels()], [uuid_game_id])
+            self.assertEqual(db.get_npc_by_id(npc_id)['current_game_id'], uuid_game_id)
+            self.assertEqual(db.get_npc_memories(npc_id, limit=1)[0]['game_id'], uuid_game_id)
+
+            # An ID longer than a UUID now fits, and deleting the game cascades to its channel row.
+            long_id = "-".join(["longword"] * 10)
+            self.assertGreater(len(long_id), 36)
+            db.save_game(long_id, self._game_dict(long_id))
+            db.save_game_channel(long_id, 333, 444)
+            self.assertIn(long_id, [c['game_id'] for c in db.load_game_channels()])
+            db.delete_game(long_id)
+            self.assertNotIn(long_id, [c['game_id'] for c in db.load_game_channels()])
+        finally:
+            db.close()
 
 
 class TestPlayerActions(EndToEndTestCase):

@@ -135,6 +135,9 @@ MIGRATIONS = [
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_npc_relationships_pair"
         " ON npc_relationships (npc_id_a, npc_id_b)",
     ],
+    [   # Migration 10: no-op. MySQL widens its game-ID columns here; SQLite's TEXT columns are
+        # already unbounded. Kept so schema_version numbers stay in step across both backends.
+    ],
 ]
 
 

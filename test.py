@@ -549,6 +549,41 @@ class TestDatabaseIntegration(unittest.TestCase):
         finally:
             db.close()
 
+    def test_game_id_longer_than_a_uuid_round_trips(self):
+        """Game IDs are no longer pinned to UUID length (36 chars); every table that
+        stores one must accept a longer ID."""
+        long_id = "-".join(["longword"] * 10)
+        self.assertGreater(len(long_id), 36)
+        db = SqliteDatabase(":memory:")
+        try:
+            mock_casino = MagicMock()
+            mock_casino.db = db
+            game = Blackjack(game_id=long_id, casino=mock_casino)
+            db.save_game(long_id, game.to_dict())
+            db.save_game_channel(long_id, 111, 222)
+
+            self.assertEqual(db.load_game(long_id)['game_id'], long_id)
+            self.assertIn(long_id, {g['game_id'] for g in db.load_all_active_games()})
+            self.assertEqual(
+                db.load_game_channels(),
+                [{'game_id': long_id, 'guild_id': 111, 'channel_id': 222}],
+            )
+
+            npc_id = db.create_npc("Winifred Cobb", "The Grizzled Prospector", 15000)
+            db.set_npc_game(npc_id, long_id)
+            self.assertEqual(db.get_npc_by_id(npc_id)['current_game_id'], long_id)
+            db.add_npc_memory(npc_id, long_id, "A long night.", max_rows=20)
+            self.assertEqual(db.get_npc_memories(npc_id, limit=1)[0]['game_id'], long_id)
+        finally:
+            db.close()
+
+    def test_backends_have_the_same_number_of_migrations(self):
+        """schema_version numbers are kept in step across MySQL and SQLite, even when one
+        backend's migration is a no-op."""
+        from cardgames.database import MIGRATIONS as MYSQL_MIGRATIONS
+        from cardgames.sqlite_database import MIGRATIONS as SQLITE_MIGRATIONS
+        self.assertEqual(len(MYSQL_MIGRATIONS), len(SQLITE_MIGRATIONS))
+
 
 class TestSettingsStore(unittest.TestCase):
     """AM1: settings key/value store on the SQLite backend."""

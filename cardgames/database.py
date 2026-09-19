@@ -141,6 +141,19 @@ MIGRATIONS = [
             UNIQUE KEY idx_npc_relationships_pair (npc_id_a, npc_id_b)
         )""",
     ],
+    [   # Migration 10: widen game-ID columns from VARCHAR(36) so IDs needn't be UUID-sized.
+        # game_channels.game_id references games.game_id, and a referenced column can't be
+        # widened on its own, so drop the FK (auto-named by migration 1), widen both, re-add it.
+        # MySQL DDL auto-commits: a crash midway leaves the version unbumped, and a rerun would
+        # fail on the DROP. Acceptable for a one-shot startup migration over tiny tables.
+        "ALTER TABLE game_channels DROP FOREIGN KEY game_channels_ibfk_1",
+        "ALTER TABLE games MODIFY game_id VARCHAR(255) NOT NULL",
+        "ALTER TABLE game_channels MODIFY game_id VARCHAR(255) NOT NULL",
+        "ALTER TABLE game_channels ADD CONSTRAINT game_channels_ibfk_1"
+        " FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE",
+        "ALTER TABLE npcs MODIFY current_game_id VARCHAR(255) NULL",
+        "ALTER TABLE npc_memories MODIFY game_id VARCHAR(255) NULL",
+    ],
 ]
 
 

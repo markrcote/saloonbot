@@ -20,6 +20,7 @@ from cardgames.casino import (
     NPC_TYPES, Casino,
     DEFAULT_NPC_AUTOFILL_MIN, DEFAULT_NPC_AUTOFILL_MAX, MAX_NPCS_PER_TABLE,
 )
+from cardgames import game_ids
 from cardgames.money import cents_to_dollars, dollars_to_cents, format_cents
 from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
@@ -97,6 +98,53 @@ class TestWildWestNames(unittest.TestCase):
         mock_choice.side_effect = ["F", "Mary", "Brown", "M", "Aiden", "Patel"]
         result = self.wild_west_names.random_name(number=2)
         self.assertEqual(result, "♀ Mary Brown\n♂ Aiden Patel")
+
+
+class TestGameIds(unittest.TestCase):
+
+    def test_word_lists_are_lowercase_alphabetic_and_unique(self):
+        for name, words in (("ADJECTIVES", game_ids.ADJECTIVES), ("NOUNS", game_ids.NOUNS)):
+            with self.subTest(list=name):
+                self.assertTrue(words)
+                self.assertEqual(len(words), len(set(words)), "duplicate words")
+                for word in words:
+                    self.assertRegex(word, r"^[a-z]+$")
+
+    def test_generated_ids_are_adjective_noun_pairs(self):
+        for _ in range(200):
+            game_id = game_ids.generate_game_id(lambda gid: False)
+            self.assertRegex(game_id, r"^[a-z]+-[a-z]+$")
+            adjective, noun = game_id.split("-")
+            self.assertIn(adjective, game_ids.ADJECTIVES)
+            self.assertIn(noun, game_ids.NOUNS)
+
+    def test_skips_ids_that_already_exist(self):
+        taken = {"dusty-saloon"}
+        with patch.object(game_ids, "_random_pair", side_effect=["dusty-saloon", "dusty-saloon", "wild-spur"]):
+            self.assertEqual(game_ids.generate_game_id(taken.__contains__), "wild-spur")
+
+    def test_falls_back_to_numeric_suffix_when_pairs_keep_colliding(self):
+        with patch.object(game_ids, "ADJECTIVES", ["dusty"]), patch.object(game_ids, "NOUNS", ["saloon"]):
+            game_id = game_ids.generate_game_id(lambda gid: gid == "dusty-saloon")
+        self.assertRegex(game_id, r"^dusty-saloon-\d+$")
+        self.assertTrue(2 <= int(game_id.rsplit("-", 1)[1]) < 100)
+
+    def test_widens_suffix_range_when_small_suffixes_are_all_taken(self):
+        def exists(gid):
+            parts = gid.split("-")
+            return len(parts) == 2 or int(parts[2]) < 100
+
+        with patch.object(game_ids, "ADJECTIVES", ["dusty"]), patch.object(game_ids, "NOUNS", ["saloon"]):
+            game_id = game_ids.generate_game_id(exists)
+        self.assertGreaterEqual(int(game_id.rsplit("-", 1)[1]), 100)
+
+    def test_generated_ids_fit_the_game_id_columns(self):
+        """VARCHAR(255) after migration 10."""
+        with patch.object(game_ids, "ADJECTIVES", ["dusty"]), patch.object(game_ids, "NOUNS", ["saloon"]):
+            game_id = game_ids.generate_game_id(lambda gid: gid == "dusty-saloon")
+        self.assertLessEqual(len(game_id), 255)
+        widest = max(map(len, game_ids.ADJECTIVES)) + 1 + max(map(len, game_ids.NOUNS))
+        self.assertLessEqual(widest, 255)
 
 
 class TestCard(unittest.TestCase):

@@ -981,7 +981,7 @@ class Casino:
         self.games[game_id] = Blackjack(
             game_id, self, initial_deck=initial_deck, on_npc_departed=self._on_npc_departed
         )
-        logging.info(f"New game {game_id[:8]} created (bots: {num_bots})")
+        logging.info(f"New game {game_id} created (bots: {num_bots})")
 
         if num_bots > 0:
             self._pending_bots[game_id] = num_bots
@@ -1100,7 +1100,7 @@ class Casino:
         if npc_count < self.npc_min:
             to_add = min(self.npc_min - npc_count, MAX_NPCS_PER_TABLE - total_count)
             if to_add > 0:
-                logging.info(f"[{game_id[:8]}] Autofill: adding {to_add} NPC(s) "
+                logging.info(f"[{game_id}] Autofill: adding {to_add} NPC(s) "
                              f"(have {npc_count}, min={self.npc_min})")
                 self._spawn_npcs_into_game(game_id, to_add)
                 changed = True
@@ -1113,7 +1113,7 @@ class Casino:
                 + [p for p in game.players if getattr(p, 'is_npc', False)]
             )
             for npc in candidates[:to_remove]:
-                logging.info(f"[{game_id[:8]}] Autofill: removing NPC {npc.name!r} "
+                logging.info(f"[{game_id}] Autofill: removing NPC {npc.name!r} "
                              f"(have {npc_count}, max={self.npc_max})")
                 game.leave(npc)
                 changed = True
@@ -1475,7 +1475,7 @@ class Casino:
                             self.update_wallet(player, bet_amount)
                             refunded.append(f"{player_name} (${format_cents(bet_amount)})")
                             logging.info(
-                                f"[{game_id[:8]}] Refunded ${format_cents(bet_amount)} to {player_name}"
+                                f"[{game_id}] Refunded ${format_cents(bet_amount)} to {player_name}"
                             )
                     if refunded:
                         game.output("🛑 Game called early! Returning bets: " + ", ".join(refunded))
@@ -1524,7 +1524,7 @@ class Casino:
             try:
                 game.tick()
             except CardGameError as e:
-                logging.error(f"[{game_id[:8]}] Error ticking game, skipping this cycle: {e}")
+                logging.error(f"[{game_id}] Error ticking game, skipping this cycle: {e}")
                 continue
 
             if game._dirty:

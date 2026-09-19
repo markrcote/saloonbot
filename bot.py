@@ -420,7 +420,7 @@ class BlackjackCog(commands.Cog):
                 waiting = ', '.join(p['name'] for p in g['players_waiting'])
                 desc_lines.append(f"Waiting: {waiting}")
             embeds.append(nextcord.Embed(
-                title=f"Game {gid[:8]}",
+                title=f"Game {gid}",
                 description="\n".join(desc_lines),
                 color=0xc8a96e,
             ))
@@ -431,7 +431,7 @@ class BlackjackCog(commands.Cog):
         # --- NPC Roster ---
         npc_lines = []
         for npc in data.get('npcs', []):
-            status = f"in game `{str(npc['current_game_id'])[:8]}`" if npc.get('current_game_id') else "idle"
+            status = f"in game `{str(npc['current_game_id'])}`" if npc.get('current_game_id') else "idle"
             npc_lines.append(
                 f"**{npc['name']}** ({npc['personality_name']}) | ${format_cents(npc['wallet_cents'])} | {status}"
             )
@@ -1116,7 +1116,7 @@ class BlackjackCog(commands.Cog):
                         await game.channel.send(embed=embed)
                     elif "✨ ~*~ The dust settles" in text:
                         msg_type = "hand_result"
-                        logging.debug(f"[{game.game_id[:8]}] Dramatic pause: 1.0s (hand_result)")
+                        logging.debug(f"[{game.game_id}] Dramatic pause: 1.0s (hand_result)")
                         async with game.channel.typing():
                             await asyncio.sleep(1.0)
                         embed = nextcord.Embed(description=text, color=0x4169e1)  # Royal blue
@@ -1131,7 +1131,7 @@ class BlackjackCog(commands.Cog):
                         await game.channel.send(embed=embed)
                     elif "🔄 Dealer flips" in text:
                         msg_type = "dealer_reveal"
-                        logging.debug(f"[{game.game_id[:8]}] Dramatic pause: 1.5s (dealer_reveal)")
+                        logging.debug(f"[{game.game_id}] Dramatic pause: 1.5s (dealer_reveal)")
                         async with game.channel.typing():
                             await asyncio.sleep(1.5)
                         await game.channel.send(text)
@@ -1139,8 +1139,8 @@ class BlackjackCog(commands.Cog):
                         msg_type = "game_event"
                         await game.channel.send(text)
 
-                    logging.info(f"[{game.game_id[:8]}] → Discord: {msg_type} | {text[:70]!r}")
-                    logging.debug(f"[{game.game_id[:8]}] Pacing: {MESSAGE_PACING_DELAY:.1f}s")
+                    logging.info(f"[{game.game_id}] → Discord: {msg_type} | {text[:70]!r}")
+                    logging.debug(f"[{game.game_id}] Pacing: {MESSAGE_PACING_DELAY:.1f}s")
                     await asyncio.sleep(MESSAGE_PACING_DELAY)
                     break
             else:
@@ -1148,7 +1148,7 @@ class BlackjackCog(commands.Cog):
 
     async def send_command(self, player_name, game, cmd, **kwargs):
         extra = f" ${format_cents(kwargs['amount'])}" if 'amount' in kwargs else ""
-        logging.info(f"[{game.game_id[:8]}] Player {player_name!r}: {cmd}{extra}")
+        logging.info(f"[{game.game_id}] Player {player_name!r}: {cmd}{extra}")
         message = {
             "player": player_name,
             "event_type": "player_action",

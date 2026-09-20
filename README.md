@@ -344,3 +344,15 @@ python watch_ambient_cost.py --game-id <id> --cap 1.50 --warn 0.50 --max-hours 1
 It aborts when cumulative spend reaches `--cap` (default `$1.50`), when usage comes from a model with no pricing on file (it can't bound the spend), or when `/metrics` stays unreachable for `--unreachable-limit` polls (default 3, `--interval` 300s) — it won't watch blind. It warns at `--warn` (default `$0.50`), or with `--expected-hourly-cost` when spend runs over 3× that rate. At `--max-hours` (default 12) it stops the table and exits cleanly. Exit codes: `0` finished, `2` aborted, `3` couldn't start watching (no baseline, or Redis unreachable so an abort would be impossible), `4` decided to stop the table but couldn't confirm it stopped — check by hand.
 
 Things to know: start it right after the table, since only usage after its first poll is counted; the cost is a close estimate from token counters (scrape lag, failed calls aren't tracked), not the invoice, so the provider dashboard remains the source of truth; and Ctrl-C leaves the table running unwatched. It runs wherever it can reach the server's `METRICS_PORT` (`--metrics-url`, default `http://localhost:9400/metrics`) and Redis (`--redis-host`/`--redis-port`) — for a remote staging host, SSH tunnels to both work.
+
+### Backstop if the watchdog's machine or tunnel dies
+
+The watchdog and `--teardown` both run on your machine and reach staging through SSH tunnels, so if either goes away nothing can stop the table. `deadman_teardown.py` arms a one-shot systemd timer *on the staging host* that republishes the same teardown (`npc_limits` 0/0, then `stop_game`) through the `saloonbot-redis` container, independent of your machine:
+
+```bash
+python deadman_teardown.py arm --game-id <id> --hours 13   # a little beyond the watchdog's --max-hours
+python deadman_teardown.py status                           # list armed timers
+python deadman_teardown.py disarm --game-id <id>            # after a normal teardown
+```
+
+It uses `--host saloonbot-staging` by default (an SSH alias) and needs passwordless `sudo` there: a system-level timer survives SSH logout, whereas a user timer would not without lingering enabled. Timers are transient, so they vanish on a reboot of the host. The teardown messages are unit-tested against `start_ambient_table.teardown()` so the two can't drift apart.

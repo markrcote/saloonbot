@@ -26,6 +26,8 @@ from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
 
+import deadman_teardown
+import start_ambient_table
 import watch_ambient_cost
 from llm_cost_report import compute_costs, extrapolate, format_report
 from wwnames.wwnames import WildWestNames
@@ -4352,6 +4354,85 @@ class TestWatchdogAbortTable(unittest.TestCase):
         with patch('watch_ambient_cost.teardown', side_effect=redis.ConnectionError('gone')), \
                 patch('watch_ambient_cost._publish', side_effect=redis.ConnectionError('still gone')):
             self.assertFalse(watch_ambient_cost.abort_table(r, pubsub, 'dusty-saloon'))
+
+
+class TestDeadmanTeardown(unittest.TestCase):
+    def test_messages_match_what_the_operator_teardown_publishes(self):
+        # Drift guard: the backstop must send exactly what start_ambient_table.teardown() does.
+        r = MagicMock()
+        ack = {'ok': True, 'min': 0, 'max': 0, 'message': 'limits set'}
+        with patch('start_ambient_table._await_response', return_value=ack):
+            start_ambient_table.teardown(r, MagicMock(), 'dusty-saloon')
+        published = [json.loads(call.args[1]) for call in r.publish.call_args_list]
+        for message in published:
+            message.pop('request_id', None)
+        expected = deadman_teardown.teardown_messages('dusty-saloon')
+        for message in expected:
+            message.pop('request_id', None)
+        self.assertEqual(published, expected)
+
+    def test_limits_are_zeroed_before_the_game_is_stopped(self):
+        limits, stop = deadman_teardown.teardown_messages('dusty-saloon')
+        self.assertEqual((limits['action'], limits['min'], limits['max']), ('npc_limits', 0, 0))
+        self.assertEqual((stop['action'], stop['game_id']), ('stop_game', 'dusty-saloon'))
+
+    def test_payload_publishes_both_messages_through_the_redis_container(self):
+        import shlex
+        payload = deadman_teardown.remote_payload('dusty-saloon')
+        publishes = payload.split(f' && sleep {deadman_teardown.SETTLE_SECONDS} && ')
+        self.assertEqual(len(publishes), 2)
+        expected = deadman_teardown.teardown_messages('dusty-saloon')
+        for argv, message in zip((shlex.split(p) for p in publishes), expected):
+            self.assertEqual(argv[:6], ['docker', 'exec', 'saloonbot-redis', 'redis-cli', 'PUBLISH', 'casino'])
+            self.assertEqual(json.loads(argv[6]), message)
+
+    def test_arm_command_schedules_a_named_one_shot_system_timer(self):
+        command = deadman_teardown.arm_command('dusty-saloon', 13)
+        self.assertEqual(command[:3], ['sudo', '-n', 'systemd-run'])
+        self.assertEqual(command[command.index('--unit') + 1], 'saloonbot-deadman-dusty-saloon')
+        self.assertEqual(command[command.index('--on-active') + 1], '46800s')
+        self.assertEqual(command[-3:-1], ['/bin/sh', '-c'])
+        self.assertEqual(command[-1], deadman_teardown.remote_payload('dusty-saloon'))
+
+    def test_fractional_hours_are_converted_to_seconds(self):
+        command = deadman_teardown.arm_command('dusty-saloon', 0.5)
+        self.assertEqual(command[command.index('--on-active') + 1], '1800s')
+
+    def test_non_positive_hours_are_rejected(self):
+        for hours in (0, -1):
+            with self.assertRaises(ValueError):
+                deadman_teardown.arm_command('dusty-saloon', hours)
+
+    def test_unsafe_game_ids_are_rejected(self):
+        for game_id in ('x; rm -rf /', 'a b', '', '-flag', "it's", '$(id)'):
+            with self.assertRaises(ValueError, msg=game_id):
+                deadman_teardown.unit_name(game_id)
+
+    def test_uuid_era_game_ids_are_accepted(self):
+        self.assertEqual(deadman_teardown.unit_name('3f2b8c1e-9d4a-4e0b-a7c5-1234567890ab'),
+                         'saloonbot-deadman-3f2b8c1e-9d4a-4e0b-a7c5-1234567890ab')
+
+    def test_disarm_stops_the_timer_unit(self):
+        self.assertEqual(deadman_teardown.disarm_command('dusty-saloon'),
+                         ['sudo', '-n', 'systemctl', 'stop', 'saloonbot-deadman-dusty-saloon.timer'])
+
+    def test_run_remote_quotes_the_command_once_for_ssh(self):
+        with patch('deadman_teardown.subprocess.run') as mock_run:
+            mock_run.return_value.returncode = 0
+            code = deadman_teardown.run_remote('saloonbot-staging', ['echo', 'a b'])
+        self.assertEqual(code, 0)
+        mock_run.assert_called_once_with(['ssh', 'saloonbot-staging', "echo 'a b'"])
+
+    def test_main_arm_runs_the_arm_command_on_the_chosen_host(self):
+        with patch('deadman_teardown.run_remote', return_value=0) as mock_remote:
+            code = deadman_teardown.main(['--host', 'other', 'arm', '--game-id', 'dusty-saloon', '--hours', '2'])
+        self.assertEqual(code, 0)
+        mock_remote.assert_called_once_with('other', deadman_teardown.arm_command('dusty-saloon', 2))
+
+    def test_main_rejects_a_bad_game_id_without_running_anything(self):
+        with patch('deadman_teardown.run_remote') as mock_remote, self.assertRaises(SystemExit):
+            deadman_teardown.main(['arm', '--game-id', 'x; reboot', '--hours', '1'])
+        mock_remote.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -29,6 +29,7 @@ from cardgames.sqlite_database import SqliteDatabase
 import deadman_teardown
 import start_ambient_table
 import watch_ambient_cost
+import watch_game
 from llm_cost_report import compute_costs, extrapolate, format_report
 from wwnames.wwnames import WildWestNames
 
@@ -4433,6 +4434,95 @@ class TestDeadmanTeardown(unittest.TestCase):
         with patch('deadman_teardown.run_remote') as mock_remote, self.assertRaises(SystemExit):
             deadman_teardown.main(['arm', '--game-id', 'x; reboot', '--hours', '1'])
         mock_remote.assert_not_called()
+
+
+class TestWatchGameClassify(unittest.TestCase):
+    def test_message_types_match_the_bots_embed_rules(self):
+        cases = [
+            ('🤠 Big Jim: "Fortune favours the bold."', 'npc_quip', watch_game.SEPIA),
+            ('Big Jim 🏆 strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
+            ('💥 Big Jim busts and lost $5.00', 'bust', watch_game.RED),
+            ('✨ ~*~ The dust settles ~*~ ✨', 'hand_result', watch_game.ROYAL_BLUE),
+            ('🃏 The dealer shuffles a fresh deck.', 'new_hand', watch_game.PURPLE),
+            ('💰 Ante up, gents!', 'bet_prompt', watch_game.ORANGE),
+            ('🔄 Dealer flips a King of Spades.', 'dealer_reveal', None),
+            ('Big Jim hits.', 'game_event', None),
+        ]
+        for text, msg_type, colour in cases:
+            with self.subTest(text=text):
+                self.assertEqual(watch_game.classify(text), (msg_type, colour))
+
+    def test_a_bare_emoji_without_a_quote_is_not_a_quip(self):
+        self.assertEqual(watch_game.classify('🤠 Big Jim tips his hat.')[0], 'game_event')
+
+    def test_bust_needs_more_than_the_emoji(self):
+        self.assertEqual(watch_game.classify('💥 A glass shatters.')[0], 'game_event')
+
+
+class TestWatchGameFormat(unittest.TestCase):
+    def test_embed_style_messages_are_wrapped_in_their_colour(self):
+        line = watch_game.format_line('Big Jim 🏆 strikes gold!', use_colour=True)
+        self.assertEqual(line, '\x1b[38;2;255;215;0mBig Jim 🏆 strikes gold!\x1b[0m')
+
+    def test_plain_messages_are_never_coloured(self):
+        self.assertEqual(watch_game.format_line('Big Jim hits.', use_colour=True), 'Big Jim hits.')
+
+    def test_no_colour_means_plain_text_even_for_embeds(self):
+        self.assertEqual(watch_game.format_line('Big Jim 🏆 strikes gold!', use_colour=False),
+                         'Big Jim 🏆 strikes gold!')
+
+
+class TestWatchGameLoop(unittest.TestCase):
+    @staticmethod
+    def _pubsub(*payloads):
+        """A fake pubsub yielding each payload as a message; None stands for a poll timeout."""
+        items = [None if p is None else {'data': json.dumps(p)} for p in payloads]
+        pubsub = MagicMock()
+        pubsub.get_message.side_effect = items
+        return pubsub
+
+    def test_prints_each_update_and_stops_at_game_over(self):
+        import io
+        out = io.StringIO()
+        pubsub = self._pubsub({'text': 'Big Jim hits.'}, None, {'text': 'Big Jim stands.'},
+                              {'event_type': 'game_over'})
+        watch_game.watch(pubsub, out, use_colour=False)
+        self.assertEqual(out.getvalue(), 'Big Jim hits.\nBig Jim stands.\n-- game over --\n')
+
+    def test_updates_without_text_are_skipped(self):
+        import io
+        out = io.StringIO()
+        pubsub = self._pubsub({'game_id': 'dusty-saloon'}, {'text': ''}, {'event_type': 'game_over'})
+        watch_game.watch(pubsub, out, use_colour=False)
+        self.assertEqual(out.getvalue(), '-- game over --\n')
+
+    def test_polls_ignoring_subscribe_confirmations(self):
+        import io
+        pubsub = self._pubsub({'event_type': 'game_over'})
+        watch_game.watch(pubsub, io.StringIO(), use_colour=False)
+        pubsub.get_message.assert_called_once_with(ignore_subscribe_messages=True, timeout=watch_game.POLL_TIMEOUT)
+
+
+class TestWatchGameMain(unittest.TestCase):
+    def test_subscribes_to_the_games_topic(self):
+        with patch('watch_game.redis.Redis') as mock_redis, patch('watch_game.watch') as mock_watch:
+            code = watch_game.main(['--game-id', 'dusty-saloon', '--redis-host', 'h', '--redis-port', '1234'])
+        self.assertEqual(code, 0)
+        mock_redis.assert_called_once_with(host='h', port=1234)
+        mock_redis.return_value.pubsub.return_value.subscribe.assert_called_once_with('game_updates_dusty-saloon')
+        mock_watch.assert_called_once()
+
+    def test_reports_an_unreachable_redis_instead_of_a_traceback(self):
+        import redis
+        with patch('watch_game.redis.Redis') as mock_redis, patch('watch_game.watch') as mock_watch:
+            mock_redis.return_value.ping.side_effect = redis.ConnectionError('refused')
+            code = watch_game.main(['--game-id', 'dusty-saloon'])
+        self.assertEqual(code, 1)
+        mock_watch.assert_not_called()
+
+    def test_ctrl_c_exits_cleanly(self):
+        with patch('watch_game.redis.Redis'), patch('watch_game.watch', side_effect=KeyboardInterrupt):
+            self.assertEqual(watch_game.main(['--game-id', 'dusty-saloon']), 0)
 
 
 if __name__ == '__main__':

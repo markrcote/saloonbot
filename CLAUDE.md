@@ -62,6 +62,11 @@ python cli.py
 ```
 Standalone async client for testing game logic without Discord.
 
+```bash
+python watch_game.py --game-id <id>
+```
+Read-only spectator: prints a game's `game_updates_<id>` text to stdout like the Discord channel would show it, coloured per `classify()`, which duplicates the message-type rules in `bot.py`'s handler (keep them in step; sharing them is tracked in #256). Live pub/sub only, so no history.
+
 ### Measuring LLM Cost
 ```bash
 python start_ambient_table.py --min 3 --max 5   # headless NPC-only table, no Discord posting

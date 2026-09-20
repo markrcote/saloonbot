@@ -121,6 +121,17 @@ Available commands:
 | `help` | Show command list |
 | `quit` | Exit |
 
+### Watching a game
+
+`watch_game.py` follows a running game's table talk on stdout, like watching it in a Discord channel. It is read-only (it never sends an action, so it can't affect the game) and works for any game, including a headless ambient table that posts nothing to Discord:
+
+```bash
+python watch_game.py --game-id dusty-saloon
+REDIS_HOST=localhost python watch_game.py --game-id dusty-saloon   # e.g. through an SSH tunnel to staging
+```
+
+It prints each update as it arrives, tinted to match the bot's embed colours (quips, wins, busts, results, shuffles, ante-up) when stdout is a terminal (`NO_COLOR` turns colour off), and exits when the game ends or on Ctrl-C. Updates are live pub/sub with no history, so only what happens after it connects is shown, and it doesn't reproduce the bot's per-message pacing delays. Its message classification is a copy of the rules in `bot.py`'s message handler, so keep the two in step (see [#256](https://github.com/markrcote/saloonbot/issues/256) for sharing them).
+
 ## Development
 
 SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis. The server persists state to a database — MySQL in production, SQLite locally.

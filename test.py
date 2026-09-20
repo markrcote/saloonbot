@@ -1542,6 +1542,73 @@ class TestCasinoGameIds(unittest.TestCase):
         self.assertEqual(second, "wild-spur")
 
 
+class TestCasinoStuckGameRecovery(unittest.TestCase):
+    """#257: a game whose tick keeps failing is stopped, not retried forever."""
+
+    def setUp(self):
+        self.casino = Casino(redis_host="localhost", redis_port=6379)
+        self.casino.redis = MagicMock()
+        self.casino.db = MagicMock()
+        self.casino.update_wallet = MagicMock()
+        self.casino._replenish_npc_wallets = MagicMock()
+        self.casino._check_llm_health = MagicMock()
+        self.game_id = self.casino.new_game()
+        self.game = self.casino.games[self.game_id]
+        self.limit = Casino.MAX_CONSECUTIVE_TICK_ERRORS
+
+    def _fail_ticks(self, count):
+        self.game.tick = MagicMock(side_effect=CardGameError("Not enough cards remaining in deck"))
+        for _ in range(count):
+            self.casino._tick_games()
+
+    def test_failures_below_limit_keep_the_game(self):
+        self._fail_ticks(self.limit - 1)
+        self.assertIn(self.game_id, self.casino.games)
+        self.assertEqual(self.casino._tick_errors[self.game_id], self.limit - 1)
+
+    def test_success_resets_the_failure_count(self):
+        self._fail_ticks(self.limit - 1)
+        self.game.tick = MagicMock()  # recovers
+        self.casino._tick_games()
+        self.assertNotIn(self.game_id, self.casino._tick_errors)
+        self._fail_ticks(self.limit - 1)  # would have hit the limit without the reset
+        self.assertIn(self.game_id, self.casino.games)
+
+    def test_game_is_stopped_after_consecutive_failures(self):
+        self._fail_ticks(self.limit)
+        self.assertNotIn(self.game_id, self.casino.games)
+        self.assertNotIn(self.game_id, self.casino._tick_errors)
+        self.casino.db.delete_game.assert_called_with(self.game_id)
+
+    def test_stuck_game_stops_calling_tick(self):
+        """The cost bug: every retry resubmitted an LLM call. Once stopped, no more ticks."""
+        self._fail_ticks(self.limit)
+        calls_at_stop = self.game.tick.call_count
+        self.casino._tick_games()
+        self.casino._tick_games()
+        self.assertEqual(self.game.tick.call_count, calls_at_stop)
+        self.assertEqual(calls_at_stop, self.limit)
+
+    def test_stopped_game_returns_bets_and_announces_game_over(self):
+        alice = Player("Alice")
+        self.game.players.append(alice)
+        self.game.bets = {"Alice": 2500}
+        self._fail_ticks(self.limit)
+        self.casino.update_wallet.assert_called_once_with(alice, 2500)
+        published = [json.loads(call.args[1]) for call in self.casino.redis.publish.call_args_list]
+        self.assertTrue(any(p.get('event_type') == 'game_over' for p in published))
+        self.assertTrue(any("Returning bets" in p.get('text', '') for p in published))
+
+    def test_other_games_keep_ticking_when_one_is_stuck(self):
+        other_id = self.casino.new_game()
+        other = self.casino.games[other_id]
+        other.tick = MagicMock()
+        self._fail_ticks(self.limit)
+        self.assertNotIn(self.game_id, self.casino.games)
+        self.assertIn(other_id, self.casino.games)
+        self.assertEqual(other.tick.call_count, self.limit)
+
+
 class TestCasinoErrorHandling(unittest.TestCase):
     def setUp(self):
         self.mock_redis = MagicMock()

@@ -121,6 +121,7 @@ class Casino:
         self.npc_min = DEFAULT_NPC_AUTOFILL_MIN
         self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
+        self._tick_errors = {}  # game_id -> consecutive failed ticks (#257)
         self._last_wallet_replenish = 0
         self._last_llm_healthcheck = 0
         self._llm_health = {}  # provider -> {status, last_success_at, last_failure_at, last_error}
@@ -940,6 +941,7 @@ class Casino:
         """Delete a game from database."""
         self._dirty_games.discard(game_id)  # no point writing then deleting
         self._last_autofill.pop(game_id, None)
+        self._tick_errors.pop(game_id, None)
 
         game = self.games.get(game_id)
         if game is not None:
@@ -1389,6 +1391,34 @@ class Casino:
         )
 
     EMPTY_GAME_TIMEOUT = 600  # seconds before an idle empty game is removed
+    # A game whose tick fails this many times in a row is wedged (retrying
+    # won't help, and for an NPC turn each retry costs an LLM call), so it's
+    # stopped and its bets returned rather than retried forever (#257).
+    MAX_CONSECUTIVE_TICK_ERRORS = 5
+
+    def _stop_game(self, game_id, headline="Game called early"):
+        """Terminate a game immediately, returning all unresolved bets."""
+        game = self.games[game_id]
+        all_players = {p.name: p for p in game.players + game.departed_players}
+        refunded = []
+        for player_name, bet_amount in game.bets.items():
+            player = all_players.get(player_name)
+            if player is not None:
+                self.update_wallet(player, bet_amount)
+                refunded.append(f"{player_name} (${format_cents(bet_amount)})")
+                logging.info(
+                    f"[{game_id}] Refunded ${format_cents(bet_amount)} to {player_name}"
+                )
+        if refunded:
+            game.output(f"🛑 {headline}! Returning bets: " + ", ".join(refunded))
+        else:
+            game.output(f"🛑 {headline}. No bets to return.")
+        self._delete_game(game_id)
+        del self.games[game_id]
+        self.publish_event(
+            f"game_updates_{game_id}",
+            {'game_id': game_id, 'event_type': 'game_over'}
+        )
 
     def _process_message(self, data):
         game_id = data.get('game_id')
@@ -1466,27 +1496,7 @@ class Casino:
             try:
                 if data['event_type'] == 'casino_action' and data.get('action') == 'stop_game':
                     logging.info(f"Stopping game {game_id} by admin request — returning unresolved bets")
-                    game = self.games[game_id]
-                    all_players = {p.name: p for p in game.players + game.departed_players}
-                    refunded = []
-                    for player_name, bet_amount in game.bets.items():
-                        player = all_players.get(player_name)
-                        if player is not None:
-                            self.update_wallet(player, bet_amount)
-                            refunded.append(f"{player_name} (${format_cents(bet_amount)})")
-                            logging.info(
-                                f"[{game_id}] Refunded ${format_cents(bet_amount)} to {player_name}"
-                            )
-                    if refunded:
-                        game.output("🛑 Game called early! Returning bets: " + ", ".join(refunded))
-                    else:
-                        game.output("🛑 Game called early. No bets to return.")
-                    self._delete_game(game_id)
-                    del self.games[game_id]
-                    self.publish_event(
-                        f"game_updates_{game_id}",
-                        {'game_id': game_id, 'event_type': 'game_over'}
-                    )
+                    self._stop_game(game_id)
                     return
                 if data['event_type'] == 'player_action' and data.get('action') == 'join':
                     self._add_pending_bots(game_id)
@@ -1524,8 +1534,17 @@ class Casino:
             try:
                 game.tick()
             except CardGameError as e:
-                logging.error(f"[{game_id}] Error ticking game, skipping this cycle: {e}")
+                failures = self._tick_errors.get(game_id, 0) + 1
+                self._tick_errors[game_id] = failures
+                logging.error(
+                    f"[{game_id}] Error ticking game ({failures}/{self.MAX_CONSECUTIVE_TICK_ERRORS}), "
+                    f"skipping this cycle: {e}"
+                )
+                if failures >= self.MAX_CONSECUTIVE_TICK_ERRORS:
+                    logging.error(f"[{game_id}] Game is stuck; stopping it and returning bets")
+                    self._stop_game(game_id, headline="The table hit a snag and can't go on")
                 continue
+            self._tick_errors.pop(game_id, None)
 
             if game._dirty:
                 self._mark_dirty(game_id)

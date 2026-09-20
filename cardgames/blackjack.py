@@ -374,6 +374,10 @@ class Blackjack(CardGame):
             self.output(f"👋 {player} tips their hat and leaves the table.")
 
         self.players.remove(player)
+        if player not in self.departed_players:
+            # Departed players keep their cards until end_hand() settles them;
+            # everyone else's cards go back into circulation now (#257).
+            self.discard_all(player)
         logging.info(f"[{self.game_id}] {_player_label(player)} leaves (state: {self.state.value})")
         self._fire_departure_hook(player)
 
@@ -578,6 +582,7 @@ class Blackjack(CardGame):
         for player in self.departed_players:
             self._pause(self.RESULT_PAUSE)
             self._resolve_player(player, departed=True)
+            self.discard_all(player)
 
         self.bets = {}
         self.departed_players = []

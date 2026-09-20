@@ -1436,6 +1436,87 @@ class TestNPCDepartureHook(unittest.TestCase):
         self.assertTrue(any("tapped out" in m for m in messages))
 
 
+class TestBlackjackCardConservation(unittest.TestCase):
+    """#257: a departing player's cards must go back into circulation, or the
+    deck slowly drains until deal() raises 'Not enough cards remaining'."""
+
+    def _make_game(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 20000
+        mock_casino.update_wallet.return_value = True
+        mock_casino.game_output = MagicMock()
+        game = Blackjack(game_id="test", casino=mock_casino)
+        game._pause = lambda *args, **kwargs: None
+        return game
+
+    def _total_cards(self, game):
+        held = sum(len(p.hand) for p in game.players + game.players_waiting + game.departed_players)
+        return len(game.deck) + len(game.discards) + held + len(game.dealer.hand)
+
+    def _deal_two_player_hand(self):
+        game = self._make_game()
+        alice, bob = Player("Alice"), Player("Bob")
+        game.join(alice)
+        game.join(bob)
+        game.tick()  # WAITING -> BETTING
+        game.bet(alice, 2000)
+        game.bet(bob, 2000)
+        game.tick()  # BETTING -> PLAYING, cards dealt
+        self.assertEqual(game.state, HandState.PLAYING)
+        self.assertEqual(self._total_cards(game), 52)
+        return game, alice, bob
+
+    def test_leave_between_hands_returns_cards(self):
+        game, alice, bob = self._deal_two_player_hand()
+        game.stand(alice)
+        game.stand(bob)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> BETWEEN_HANDS
+        self.assertEqual(game.state, HandState.BETWEEN_HANDS)
+
+        game.leave(alice)
+
+        self.assertEqual(alice.hand, [])
+        self.assertEqual(self._total_cards(game), 52)
+
+    def test_leave_forfeiting_mid_hand_returns_cards(self):
+        game, alice, bob = self._deal_two_player_hand()
+        game.leave(alice)  # alice's turn: bet forfeited, not settled later
+
+        self.assertEqual(alice.hand, [])
+        self.assertEqual(self._total_cards(game), 52)
+
+    def test_departed_player_cards_returned_after_settlement(self):
+        game, alice, bob = self._deal_two_player_hand()
+        game.stand(alice)
+        game.leave(alice)  # already acted: settles at end_hand()
+        self.assertIn(alice, game.departed_players)
+        self.assertGreater(len(alice.hand), 0)  # still needed for settlement
+        self.assertEqual(self._total_cards(game), 52)
+
+        game.stand(bob)
+        game.tick()  # DEALER_TURN
+        game.tick()  # RESOLVING -> BETWEEN_HANDS
+
+        self.assertEqual(game.departed_players, [])
+        self.assertEqual(alice.hand, [])
+        self.assertEqual(self._total_cards(game), 52)
+
+    def test_deck_survives_many_departures(self):
+        """Repeated leave/rejoin churn never shrinks the pool of cards."""
+        game = self._make_game()
+        for i in range(30):
+            player = Player(f"Drifter {i}")
+            game.join(player)
+            game.tick()  # WAITING/BETWEEN_HANDS -> BETTING (promotes waiting)
+            game.bet(player, 2000)
+            game.tick()  # BETTING -> PLAYING
+            game.leave(player)
+            game.state = HandState.WAITING
+            self.assertEqual(self._total_cards(game), 52, f"cards leaked after departure {i}")
+
+
 class TestCasinoGameIds(unittest.TestCase):
     def setUp(self):
         self.casino = Casino(redis_host="localhost", redis_port=6379)

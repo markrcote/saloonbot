@@ -328,6 +328,6 @@ sum by (purpose, model, provider) (increase(saloonbot_llm_output_tokens_total[W]
 sum(increase(saloonbot_hands_total{ambient="true"}[W]))
 ```
 
-Divide the priced token totals by the hand count for cost per ambient hand, or by `N × hours` for cost per NPC-hour at a constant `N` NPCs.
+Divide the priced token totals by the hand count for cost per ambient hand. For cost per NPC-hour, use the average number of seated NPCs — every seated NPC bets once per hand, so it is `npc_bet` calls ÷ hands (`increase(saloonbot_llm_calls_total{purpose="npc_bet"}[W])` over the hand count above) — times the window's hours. This holds when NPCs arrive and depart (e.g. `--min 3 --max 5`); note autofill only adds below `min` and trims above `max`, so such a table mostly sits at `min`.
 
 The pricing table is hardcoded and dated in the script — check it's current before trusting the numbers for a real budgeting decision.

@@ -1533,16 +1533,23 @@ class Casino:
         for game_id, game in list(self.games.items()):
             try:
                 game.tick()
-            except CardGameError as e:
+            except Exception as e:
+                # CardGameError is the expected failure; anything else is a bug
+                # in one game, which must not escape and take every table down (#259).
                 failures = self._tick_errors.get(game_id, 0) + 1
                 self._tick_errors[game_id] = failures
                 logging.error(
                     f"[{game_id}] Error ticking game ({failures}/{self.MAX_CONSECUTIVE_TICK_ERRORS}), "
-                    f"skipping this cycle: {e}"
+                    f"skipping this cycle: {e}",
+                    exc_info=not isinstance(e, CardGameError),
                 )
                 if failures >= self.MAX_CONSECUTIVE_TICK_ERRORS:
                     logging.error(f"[{game_id}] Game is stuck; stopping it and returning bets")
-                    self._stop_game(game_id, headline="The table hit a snag and can't go on")
+                    try:
+                        self._stop_game(game_id, headline="The table hit a snag and can't go on")
+                    except Exception:
+                        # Leave the game in place; the next failed tick retries the stop.
+                        logging.exception(f"[{game_id}] Failed to stop stuck game")
                 continue
             self._tick_errors.pop(game_id, None)
 

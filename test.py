@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 from datetime import date, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from changelog import parse_changelog, select_recent_entries, ChangelogEntry
 from cardgames.blackjack import (
@@ -1556,8 +1556,9 @@ class TestCasinoStuckGameRecovery(unittest.TestCase):
         self.game = self.casino.games[self.game_id]
         self.limit = Casino.MAX_CONSECUTIVE_TICK_ERRORS
 
-    def _fail_ticks(self, count):
-        self.game.tick = MagicMock(side_effect=CardGameError("Not enough cards remaining in deck"))
+    def _fail_ticks(self, count, exc=None):
+        exc = exc or CardGameError("Not enough cards remaining in deck")
+        self.game.tick = MagicMock(side_effect=exc)
         for _ in range(count):
             self.casino._tick_games()
 
@@ -1607,6 +1608,45 @@ class TestCasinoStuckGameRecovery(unittest.TestCase):
         self.assertNotIn(self.game_id, self.casino.games)
         self.assertIn(other_id, self.casino.games)
         self.assertEqual(other.tick.call_count, self.limit)
+
+    def test_unexpected_exception_does_not_escape_the_loop(self):
+        """#259: a non-CardGameError from one game must not propagate out of _tick_games."""
+        for exc in (KeyError("boom"), TypeError("boom"), RuntimeError("boom")):
+            with self.subTest(exc=type(exc).__name__):
+                self._fail_ticks(1, exc=exc)  # would raise if uncaught
+                self.assertEqual(self.casino._tick_errors[self.game_id], 1)
+                self.casino._tick_errors.clear()
+
+    def test_unexpected_exception_counts_towards_the_stop_limit(self):
+        self._fail_ticks(self.limit, exc=KeyError("boom"))
+        self.assertNotIn(self.game_id, self.casino.games)
+        self.casino.db.delete_game.assert_called_with(self.game_id)
+
+    def test_other_games_keep_ticking_when_one_raises_unexpectedly(self):
+        other_id = self.casino.new_game()
+        other = self.casino.games[other_id]
+        other.tick = MagicMock()
+        self._fail_ticks(1, exc=KeyError("boom"))
+        self.assertIn(self.game_id, self.casino.games)
+        self.assertEqual(other.tick.call_count, 1)
+
+    def test_unexpected_exception_is_logged_with_traceback(self):
+        with self.assertLogs(level="ERROR") as logs:
+            self._fail_ticks(1, exc=KeyError("boom"))
+        self.assertTrue(any(record.exc_info for record in logs.records))
+
+    def test_expected_card_game_error_is_logged_without_traceback(self):
+        with self.assertLogs(level="ERROR") as logs:
+            self._fail_ticks(1)
+        self.assertFalse(any(record.exc_info for record in logs.records))
+
+    def test_failure_to_stop_a_stuck_game_does_not_escape_the_loop(self):
+        self.casino._stop_game = MagicMock(side_effect=RuntimeError("db gone"))
+        self._fail_ticks(self.limit, exc=KeyError("boom"))  # would raise if uncaught
+        self.casino._stop_game.assert_called_once_with(self.game_id, headline=ANY)
+        self.assertIn(self.game_id, self.casino.games)  # left in place; next failed tick retries
+        self._fail_ticks(1, exc=KeyError("boom"))
+        self.assertEqual(self.casino._stop_game.call_count, 2)
 
 
 class TestCasinoErrorHandling(unittest.TestCase):

@@ -122,6 +122,7 @@ class Casino:
         self.npc_max = DEFAULT_NPC_AUTOFILL_MAX
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
         self._tick_errors = {}  # game_id -> consecutive failed ticks (#257)
+        self._quarantined = set()  # game_ids that failed and couldn't be stopped; never ticked (#259)
         self._last_wallet_replenish = 0
         self._last_llm_healthcheck = 0
         self._llm_health = {}  # provider -> {status, last_success_at, last_failure_at, last_error}
@@ -942,6 +943,7 @@ class Casino:
         self._dirty_games.discard(game_id)  # no point writing then deleting
         self._last_autofill.pop(game_id, None)
         self._tick_errors.pop(game_id, None)
+        self._quarantined.discard(game_id)
 
         game = self.games.get(game_id)
         if game is not None:
@@ -1420,6 +1422,17 @@ class Casino:
             {'game_id': game_id, 'event_type': 'game_over'}
         )
 
+    def _stop_failed_game(self, game_id):
+        """Stop a game that can't be ticked. If even that fails the game's state
+        can't be trusted, so quarantine it: it stays in ``self.games`` (visible
+        to /debug) but is never ticked again."""
+        try:
+            self._stop_game(game_id, headline="The table hit a snag and can't go on")
+        except Exception:
+            logging.exception(f"[{game_id}] Failed to stop failed game; quarantining it")
+            if game_id in self.games:
+                self._quarantined.add(game_id)
+
     def _process_message(self, data):
         game_id = data.get('game_id')
 
@@ -1531,25 +1544,28 @@ class Casino:
         self._check_llm_health()
 
         for game_id, game in list(self.games.items()):
+            if game_id in self._quarantined:
+                continue
             try:
                 game.tick()
-            except Exception as e:
-                # CardGameError is the expected failure; anything else is a bug
-                # in one game, which must not escape and take every table down (#259).
+            except CardGameError as e:
                 failures = self._tick_errors.get(game_id, 0) + 1
                 self._tick_errors[game_id] = failures
                 logging.error(
                     f"[{game_id}] Error ticking game ({failures}/{self.MAX_CONSECUTIVE_TICK_ERRORS}), "
-                    f"skipping this cycle: {e}",
-                    exc_info=not isinstance(e, CardGameError),
+                    f"skipping this cycle: {e}"
                 )
                 if failures >= self.MAX_CONSECUTIVE_TICK_ERRORS:
                     logging.error(f"[{game_id}] Game is stuck; stopping it and returning bets")
-                    try:
-                        self._stop_game(game_id, headline="The table hit a snag and can't go on")
-                    except Exception:
-                        # Leave the game in place; the next failed tick retries the stop.
-                        logging.exception(f"[{game_id}] Failed to stop stuck game")
+                    self._stop_failed_game(game_id)
+                continue
+            except Exception:
+                # Anything but CardGameError is a bug that may have left the game
+                # half-updated, so retrying the tick could repeat side effects. Stop
+                # it now rather than retry, and keep it from taking every table
+                # down with it (#259).
+                logging.exception(f"[{game_id}] Unexpected error ticking game; stopping it and returning bets")
+                self._stop_failed_game(game_id)
                 continue
             self._tick_errors.pop(game_id, None)
 

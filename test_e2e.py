@@ -22,6 +22,7 @@ import requests
 
 from cardgames import database as database_module
 from cardgames.blackjack import Blackjack
+import watch_ambient_cost
 
 # Configure logging
 logging.basicConfig(
@@ -1728,6 +1729,100 @@ class TestMetricsEndpoint(EndToEndTestCase):
         self.assertIn('saloonbot_llm_output_tokens_total', body)
         self.assertIn('provider="fake"', body)
         self.assertIn('saloonbot_llm_provider_up{provider="fake"} 1.0', body)
+
+
+class TestAmbientCostWatchdogE2E(EndToEndTestCase):
+    """E2E: watch_ambient_cost.py tears down a real ambient table over Redis.
+
+    The fake provider's model isn't in llm_cost_report.PRICING, so the first NPC
+    call trips the watchdog's "unpriced usage" abort. That exercises the real
+    teardown path (npc_limits acknowledged, then stop_game) without any spend.
+    """
+
+    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+    METRICS_PORT = 9400
+
+    def _clear_settings(self):
+        # The abort sets autofill limits to 0/0, which persist in `settings` and would
+        # be loaded by later classes' servers.
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM settings")
+        self.db.commit()
+        cursor.close()
+
+    def setUp(self):
+        super().setUp()
+        self._clear_settings()
+        self.game_id = None
+        self.watchdog = None
+        fd, self.watchdog_log_path = tempfile.mkstemp(suffix='.log', prefix='saloonbot_watchdog_')
+        self.watchdog_log = os.fdopen(fd, 'w')
+
+    def tearDown(self):
+        if self.watchdog and self.watchdog.poll() is None:
+            self.watchdog.kill()
+            self.watchdog.wait(timeout=5)
+        self.watchdog_log.close()
+        if self.game_id:
+            self._stop_game(self.game_id)
+        self._clear_settings()
+        super().tearDown()
+
+    def _watchdog_output(self):
+        with open(self.watchdog_log_path) as f:
+            return f.read()
+
+    def _wait_for_watchdog_output(self, text, timeout=15):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if text in self._watchdog_output():
+                return True
+            time.sleep(0.2)
+        return False
+
+    def test_watchdog_stops_the_table_when_usage_cannot_be_priced(self):
+        game_id = self.create_game()  # empty table: no LLM calls yet, so a clean baseline
+        self.game_id = game_id
+        game_pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.watchdog = subprocess.Popen(
+                ['python', 'watch_ambient_cost.py', '--game-id', game_id, '--interval', '1',
+                 '--metrics-url', f'http://localhost:{self.METRICS_PORT}/metrics'],
+                stdout=self.watchdog_log, stderr=subprocess.STDOUT,
+            )
+            self.assertTrue(self._wait_for_watchdog_output('Baseline recorded'),
+                            f"Watchdog never recorded a baseline:\n{self._watchdog_output()}")
+
+            # An NPC at the table starts making (fake, unpriced) LLM calls.
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'npc_action', 'action': 'add_npc', 'game_id': game_id, 'count': 1,
+            }))
+
+            game_over = False
+            deadline = time.time() + 30
+            while time.time() < deadline and not game_over:
+                msg = game_pubsub.get_message(timeout=0.5)
+                if msg and msg['type'] == 'message':
+                    game_over = json.loads(msg['data']).get('event_type') == 'game_over'
+            self.assertTrue(game_over, f"Watchdog should have stopped the game:\n{self._watchdog_output()}")
+            self.game_id = None  # already stopped
+
+            exit_code = self.watchdog.wait(timeout=10)
+            output = self._watchdog_output()
+            self.assertEqual(exit_code, watch_ambient_cost.EXIT_ABORTED, output)
+            self.assertIn('no pricing on file', output)
+        finally:
+            game_pubsub.close()
+
+    def test_watchdog_refuses_to_watch_when_redis_is_unreachable(self):
+        """Without Redis an abort would be impossible, so it exits instead of watching blind."""
+        result = subprocess.run(
+            ['python', 'watch_ambient_cost.py', '--game-id', 'nowhere', '--redis-port', '1',
+             '--metrics-url', f'http://localhost:{self.METRICS_PORT}/metrics'],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, watch_ambient_cost.EXIT_CANNOT_WATCH, result.stderr)
+        self.assertIn("abort would be impossible", result.stderr)
 
 
 class TestNPCDepartureE2E(EndToEndTestCase):

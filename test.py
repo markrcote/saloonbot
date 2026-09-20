@@ -26,6 +26,7 @@ from cardgames.player import Player
 from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
 
+import watch_ambient_cost
 from llm_cost_report import compute_costs, extrapolate, format_report
 from wwnames.wwnames import WildWestNames
 
@@ -4151,6 +4152,206 @@ class TestLLMCostReport(unittest.TestCase):
         report = format_report(rows, days=1)
         self.assertIn("Total cost this window: $1.0000", report)
         self.assertIn("per week:  $7.00", report)
+
+
+MINI = ('openai', 'gpt-4o-mini')  # priced at $0.15/M input, $0.60/M output; 10M input tokens = $1.50
+
+
+class TestWatchdogReadTokenTotals(unittest.TestCase):
+    METRICS_TEXT = (
+        '# HELP saloonbot_llm_input_tokens_total Total LLM input tokens\n'
+        '# TYPE saloonbot_llm_input_tokens_total counter\n'
+        'saloonbot_llm_input_tokens_total{model="gpt-4o-mini",provider="openai",purpose="npc_bet"} 1000.0\n'
+        'saloonbot_llm_input_tokens_total{model="gpt-4o-mini",provider="openai",purpose="npc_action"} 500.0\n'
+        '# HELP saloonbot_llm_input_tokens_created Total LLM input tokens\n'
+        '# TYPE saloonbot_llm_input_tokens_created gauge\n'
+        'saloonbot_llm_input_tokens_created{model="gpt-4o-mini",provider="openai",purpose="npc_bet"} 1.78e+09\n'
+        '# HELP saloonbot_llm_output_tokens_total Total LLM output tokens\n'
+        '# TYPE saloonbot_llm_output_tokens_total counter\n'
+        'saloonbot_llm_output_tokens_total{model="gpt-4o-mini",provider="openai",purpose="npc_bet"} 30.0\n'
+        'saloonbot_llm_output_tokens_total{model="claude-haiku-4-5",provider="claude",purpose="npc_bet"} 7.0\n'
+    )
+
+    def test_sums_over_purpose_per_provider_and_model(self):
+        with patch.object(watch_ambient_cost, '_fetch_text', return_value=self.METRICS_TEXT):
+            totals = watch_ambient_cost.read_token_totals('http://x/metrics')
+        self.assertEqual(totals[MINI], (1500.0, 30.0))
+        self.assertEqual(totals[('claude', 'claude-haiku-4-5')], (0.0, 7.0))
+        self.assertEqual(len(totals), 2)  # the *_created gauges are ignored
+
+    def test_fetch_failure_raises_metrics_error(self):
+        import urllib.error
+        with patch('watch_ambient_cost.urllib.request.urlopen', side_effect=urllib.error.URLError('down')):
+            with self.assertRaises(watch_ambient_cost.MetricsError):
+                watch_ambient_cost.read_token_totals('http://x/metrics')
+
+
+class TestWatchdogSpendTracker(unittest.TestCase):
+    def test_baseline_is_not_counted(self):
+        tracker = watch_ambient_cost.SpendTracker()
+        tracker.update({MINI: (5_000_000, 100_000)})
+        self.assertEqual(tracker.rows(), [])
+
+    def test_growth_accumulates_across_polls(self):
+        tracker = watch_ambient_cost.SpendTracker()
+        tracker.update({MINI: (1000, 10)})
+        tracker.update({MINI: (1500, 30)})
+        tracker.update({MINI: (2500, 40)})
+        self.assertEqual(tracker.rows(), [
+            {'provider': 'openai', 'model': 'gpt-4o-mini', 'total_input': 1500, 'total_output': 30}])
+
+    def test_counter_reset_after_server_restart_counts_new_value(self):
+        tracker = watch_ambient_cost.SpendTracker()
+        tracker.update({MINI: (1000, 10)})
+        tracker.update({MINI: (1400, 20)})  # +400 in, +10 out
+        tracker.update({MINI: (300, 5)})    # restarted: 300 in / 5 out are all new
+        tracker.update({MINI: (500, 8)})    # +200 in, +3 out
+        row, = tracker.rows()
+        self.assertEqual((row['total_input'], row['total_output']), (400 + 300 + 200, 10 + 5 + 3))
+
+    def test_series_first_seen_after_baseline_counts_in_full(self):
+        tracker = watch_ambient_cost.SpendTracker()
+        tracker.update({})
+        tracker.update({MINI: (700, 20)})
+        row, = tracker.rows()
+        self.assertEqual((row['total_input'], row['total_output']), (700, 20))
+
+
+class TestWatchdogEvaluate(unittest.TestCase):
+    def _evaluate(self, cost=0.0, unpriced=(), hours=1.0, expected_hourly=None):
+        return watch_ambient_cost.evaluate(
+            cost, list(unpriced), hours, warn_at=0.50, cap=1.50, max_hours=12, expected_hourly=expected_hourly)[0]
+
+    def test_ok_below_warning(self):
+        self.assertEqual(self._evaluate(cost=0.10), 'ok')
+
+    def test_warns_at_warning_level(self):
+        self.assertEqual(self._evaluate(cost=0.50), 'warn')
+
+    def test_aborts_at_cap(self):
+        self.assertEqual(self._evaluate(cost=1.50), 'abort')
+
+    def test_aborts_on_unpriced_model_even_with_no_cost(self):
+        self.assertEqual(self._evaluate(cost=0.0, unpriced=[('fake', 'fake')]), 'abort')
+
+    def test_done_at_time_limit(self):
+        self.assertEqual(self._evaluate(cost=0.10, hours=12), 'done')
+
+    def test_cap_takes_precedence_over_time_limit(self):
+        self.assertEqual(self._evaluate(cost=2.00, hours=12), 'abort')
+
+    def test_rate_warning_once_past_the_startup_window(self):
+        self.assertEqual(self._evaluate(cost=0.20, hours=1.0, expected_hourly=0.05), 'warn')
+
+    def test_no_rate_warning_during_startup_burst(self):
+        self.assertEqual(self._evaluate(cost=0.20, hours=0.1, expected_hourly=0.05), 'ok')
+
+    def test_no_rate_warning_without_an_expected_rate(self):
+        self.assertEqual(self._evaluate(cost=0.20, hours=1.0), 'ok')
+
+    def test_rate_within_three_times_expected_is_ok(self):
+        self.assertEqual(self._evaluate(cost=0.14, hours=1.0, expected_hourly=0.05), 'ok')
+
+
+class _FakeTime:
+    """Deterministic clock: sleeping just advances time."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class TestWatchdogLoop(unittest.TestCase):
+    def _watch(self, readings, stop_result=True, **overrides):
+        """Run watch() feeding `readings` (totals dicts or exceptions) one per poll."""
+        feed = iter(readings)
+
+        def read_totals():
+            item = next(feed)  # StopIteration here means the loop failed to stop when it should have
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        fake = _FakeTime()
+        stop_table = MagicMock(return_value=stop_result)
+        kwargs = dict(warn_at=0.50, cap=1.50, max_hours=1, interval=300, unreachable_limit=3)
+        kwargs.update(overrides)
+        code = watch_ambient_cost.watch(read_totals, stop_table, clock=fake.clock, sleep=fake.sleep, **kwargs)
+        return code, stop_table
+
+    def test_aborts_and_stops_table_when_cap_reached(self):
+        code, stop_table = self._watch([{MINI: (0, 0)}, {MINI: (2_000_000, 0)}, {MINI: (10_000_000, 0)}])
+        self.assertEqual(code, watch_ambient_cost.EXIT_ABORTED)
+        stop_table.assert_called_once()
+
+    def test_stops_table_and_exits_cleanly_at_time_limit(self):
+        code, stop_table = self._watch(
+            [{MINI: (0, 0)}, {MINI: (1000, 10)}, {MINI: (2000, 20)}], interval=1800, max_hours=1)
+        self.assertEqual(code, watch_ambient_cost.EXIT_OK)
+        stop_table.assert_called_once()
+
+    def test_no_baseline_means_no_watching_and_no_teardown(self):
+        code, stop_table = self._watch([watch_ambient_cost.MetricsError('down')])
+        self.assertEqual(code, watch_ambient_cost.EXIT_CANNOT_WATCH)
+        stop_table.assert_not_called()
+
+    def test_stops_table_when_metrics_stay_unreachable(self):
+        err = watch_ambient_cost.MetricsError('down')
+        code, stop_table = self._watch([{MINI: (0, 0)}, err, err, err])
+        self.assertEqual(code, watch_ambient_cost.EXIT_ABORTED)
+        stop_table.assert_called_once()
+
+    def test_transient_failure_does_not_stop_the_table(self):
+        err = watch_ambient_cost.MetricsError('blip')
+        code, stop_table = self._watch(
+            [{MINI: (0, 0)}, err, {MINI: (1000, 10)}, {MINI: (2000, 20)}], interval=1800, max_hours=1.5)
+        self.assertEqual(code, watch_ambient_cost.EXIT_OK)  # ended by the time limit, not the blip
+        stop_table.assert_called_once()
+
+    def test_aborts_on_usage_from_an_unpriced_model(self):
+        fake_key = ('fake', 'fake')
+        code, stop_table = self._watch([{fake_key: (0, 0)}, {fake_key: (100, 10)}])
+        self.assertEqual(code, watch_ambient_cost.EXIT_ABORTED)
+        stop_table.assert_called_once()
+
+    def test_unconfirmed_teardown_is_reported_as_a_distinct_failure(self):
+        code, stop_table = self._watch(
+            [{MINI: (0, 0)}, {MINI: (10_000_000, 0)}], stop_result=False)
+        self.assertEqual(code, watch_ambient_cost.EXIT_TEARDOWN_FAILED)
+        stop_table.assert_called_once()
+
+    def test_spend_survives_a_server_restart_mid_run(self):
+        # 6M in, then the counter resets to 5M (restart): 6M + 5M = $1.65 real spend, over the cap.
+        code, _ = self._watch([{MINI: (0, 0)}, {MINI: (6_000_000, 0)}, {MINI: (5_000_000, 0)}])
+        self.assertEqual(code, watch_ambient_cost.EXIT_ABORTED)
+
+
+class TestWatchdogAbortTable(unittest.TestCase):
+    def test_clean_teardown_reports_success(self):
+        r, pubsub = MagicMock(), MagicMock()
+        with patch('watch_ambient_cost.teardown') as mock_teardown:
+            self.assertTrue(watch_ambient_cost.abort_table(r, pubsub, 'dusty-saloon'))
+        mock_teardown.assert_called_once_with(r, pubsub, 'dusty-saloon')
+
+    def test_falls_back_to_stop_game_when_limits_are_not_acknowledged(self):
+        r, pubsub = MagicMock(), MagicMock()
+        with patch('watch_ambient_cost.teardown', side_effect=SystemExit('Timed out waiting for npc_limits')), \
+                patch('watch_ambient_cost._publish') as mock_publish:
+            self.assertFalse(watch_ambient_cost.abort_table(r, pubsub, 'dusty-saloon'))
+        mock_publish.assert_called_once_with(
+            r, {'event_type': 'casino_action', 'action': 'stop_game', 'game_id': 'dusty-saloon'})
+
+    def test_survives_redis_failing_during_the_fallback(self):
+        import redis
+        r, pubsub = MagicMock(), MagicMock()
+        with patch('watch_ambient_cost.teardown', side_effect=redis.ConnectionError('gone')), \
+                patch('watch_ambient_cost._publish', side_effect=redis.ConnectionError('still gone')):
+            self.assertFalse(watch_ambient_cost.abort_table(r, pubsub, 'dusty-saloon'))
 
 
 if __name__ == '__main__':

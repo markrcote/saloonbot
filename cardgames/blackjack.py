@@ -333,6 +333,22 @@ class Blackjack(CardGame):
                 self.output(f"🪑 {_player_label(player)} pulls up a chair. They'll join the next hand.")
             self.players_waiting.append(player)
             logging.info(f"[{self.game_id}] {_player_label(player)} joins (next hand)")
+            if not getattr(player, 'is_npc', False):
+                self._hurry_between_hands_for_human()
+
+    def _human_waiting(self):
+        return any(not getattr(p, 'is_npc', False) for p in self.players_waiting)
+
+    def _hurry_between_hands_for_human(self):
+        """A human sitting down between hands shouldn't wait out an ambient table's long
+        (up to 5 minute) gap: deal at most TIME_BETWEEN_HANDS from now (#268). A table that
+        already had a human is on the normal gap, so this never shortens it."""
+        if self.state != HandState.BETWEEN_HANDS or self.time_last_hand_ended is None:
+            return
+        capped = time.time() - self.time_last_hand_ended + self.TIME_BETWEEN_HANDS
+        if capped < self.time_between_hands_duration:
+            self.time_between_hands_duration = capped
+            self.output(f"🕐 Fresh blood at the table — next hand deals in {self.TIME_BETWEEN_HANDS} seconds.")
 
     def leave(self, player, reason=None):
         if player not in self.players:
@@ -593,7 +609,9 @@ class Blackjack(CardGame):
         self.state = HandState.BETWEEN_HANDS
         self.time_last_hand_ended = time.time()
         metrics.record_hand(ambient)
-        if ambient:
+        # A human who joined mid-hand sits in players_waiting, so the hand just played was
+        # ambient, but they shouldn't have to wait out the slow ambient gap (#268).
+        if ambient and not self._human_waiting():
             self.time_between_hands_duration = random.uniform(
                 self.AMBIENT_TIME_BETWEEN_HANDS_MIN, self.AMBIENT_TIME_BETWEEN_HANDS_MAX
             )

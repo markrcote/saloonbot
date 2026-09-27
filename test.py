@@ -479,6 +479,43 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.game.end_hand()
         self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
 
+    def test_end_hand_ambient_with_human_waiting_uses_fixed_duration(self):
+        """A human who joined mid-hand (players_waiting) gets the normal gap, not the ambient one (#268)."""
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        npc = SimpleBlackjackNPC("Bot1")
+        self.game.players.append(npc)
+        self.game.new_hand()
+        self.game.bets[npc.name] = self.game.MIN_BET
+        self.game.players_waiting.append(Player("Latecomer"))
+        self.game.stand(npc)
+        self.game.dealer_turn()
+        self.game.end_hand()
+        self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
+
+    def _mid_ambient_wait(self, elapsed, duration):
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.game.state = HandState.BETWEEN_HANDS
+        self.game.time_last_hand_ended = time.time() - elapsed
+        self.game.time_between_hands_duration = duration
+
+    def test_human_join_between_hands_caps_ambient_wait(self):
+        self._mid_ambient_wait(elapsed=30, duration=250)
+        self.game.join(Player("Latecomer"))
+        self.assertAlmostEqual(self.game.time_between_hands_duration,
+                               30 + self.game.TIME_BETWEEN_HANDS, delta=1)
+        self.assertTrue(self.game._dirty)
+
+    def test_npc_join_between_hands_keeps_ambient_wait(self):
+        self._mid_ambient_wait(elapsed=30, duration=250)
+        self.game.join(SimpleBlackjackNPC("Bot2"))
+        self.assertEqual(self.game.time_between_hands_duration, 250)
+
+    def test_human_join_never_lengthens_wait(self):
+        self._mid_ambient_wait(elapsed=1, duration=self.game.TIME_BETWEEN_HANDS)
+        self.game.join(Player("Latecomer"))
+        self.assertEqual(self.game.time_between_hands_duration, self.game.TIME_BETWEEN_HANDS)
+
     @staticmethod
     def _hands_counted(ambient):
         from cardgames import metrics

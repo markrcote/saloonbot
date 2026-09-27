@@ -90,6 +90,13 @@ def tearDownModule():
     logging.info("Cleanup complete")
 
 
+# num_bots NPCs are seated when a game is created, so an NPC-only table would
+# start betting on its first tick. Classes that seat a human alongside them use
+# this join window so the human sits down first (seat order NPC, then human —
+# the injected decks rely on it).
+NPC_JOIN_WINDOW_ENV = {'BLACKJACK_TIME_WAIT_FOR_PLAYERS': '2'}
+
+
 class EndToEndTestCase(unittest.TestCase):
     """Base test case that manages the server process."""
 
@@ -1093,9 +1100,22 @@ class TestMultiplePlayers(EndToEndTestCase):
 class TestNPCBots(EndToEndTestCase):
     """Test games with NPC bot players."""
 
+    EXTRA_ENV = NPC_JOIN_WINDOW_ENV
+
+    def test_bots_only_game_plays_without_a_human(self):
+        """A new game with num_bots and no human deals and settles a hand on its own."""
+        game_id = self.create_game(num_bots=2)
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            messages = self.collect_messages(pubsub, timeout=15, stop_on='dust settles')
+            self.assertTrue(any('dust settles' in m for m in messages),
+                            f"Bots-only table should play a hand. Messages: {messages}")
+        finally:
+            pubsub.close()
+
     def test_npc_bot_plays_without_human_intervention(self):
         """NPC bot takes its turn automatically so the hand resolves without prompting it."""
-        # NPC is added before the human when the human joins, so NPC goes first
+        # NPC is seated at game creation, before the human, so NPC goes first
         game_id = self.create_game(num_bots=1)
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1552,7 +1572,7 @@ class TestNPCWalletReplenishment(EndToEndTestCase):
 class TestNPCSessionMemory(EndToEndTestCase):
     """E2E tests for M6 NPC session memories, using the fake LLM provider."""
 
-    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+    EXTRA_ENV = {**NPC_JOIN_WINDOW_ENV, 'LLM_PROVIDER': 'fake'}
 
     # Two players (NPC seated first, then human). Cards pop from the end:
     # dealer H6 + S10 (16, no blackjack, hits D2 → 18), NPC C8 + D10 (18 —
@@ -1666,7 +1686,7 @@ class TestNPCSessionMemory(EndToEndTestCase):
 class TestMetricsEndpoint(EndToEndTestCase):
     """E2E: the Prometheus /metrics endpoint exposes LLM usage and health series."""
 
-    EXTRA_ENV = {'LLM_PROVIDER': 'fake'}
+    EXTRA_ENV = {**NPC_JOIN_WINDOW_ENV, 'LLM_PROVIDER': 'fake'}
     METRICS_PORT = 9400
 
     # Same shape as TestNPCSessionMemory.MEMORY_DECK: NPC stands at 18, human at 16.
@@ -1830,6 +1850,7 @@ class TestNPCDepartureE2E(EndToEndTestCase):
     night after the hand and its session is condensed without any remove_npc."""
 
     EXTRA_ENV = {
+        **NPC_JOIN_WINDOW_ENV,
         'LLM_PROVIDER': 'fake',
         'BLACKJACK_NPC_DEPARTURE_BASE': '1.0',
         'BLACKJACK_NPC_DEPARTURE_RAMP': '0',
@@ -1903,17 +1924,13 @@ class TestNPCRelationships(EndToEndTestCase):
         super().tearDown()
 
     def _seat_npcs(self, num_bots):
-        """Create a game with pending bots and a human whose join spawns them."""
+        """Create a game whose num_bots NPCs are seated at creation, no human needed."""
         game_id = self.create_game(num_bots=num_bots)
         self.game_id = game_id
-        pubsub = self.subscribe_to_game(game_id)
-        try:
-            self.join_player(game_id, 'RelHuman')
-            msgs = self.collect_messages(pubsub, timeout=10, stop_on='New arrivals')
-            self.assertTrue(any('New arrivals' in m for m in msgs),
-                            f"Expected NPC arrivals. Messages: {msgs}")
-        finally:
-            pubsub.close()
+        row = self.poll_db(
+            "SELECT COUNT(*) FROM npcs WHERE current_game_id = %s", (game_id,),
+            predicate=lambda r: r[0] == num_bots, timeout=10)
+        self.assertIsNotNone(row, f"Expected {num_bots} NPCs seated at game creation")
         return game_id
 
     def _seed_relationship(self, rel_type, strength, notes):

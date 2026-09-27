@@ -21,7 +21,7 @@ All gameplay actions have slash commands. As a convenience, `join`, `leave`, `be
 Slash commands:
 
 * `/help` — show all available commands.
-* `/newgame [num_bots]` *(admin)* — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Each game gets a memorable Old West ID like `dusty-saloon` (shown when the game is created and in `/debug`) instead of a raw UUID.
+* `/newgame [num_bots]` *(admin)* — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. They sit down as soon as the game is created, so a game with bots and no humans starts playing on its own at the slower ambient pace; anyone who `/join`s within the first few seconds is dealt into the first hand. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Each game gets a memorable Old West ID like `dusty-saloon` (shown when the game is created and in `/debug`) instead of a raw UUID.
 * `/joingame` — sit down at the table.
 * `/leavegame` — leave the current game.
 * `/bet <amount>` — place a bet during the betting phase.

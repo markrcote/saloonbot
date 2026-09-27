@@ -112,7 +112,6 @@ class Casino:
         self.games = {}
         self.redis = redis.Redis(host=redis_host, port=redis_port)
         self.db = db
-        self._pending_bots = {}  # game_id -> num_bots to add on first human join
         self._dirty_games = set()  # game_ids pending a DB write
         self._llm_client = None
         self._llm_client_tried = False
@@ -987,9 +986,6 @@ class Casino:
         )
         logging.info(f"New game {game_id} created (bots: {num_bots})")
 
-        if num_bots > 0:
-            self._pending_bots[game_id] = num_bots
-
         # Save game and channel info to database
         self._save_game(game_id)
         if guild_id is not None and channel_id is not None and self.db is not None:
@@ -997,6 +993,11 @@ class Casino:
                 self.db.save_game_channel(game_id, guild_id, channel_id)
             except Exception as e:
                 logging.error(f"Error saving game channel {game_id}: {e}")
+
+        # Seat bots now rather than waiting for a human: an NPC-only table plays
+        # on as an ambient table, same as one whose humans have all left.
+        if num_bots > 0:
+            self.add_npc(game_id, num_bots)
 
         return game_id
 
@@ -1071,15 +1072,6 @@ class Casino:
                 game.output(f"🎭 New arrivals: {', '.join(arrivals)}. They're in for this round!")
             else:
                 game.output(f"🎭 New arrivals: {', '.join(arrivals)}. They'll join the next hand.")
-
-    def _add_pending_bots(self, game_id):
-        """Add any pending bots to the game when the first human player joins."""
-        num_bots = self._pending_bots.pop(game_id, 0)
-        if num_bots <= 0:
-            return
-        if game_id not in self.games:
-            return
-        self._spawn_npcs_into_game(game_id, num_bots)
 
     def _autofill_npcs(self, game_id, game):
         """Fill or trim NPCs in a game to stay within npc_min/npc_max.
@@ -1285,7 +1277,6 @@ class Casino:
                 'game_id': game_id,
                 'state': game.state.value,
                 'current_player_idx': game.current_player_idx,
-                'pending_bots': self._pending_bots.get(game_id, 0),
                 'dirty': game_id in self._dirty_games,
                 'deck_remaining': len(game.deck),
                 'discards': len(game.discards),
@@ -1511,8 +1502,6 @@ class Casino:
                     logging.info(f"Stopping game {game_id} by admin request — returning unresolved bets")
                     self._stop_game(game_id)
                     return
-                if data['event_type'] == 'player_action' and data.get('action') == 'join':
-                    self._add_pending_bots(game_id)
                 if data['event_type'] == 'npc_action':
                     action = data['action']
                     if action == 'add_npc':

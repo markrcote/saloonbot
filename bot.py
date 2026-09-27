@@ -410,8 +410,6 @@ class BlackjackCog(commands.Cog):
                 f"Current player idx: {g['current_player_idx']}",
                 f"Dealer: {' '.join(g['dealer_hand']) or '—'}",
             ]
-            if g.get('pending_bots'):
-                desc_lines.append(f"Pending bots to add: {g['pending_bots']}")
             for p in g['players']:
                 npc_tag = f" ({p['npc_type']}/{p['personality']})" if p['is_npc'] else ""
                 hand_str = ' '.join(p['hand']) if p['hand'] else '—'

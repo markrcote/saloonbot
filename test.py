@@ -2732,8 +2732,21 @@ class TestNPCPersistence(unittest.TestCase):
         casino.get_wallet(npc)
         mock_db.get_user_wallet.assert_called_with("EphemeralBot")
 
-    def test_add_pending_bots_uses_db_roster(self):
-        """_add_pending_bots should pull from DB roster and set current_game_id."""
+    @staticmethod
+    def _roster_db(n):
+        """A mock DB whose roster holds n NPCs. get_available_npcs must return a
+        real list: a bare MagicMock has len() 0 forever, so _get_or_create_npcs
+        would loop without end."""
+        mock_db = MagicMock()
+        mock_db.get_available_npcs.return_value = [
+            {'id': i, 'name': f'Npc{i}', 'personality_name': 'The Card Sharp',
+             'backstory': '', 'wallet_cents': 40000}
+            for i in range(1, n + 1)
+        ]
+        return mock_db
+
+    def test_new_game_seats_bots_from_db_roster(self):
+        """new_game(num_bots=N) seats roster NPCs immediately, no human needed."""
         from cardgames.casino import Casino
         mock_db = MagicMock()
         mock_db.get_available_npcs.return_value = [
@@ -2745,15 +2758,32 @@ class TestNPCPersistence(unittest.TestCase):
         casino.redis = MagicMock()
         game_id = casino.new_game(num_bots=1)
         game = casino.games[game_id]
-        game.join(Player("Human"))
-        # Trigger bot seating
-        casino._add_pending_bots(game_id)
-        # NPC should be in the game
         all_players = game.players + game.players_waiting
-        npc_names = [p.name for p in all_players if p.is_npc]
-        self.assertIn("Clem", npc_names)
-        # current_game_id should have been set
+        self.assertEqual([p.name for p in all_players], ["Clem"])
         mock_db.set_npc_game.assert_called_with(5, game_id)
+        self.assertIn(game_id, casino._dirty_games)
+
+    def test_new_game_bots_only_table_starts_ambient(self):
+        """A bots-only new game starts a hand on its own and plays as ambient."""
+        from cardgames.casino import Casino
+        casino = Casino(redis_host="localhost", redis_port=6379, db=self._roster_db(2))
+        casino.redis = MagicMock()
+        with patch.object(Blackjack, 'TIME_WAIT_FOR_PLAYERS', 0):
+            game_id = casino.new_game(num_bots=2)
+            game = casino.games[game_id]
+            game.tick()
+        self.assertEqual(game.state, HandState.BETTING)
+        self.assertEqual(len(game.players), 2)
+        self.assertTrue(game._is_ambient())
+
+    def test_new_game_num_bots_respects_table_cap(self):
+        from cardgames.casino import Casino, MAX_NPCS_PER_TABLE
+        casino = Casino(redis_host="localhost", redis_port=6379,
+                        db=self._roster_db(MAX_NPCS_PER_TABLE + 3))
+        casino.redis = MagicMock()
+        game_id = casino.new_game(num_bots=MAX_NPCS_PER_TABLE + 3)
+        game = casino.games[game_id]
+        self.assertEqual(len(game.players) + len(game.players_waiting), MAX_NPCS_PER_TABLE)
 
     def test_delete_game_clears_npc_game(self):
         """_delete_game() should clear current_game_id for all NPCs in the game."""

@@ -8,6 +8,7 @@ Notable changes to SaloonBot, for players and server admins. Dates are when each
 - A table of only bots plays on its own at a slower, background pace, and picks back up where it left off after a server restart.
 - Joining a bots-only table between hands no longer means waiting out its slow pace: the next hand deals within the usual 10 seconds.
 - Admins: a game's own NPC limits override the server-wide `/npclimits`, so a server-wide 0/0 no longer clears the bots out of a `/newgame` table.
+- If the server hits an unexpected error handling a command, it now says so instead of leaving the command "thinking" forever, and the error no longer brings down every table at once.
 
 ## 2026-09-19 — Memorable game names
 

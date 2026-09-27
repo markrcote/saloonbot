@@ -1103,6 +1103,8 @@ class BlackjackCog(commands.Cog):
                 interaction = self._pending_npcrel_interactions.pop(request_id, None)
                 if interaction:
                     await self._handle_npc_relationships_response(interaction, data)
+            elif data.get("event_type") == "request_failed":
+                await self._handle_request_failed(data)
         else:
             for game in self.games:
                 if game.topic() == topic:
@@ -1208,6 +1210,36 @@ class BlackjackCog(commands.Cog):
 
     def find_game_by_interaction(self, interaction):
         return self.find_game(interaction.guild_id, interaction.channel_id)
+
+    async def _handle_request_failed(self, data):
+        """The server hit an unexpected error serving a request (#261): release
+        whatever was waiting on it so the user isn't left on "thinking…"."""
+        request_id = data.get("request_id")
+        logging.warning(f"Server failed request {request_id} ({data.get('action')}): {data.get('message')}")
+
+        game = self.find_game_by_request_id(request_id)
+        if game and game.state == GameState.WAITING:
+            # Drop the placeholder, or the channel would look busy forever.
+            self.games.remove(game)
+            await game.channel.send("⚠️ Couldn't start a game — the server hit an error. Try again.")
+            return
+
+        for pending in (
+            self._pending_usage_interactions,
+            self._pending_stats_interactions,
+            self._pending_debug_interactions,
+            self._pending_wallet_interactions,
+            self._pending_checkwallet_interactions,
+            self._pending_setwallet_interactions,
+            self._pending_npclimits_interactions,
+            self._pending_npcrel_interactions,
+        ):
+            interaction = pending.pop(request_id, None)
+            if interaction:
+                await interaction.followup.send(
+                    "⚠️ The server hit an error handling that request. Try again later.", ephemeral=True
+                )
+                return
 
     def find_game_by_request_id(self, request_id):
         for game in self.games:

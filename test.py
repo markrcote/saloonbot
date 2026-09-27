@@ -8,6 +8,8 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import ANY, MagicMock, patch
 
+import redis
+
 from changelog import parse_changelog, select_recent_entries, ChangelogEntry
 from cardgames.blackjack import (
     Action, Blackjack, HandState, InvalidActionError, InvalidBetError,
@@ -17,7 +19,7 @@ from cardgames.blackjack import (
 from cardgames.npc_player import NPCPlayer
 from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.casino import (
-    NPC_TYPES, Casino,
+    AUTOFILL_ERROR_LOG_INTERVAL, NPC_TYPES, Casino,
     DEFAULT_NPC_AUTOFILL_MIN, DEFAULT_NPC_AUTOFILL_MAX, MAX_NPCS_PER_TABLE,
     normalize_npc_limits,
 )
@@ -1766,6 +1768,181 @@ class TestCasinoStuckGameRecovery(unittest.TestCase):
         self.casino._quarantined.add(self.game_id)
         self.casino._delete_game(self.game_id)
         self.assertNotIn(self.game_id, self.casino._quarantined)
+
+
+class TestCasinoAutofillFailure(unittest.TestCase):
+    """#261: an NPC autofill failure is logged and retried, never escapes the loop."""
+
+    def setUp(self):
+        self.casino = Casino(redis_host="localhost", redis_port=6379)
+        self.casino.redis = MagicMock()
+        self.casino.db = MagicMock()
+        self.casino._replenish_npc_wallets = MagicMock()
+        self.casino._check_llm_health = MagicMock()
+        self.game_id = self.casino.new_game()
+        self.game = self.casino.games[self.game_id]
+        self.game.tick = MagicMock()
+
+    def test_failure_does_not_escape_or_stop_the_game(self):
+        self.casino._autofill_npcs = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._tick_games()  # would raise if uncaught
+        self.casino._tick_games()
+        self.assertIn(self.game_id, self.casino.games)
+        self.assertNotIn(self.game_id, self.casino._quarantined)
+        self.assertEqual(self.game.tick.call_count, 2)
+
+    def test_other_games_keep_ticking(self):
+        other_id = self.casino.new_game()
+        other = self.casino.games[other_id]
+        other.tick = MagicMock()
+        self.casino._autofill_npcs = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._tick_games()
+        self.assertEqual(other.tick.call_count, 1)
+        self.assertEqual(self.casino._autofill_npcs.call_count, 2)  # tried for both games
+
+    def test_failed_autofill_is_retried_after_the_interval_not_every_tick(self):
+        """The throttle is stamped before any work, so a failure isn't retried on the next loop pass."""
+        self.game.npc_min, self.game.npc_max = 1, 3
+        self.casino._spawn_npcs_into_game = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._tick_games()
+        self.casino._tick_games()
+        self.assertEqual(self.casino._spawn_npcs_into_game.call_count, 1)
+        self.casino._last_autofill[self.game_id] = 0  # interval elapsed
+        self.casino._tick_games()
+        self.assertEqual(self.casino._spawn_npcs_into_game.call_count, 2)
+
+    def test_traceback_is_logged_at_most_once_per_interval(self):
+        self.casino._autofill_npcs = MagicMock(side_effect=RuntimeError("roster gone"))
+        with patch('cardgames.casino.time.time', return_value=1000.0):
+            with self.assertLogs(level="ERROR") as logs:
+                self.casino._tick_games()
+                self.casino._tick_games()
+        self.assertEqual(len([r for r in logs.records if r.exc_info]), 1)
+        with patch('cardgames.casino.time.time', return_value=1000.0 + AUTOFILL_ERROR_LOG_INTERVAL):
+            with self.assertLogs(level="ERROR") as logs:
+                self.casino._tick_games()
+        self.assertEqual(len([r for r in logs.records if r.exc_info]), 1)
+
+    def test_redis_connection_error_still_propagates(self):
+        """listen() reconnects on ConnectionError, so it must not be swallowed."""
+        self.casino._autofill_npcs = MagicMock(side_effect=redis.exceptions.ConnectionError("down"))
+        with self.assertRaises(redis.exceptions.ConnectionError):
+            self.casino._tick_games()
+
+    def test_deleting_the_game_forgets_its_logged_failure(self):
+        self.casino._autofill_npcs = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._tick_games()
+        self.assertIn(self.game_id, self.casino._autofill_error_logged)
+        self.casino._delete_game(self.game_id)
+        self.assertNotIn(self.game_id, self.casino._autofill_error_logged)
+
+
+class TestCasinoMessageFailure(unittest.TestCase):
+    """#261: an unexpected error handling a Redis message never escapes the loop."""
+
+    def setUp(self):
+        self.casino = Casino(redis_host="localhost", redis_port=6379)
+        self.casino.redis = MagicMock()
+        self.casino.db = MagicMock()
+        self.casino.update_wallet = MagicMock()
+        self.game_id = self.casino.new_game()
+        self.game = self.casino.games[self.game_id]
+
+    def _published(self):
+        return [json.loads(call.args[1]) for call in self.casino.redis.publish.call_args_list]
+
+    def test_admin_request_failure_replies_request_failed(self):
+        self.casino._handle_get_stats = MagicMock(side_effect=RuntimeError("db gone"))
+        self.casino._process_message({
+            'event_type': 'casino_action', 'action': 'get_stats',
+            'request_id': 'req-1', 'player': 'Alice',
+        })  # would raise if uncaught
+        failures = [p for p in self._published() if p.get('event_type') == 'request_failed']
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]['request_id'], 'req-1')
+        self.assertEqual(failures[0]['action'], 'get_stats')
+
+    def test_admin_request_failure_is_logged_with_traceback(self):
+        self.casino._handle_get_debug = MagicMock(side_effect=RuntimeError("db gone"))
+        with self.assertLogs(level="ERROR") as logs:
+            self.casino._process_message(
+                {'event_type': 'casino_action', 'action': 'get_debug', 'request_id': 'req-1'}
+            )
+        self.assertTrue(any(record.exc_info for record in logs.records))
+
+    def test_malformed_message_without_request_id_is_dropped_quietly(self):
+        self.casino.redis.publish.reset_mock()
+        with self.assertLogs(level="ERROR"):
+            self.casino._process_message({'event_type': 'casino_action'})  # no 'action': KeyError
+        self.casino.redis.publish.assert_not_called()
+
+    def test_new_game_failure_replies_request_failed(self):
+        self.casino.new_game = MagicMock(side_effect=RuntimeError("db gone"))
+        self.casino._process_message(
+            {'event_type': 'casino_action', 'action': 'new_game', 'request_id': 'req-2'}
+        )
+        events = [p.get('event_type') for p in self._published() if p.get('request_id') == 'req-2']
+        self.assertEqual(events, ['request_failed'])
+
+    def test_npc_seating_failure_at_creation_still_creates_the_game(self):
+        """The game is already saved by then; failing the request would orphan it."""
+        self.casino.add_npc = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._process_message({
+            'event_type': 'casino_action', 'action': 'new_game',
+            'request_id': 'req-3', 'npc_min': 3, 'npc_max': 5,
+        })
+        replies = [p for p in self._published() if p.get('request_id') == 'req-3']
+        self.assertEqual([p['event_type'] for p in replies], ['new_game'])
+        self.assertIn(replies[0]['game_id'], self.casino.games)
+
+    def test_redis_connection_error_still_propagates(self):
+        self.casino._handle_get_debug = MagicMock(side_effect=redis.exceptions.ConnectionError("down"))
+        with self.assertRaises(redis.exceptions.ConnectionError):
+            self.casino._process_message(
+                {'event_type': 'casino_action', 'action': 'get_debug', 'request_id': 'req-1'}
+            )
+        self.game.action = MagicMock(side_effect=redis.exceptions.ConnectionError("down"))
+        with self.assertRaises(redis.exceptions.ConnectionError):
+            self.casino._process_message(
+                {'event_type': 'player_action', 'game_id': self.game_id, 'action': 'hit', 'player': 'A'}
+            )
+        self.assertIn(self.game_id, self.casino.games)
+
+    def test_unexpected_game_action_error_stops_the_game_and_refunds(self):
+        alice = Player("Alice")
+        self.game.players.append(alice)
+        self.game.bets = {"Alice": 2500}
+        self.game.action = MagicMock(side_effect=KeyError("boom"))
+        self.casino._process_message(
+            {'event_type': 'player_action', 'game_id': self.game_id, 'action': 'hit', 'player': 'Alice'}
+        )  # would raise if uncaught
+        self.assertNotIn(self.game_id, self.casino.games)
+        self.casino.update_wallet.assert_called_once_with(alice, 2500)
+        self.assertTrue(any(p.get('event_type') == 'game_over' for p in self._published()))
+
+    def test_unexpected_npc_action_error_stops_the_game(self):
+        self.casino.add_npc = MagicMock(side_effect=RuntimeError("roster gone"))
+        self.casino._process_message(
+            {'event_type': 'npc_action', 'game_id': self.game_id, 'action': 'add_npc'}
+        )
+        self.assertNotIn(self.game_id, self.casino.games)
+
+    def test_card_game_error_still_just_tells_the_player(self):
+        self.game.action = MagicMock(side_effect=CardGameError("nope"))
+        self.casino._process_message(
+            {'event_type': 'player_action', 'game_id': self.game_id, 'action': 'hit', 'player': 'A'}
+        )
+        self.assertIn(self.game_id, self.casino.games)
+
+    def test_failed_stop_game_is_quarantined_not_retried(self):
+        """Re-running a half-finished _stop_game could refund some bets twice."""
+        self.casino._stop_game = MagicMock(side_effect=RuntimeError("db gone"))
+        self.casino._process_message(
+            {'event_type': 'casino_action', 'action': 'stop_game', 'game_id': self.game_id}
+        )
+        self.assertEqual(self.casino._stop_game.call_count, 1)
+        self.assertIn(self.game_id, self.casino.games)
+        self.assertIn(self.game_id, self.casino._quarantined)
 
 
 class TestCasinoErrorHandling(unittest.TestCase):

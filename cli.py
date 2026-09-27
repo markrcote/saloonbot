@@ -146,8 +146,13 @@ class CasinoCli:
                 continue
 
             data = json.loads(message['data'])
-            if data.get('event_type') == 'new_game' and data.get('request_id') == request_id:
+            if data.get('request_id') != request_id:
+                continue
+            if data.get('event_type') == 'new_game':
                 self.game_id = data.get('game_id')
+            elif data.get('event_type') == 'request_failed':
+                logging.error(f"Couldn't create a game: {data.get('message')}")
+                return
 
         logging.info(f"Game created: {self.game_id}")
 

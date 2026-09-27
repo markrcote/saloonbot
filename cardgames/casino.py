@@ -30,6 +30,7 @@ DEFAULT_NPC_AUTOFILL_MIN = 0   # auto-fill off by default
 DEFAULT_NPC_AUTOFILL_MAX = 4
 MAX_NPCS_PER_TABLE = 6         # hard cap regardless of limits
 AUTOFILL_INTERVAL = 15         # seconds between autofill checks per game
+AUTOFILL_ERROR_LOG_INTERVAL = 300  # seconds between logged autofill-failure tracebacks per game (#261)
 
 MAX_MEMORIES_PER_NPC = 20      # npc_memories retention cap, pruned on insert
 SESSION_MEMORY_MIN_EVENTS = 3  # skip condensation for sessions shorter than this
@@ -130,6 +131,7 @@ class Casino:
         self._last_autofill = {}  # game_id -> timestamp of last autofill check
         self._tick_errors = {}  # game_id -> consecutive failed ticks (#257)
         self._quarantined = set()  # game_ids that failed and couldn't be stopped; never ticked (#259)
+        self._autofill_error_logged = {}  # game_id -> time of last logged autofill failure (#261)
         self._last_wallet_replenish = 0
         self._last_llm_healthcheck = 0
         self._llm_health = {}  # provider -> {status, last_success_at, last_failure_at, last_error}
@@ -951,6 +953,7 @@ class Casino:
         self._last_autofill.pop(game_id, None)
         self._tick_errors.pop(game_id, None)
         self._quarantined.discard(game_id)
+        self._autofill_error_logged.pop(game_id, None)
 
         game = self.games.get(game_id)
         if game is not None:
@@ -1011,7 +1014,15 @@ class Casino:
         # Seat NPCs now rather than waiting for a human: an NPC-only table plays
         # on as an ambient table, same as one whose humans have all left.
         if game.npc_min:
-            self.add_npc(game_id, game.npc_min)
+            try:
+                self.add_npc(game_id, game.npc_min)
+            except redis.exceptions.ConnectionError:
+                raise
+            except Exception:
+                # The game already exists (and is saved), so failing the request
+                # would orphan it. It has no bets yet, and autofill tops it up to
+                # npc_min on a later tick (#261).
+                logging.exception(f"[{game_id}] Failed to seat NPCs at creation; autofill will retry")
 
         return game_id
 
@@ -1138,6 +1149,28 @@ class Casino:
 
         if changed:
             self._mark_dirty(game_id)
+
+    def _autofill_npcs_safely(self, game_id, game):
+        """Run _autofill_npcs without letting a failure escape the tick loop (#261).
+
+        Autofill is best-effort and _autofill_npcs stamps its throttle before
+        doing any work, so a failure is simply retried AUTOFILL_INTERVAL later.
+        It doesn't stop the game; the traceback is logged at most once per
+        AUTOFILL_ERROR_LOG_INTERVAL per game so a persistent fault doesn't
+        flood the log.
+        """
+        try:
+            self._autofill_npcs(game_id, game)
+        except redis.exceptions.ConnectionError:
+            raise  # listen() reconnects on this
+        except Exception:
+            now = time.time()
+            last_logged = self._autofill_error_logged.get(game_id)
+            if last_logged is None or now - last_logged >= AUTOFILL_ERROR_LOG_INTERVAL:
+                self._autofill_error_logged[game_id] = now
+                logging.exception(f"[{game_id}] NPC autofill failed; will retry")
+            else:
+                logging.debug(f"[{game_id}] NPC autofill failed again", exc_info=True)
 
     def _replenish_npc_wallets(self):
         """Nudge idle (unseated) NPCs' wallets toward their personality's starting wallet.
@@ -1448,82 +1481,109 @@ class Casino:
             if game_id in self.games:
                 self._quarantined.add(game_id)
 
+    def _reply_request_failed(self, data):
+        """Tell whoever sent a casino-level request that it failed, if they're waiting on one."""
+        request_id = data.get('request_id')
+        if not request_id:
+            return
+        self.publish_event(
+            'casino_update',
+            {
+                'event_type': 'request_failed',
+                'request_id': request_id,
+                'action': data.get('action'),
+                'message': "The server hit an unexpected error handling that request.",
+            }
+        )
+
+    def _process_casino_message(self, data):
+        if data['event_type'] == 'casino_action':
+            if data['action'] == 'new_game':
+                request_id = data.get('request_id')
+                if request_id:
+                    guild_id = data.get('guild_id')
+                    channel_id = data.get('channel_id')
+                    npc_min = data.get('npc_min')
+                    npc_max = data.get('npc_max')
+                    deck_data = data.get('deck')
+                    initial_deck = deserialize_hand(deck_data) if deck_data else None
+                    game_id = self.new_game(
+                        guild_id, channel_id,
+                        npc_min=int(npc_min) if npc_min is not None else None,
+                        npc_max=int(npc_max) if npc_max is not None else None,
+                        initial_deck=initial_deck,
+                    )
+                    self.publish_event(
+                        'casino_update',
+                        {
+                            'event_type': 'new_game',
+                            'request_id': request_id,
+                            'game_id': game_id
+                        }
+                    )
+            elif data['action'] == 'list_games':
+                request_id = data.get('request_id')
+                if request_id:
+                    self._handle_list_games(request_id)
+            elif data['action'] == 'get_usage':
+                request_id = data.get('request_id')
+                if request_id:
+                    self._handle_get_usage(request_id, days=data.get('days', 7))
+            elif data['action'] == 'get_debug':
+                request_id = data.get('request_id')
+                if request_id:
+                    self._handle_get_debug(request_id)
+            elif data['action'] == 'get_stats':
+                request_id = data.get('request_id')
+                player_name = data.get('player')
+                if request_id and player_name:
+                    self._handle_get_stats(request_id, player_name)
+            elif data['action'] == 'get_wallet':
+                request_id = data.get('request_id')
+                player_name = data.get('player')
+                if request_id and player_name:
+                    self._handle_get_wallet(request_id, player_name)
+            elif data['action'] == 'lookup_wallet':
+                request_id = data.get('request_id')
+                target = data.get('target')
+                if request_id and target:
+                    self._handle_lookup_wallet(request_id, target)
+            elif data['action'] == 'set_wallet':
+                request_id = data.get('request_id')
+                target = data.get('target')
+                mode = data.get('mode', 'set')
+                amount = data.get('amount', 0)
+                if request_id and target:
+                    self._handle_set_wallet(request_id, target, mode, amount)
+            elif data['action'] == 'get_npc_relationships':
+                request_id = data.get('request_id')
+                target = data.get('target')
+                if request_id and target:
+                    self._handle_npc_relationships(request_id, target)
+            elif data['action'] == 'npc_limits':
+                request_id = data.get('request_id')
+                if request_id:
+                    self._handle_npc_limits(
+                        request_id,
+                        min_val=data.get('min'),
+                        max_val=data.get('max'),
+                    )
+
     def _process_message(self, data):
         game_id = data.get('game_id')
 
         if game_id is None:
             logging.debug(f"Got casino message: {data}")
-            if data['event_type'] == 'casino_action':
-                if data['action'] == 'new_game':
-                    request_id = data.get('request_id')
-                    if request_id:
-                        guild_id = data.get('guild_id')
-                        channel_id = data.get('channel_id')
-                        npc_min = data.get('npc_min')
-                        npc_max = data.get('npc_max')
-                        deck_data = data.get('deck')
-                        initial_deck = deserialize_hand(deck_data) if deck_data else None
-                        game_id = self.new_game(
-                            guild_id, channel_id,
-                            npc_min=int(npc_min) if npc_min is not None else None,
-                            npc_max=int(npc_max) if npc_max is not None else None,
-                            initial_deck=initial_deck,
-                        )
-                        self.publish_event(
-                            'casino_update',
-                            {
-                                'event_type': 'new_game',
-                                'request_id': request_id,
-                                'game_id': game_id
-                            }
-                        )
-                elif data['action'] == 'list_games':
-                    request_id = data.get('request_id')
-                    if request_id:
-                        self._handle_list_games(request_id)
-                elif data['action'] == 'get_usage':
-                    request_id = data.get('request_id')
-                    if request_id:
-                        self._handle_get_usage(request_id, days=data.get('days', 7))
-                elif data['action'] == 'get_debug':
-                    request_id = data.get('request_id')
-                    if request_id:
-                        self._handle_get_debug(request_id)
-                elif data['action'] == 'get_stats':
-                    request_id = data.get('request_id')
-                    player_name = data.get('player')
-                    if request_id and player_name:
-                        self._handle_get_stats(request_id, player_name)
-                elif data['action'] == 'get_wallet':
-                    request_id = data.get('request_id')
-                    player_name = data.get('player')
-                    if request_id and player_name:
-                        self._handle_get_wallet(request_id, player_name)
-                elif data['action'] == 'lookup_wallet':
-                    request_id = data.get('request_id')
-                    target = data.get('target')
-                    if request_id and target:
-                        self._handle_lookup_wallet(request_id, target)
-                elif data['action'] == 'set_wallet':
-                    request_id = data.get('request_id')
-                    target = data.get('target')
-                    mode = data.get('mode', 'set')
-                    amount = data.get('amount', 0)
-                    if request_id and target:
-                        self._handle_set_wallet(request_id, target, mode, amount)
-                elif data['action'] == 'get_npc_relationships':
-                    request_id = data.get('request_id')
-                    target = data.get('target')
-                    if request_id and target:
-                        self._handle_npc_relationships(request_id, target)
-                elif data['action'] == 'npc_limits':
-                    request_id = data.get('request_id')
-                    if request_id:
-                        self._handle_npc_limits(
-                            request_id,
-                            min_val=data.get('min'),
-                            max_val=data.get('max'),
-                        )
+            try:
+                self._process_casino_message(data)
+            except redis.exceptions.ConnectionError:
+                raise  # listen() reconnects on this
+            except Exception:
+                # A malformed request or a DB error serving one mustn't take the
+                # server (and every table) down; answer so the requester isn't
+                # left waiting (#261).
+                logging.exception(f"Unexpected error handling casino action {data.get('action')!r}")
+                self._reply_request_failed(data)
         elif game_id in self.games.keys():
             logging.debug(f"Got game message: {data}")
             try:
@@ -1554,6 +1614,23 @@ class Casino:
             except CardGameError as e:
                 logging.warning(f"Game error: {e}")
                 self.game_output(game_id, e.user_message())
+            except redis.exceptions.ConnectionError:
+                raise  # listen() reconnects on this
+            except Exception:
+                # As with an unexpected tick() failure (#259), the game may be
+                # half-updated, so stop it rather than carry on with state we
+                # can't trust (#261).
+                if data.get('action') == 'stop_game':
+                    # _stop_game itself failed partway; running it again could
+                    # refund some bets twice, so quarantine as _stop_failed_game would.
+                    logging.exception(f"[{game_id}] Failed to stop game; quarantining it")
+                    if game_id in self.games:
+                        self._quarantined.add(game_id)
+                else:
+                    logging.exception(
+                        f"[{game_id}] Unexpected error handling game message; stopping it and returning bets"
+                    )
+                    self._stop_failed_game(game_id)
         else:
             logging.debug(f"Got unknown message: {data}")
 
@@ -1591,7 +1668,7 @@ class Casino:
                 self._mark_dirty(game_id)
                 game._dirty = False
 
-            self._autofill_npcs(game_id, game)
+            self._autofill_npcs_safely(game_id, game)
 
             # Remove idle empty games
             if (game.state == HandState.WAITING

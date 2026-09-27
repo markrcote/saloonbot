@@ -1509,6 +1509,43 @@ class TestBlackjackCardConservation(unittest.TestCase):
         self.assertEqual(alice.hand, [])
         self.assertEqual(self._total_cards(game), 52)
 
+    def test_departed_player_survives_restart_and_is_settled(self):
+        """A player who acted then left mid-hand is persisted and restored: still owed
+        a settlement, cards still counted, and settled when the hand ends."""
+        game, alice, bob = self._deal_two_player_hand()
+        game.stand(alice)
+        game.leave(alice)
+        db = SqliteDatabase(":memory:")
+        try:
+            db.save_game(game.game_id, game.to_dict())
+            restored = Blackjack.from_dict(db.load_all_active_games()[0], game.casino)
+        finally:
+            db.close()
+        restored._pause = lambda *args, **kwargs: None
+
+        self.assertEqual([p.name for p in restored.departed_players], ["Alice"])
+        self.assertEqual(self._total_cards(restored), 52)
+
+        game.casino.game_output.reset_mock()
+        restored.stand(next(p for p in restored.players if p.name == "Bob"))
+        restored.tick()  # DEALER_TURN
+        restored.tick()  # RESOLVING -> BETWEEN_HANDS
+        outputs = [c.args[1] for c in game.casino.game_output.call_args_list]
+        self.assertTrue(any("Alice" in o for o in outputs), f"Alice was never settled: {outputs}")
+        self.assertEqual(restored.departed_players, [])
+        self.assertEqual(self._total_cards(restored), 52)
+
+    def test_time_first_player_joined_round_trips_through_sqlite(self):
+        game = self._make_game()
+        game.time_first_player_joined = 1234.5
+        db = SqliteDatabase(":memory:")
+        try:
+            db.save_game(game.game_id, game.to_dict())
+            restored = Blackjack.from_dict(db.load_all_active_games()[0], game.casino)
+        finally:
+            db.close()
+        self.assertEqual(restored.time_first_player_joined, 1234.5)
+
     def test_deck_survives_many_departures(self):
         """Repeated leave/rejoin churn never shrinks the pool of cards."""
         game = self._make_game()

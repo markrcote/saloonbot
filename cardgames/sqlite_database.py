@@ -146,6 +146,12 @@ MIGRATIONS = [
         # restart mid-wait doesn't reset it; NULL = the Blackjack default.
         "ALTER TABLE games ADD COLUMN time_between_hands_duration REAL",
     ],
+    [   # Migration 13: the rest of Blackjack.to_dict() -- the pre-deal countdown start, and players
+        # who left mid-hand but are still owed a settlement (their cards stay out of the deck until
+        # end_hand). NULL = none / not started.
+        "ALTER TABLE games ADD COLUMN time_first_player_joined REAL",
+        "ALTER TABLE games ADD COLUMN departed_players_json TEXT",
+    ],
 ]
 
 
@@ -281,8 +287,9 @@ class SqliteDatabase:
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
                     players_json, players_waiting_json, bets_json,
-                    npc_min, npc_max, time_between_hands_duration
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    npc_min, npc_max, time_between_hands_duration,
+                    time_first_player_joined, departed_players_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     state = excluded.state,
                     current_player_idx = excluded.current_player_idx,
@@ -298,6 +305,8 @@ class SqliteDatabase:
                     npc_min = excluded.npc_min,
                     npc_max = excluded.npc_max,
                     time_between_hands_duration = excluded.time_between_hands_duration,
+                    time_first_player_joined = excluded.time_first_player_joined,
+                    departed_players_json = excluded.departed_players_json,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 game_id,
@@ -315,6 +324,8 @@ class SqliteDatabase:
                 game_data.get('npc_min'),
                 game_data.get('npc_max'),
                 game_data.get('time_between_hands_duration'),
+                game_data.get('time_first_player_joined'),
+                json.dumps(game_data.get('departed_players', [])),
             ))
             self.connection.commit()
             logging.debug(f"Saved game {game_id}")
@@ -366,6 +377,8 @@ class SqliteDatabase:
             'npc_min': result['npc_min'],
             'npc_max': result['npc_max'],
             'time_between_hands_duration': result['time_between_hands_duration'],
+            'time_first_player_joined': result['time_first_player_joined'],
+            'departed_players': json.loads(result['departed_players_json'] or '[]'),
         }
 
     @_synchronized

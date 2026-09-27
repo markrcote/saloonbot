@@ -783,6 +783,47 @@ class TestServerRestart(EndToEndTestCase):
         finally:
             pubsub.close()
 
+    def test_departed_player_settled_after_restart(self):
+        """A player who stood then left mid-hand is owed a settlement at end_hand; a
+        restart before then must not lose them (or their cards)."""
+        # Full deck, aces dealt last: no blackjack can end the hand before anyone acts.
+        aces = [f"{suit}14" for suit in "HDCS"]
+        deck = aces + [f"{suit}{value}" for suit in "HDCS" for value in range(2, 14)]
+        game_id = self.create_game(deck=deck)
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.join_player(game_id, 'Departer')
+            self.join_player(game_id, 'Stayer')
+            self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
+            self.place_bet(game_id, 'Departer', 1000)
+            self.place_bet(game_id, 'Stayer', 1000)
+            self.collect_messages(pubsub, timeout=10, stop_on="Departer, you're up")
+            self.player_action(game_id, 'Departer', 'stand')
+            self.collect_messages(pubsub, timeout=10, stop_on="Stayer, you're up")
+            self.player_action(game_id, 'Departer', 'leave')
+            msgs = self.collect_messages(pubsub, timeout=10, stop_on='settled when the dust clears')
+            self.assertTrue(any('settled when the dust clears' in m for m in msgs),
+                            f"Departer should be routed to departed_players. Messages: {msgs}")
+        finally:
+            pubsub.close()
+
+        row = self.poll_db(
+            "SELECT departed_players_json FROM games WHERE game_id = %s", (game_id,),
+            predicate=lambda r: r[0] is not None and 'Departer' in r[0], timeout=5)
+        self.assertIsNotNone(row, "departed_players should be persisted before the restart")
+
+        self._stop_server()
+        self._start_server()
+
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            self.player_action(game_id, 'Stayer', 'stand')
+            msgs = self.collect_messages(pubsub, timeout=30, stop_on='Departer')
+            self.assertTrue(any('Departer' in m for m in msgs),
+                            f"Departer's hand should be settled after the restart. Messages: {msgs}")
+        finally:
+            pubsub.close()
+
     def test_bet_preserved_after_restart(self):
         """Test that player bets are preserved after server restart."""
         game_id = self.create_game(deck=self.DETERMINISTIC_DECK)

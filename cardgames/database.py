@@ -154,6 +154,9 @@ MIGRATIONS = [
         "ALTER TABLE npcs MODIFY current_game_id VARCHAR(255) NULL",
         "ALTER TABLE npc_memories MODIFY game_id VARCHAR(255) NULL",
     ],
+    [   # Migration 11: per-game NPC autofill limits from /newgame; NULL = use the global npc_limits.
+        "ALTER TABLE games ADD COLUMN npc_min INT NULL, ADD COLUMN npc_max INT NULL",
+    ],
 ]
 
 
@@ -357,6 +360,8 @@ class Database:
             json.dumps(game_data['players']),
             json.dumps(game_data['players_waiting']),
             json.dumps(game_data['bets']),
+            game_data.get('npc_min'),
+            game_data.get('npc_max'),
         )
 
         def fn(cursor):
@@ -365,8 +370,9 @@ class Database:
                     game_id, state, current_player_idx,
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
-                    players_json, players_waiting_json, bets_json
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
+                    players_json, players_waiting_json, bets_json,
+                    npc_min, npc_max
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
                 ON DUPLICATE KEY UPDATE
                     state = new.state,
                     current_player_idx = new.current_player_idx,
@@ -378,7 +384,9 @@ class Database:
                     dealer_hand_json = new.dealer_hand_json,
                     players_json = new.players_json,
                     players_waiting_json = new.players_waiting_json,
-                    bets_json = new.bets_json
+                    bets_json = new.bets_json,
+                    npc_min = new.npc_min,
+                    npc_max = new.npc_max
             """, params)
             logging.debug(f"Saved game {game_id}")
             return True
@@ -411,6 +419,8 @@ class Database:
                 'players': json.loads(result['players_json']),
                 'players_waiting': json.loads(result['players_waiting_json']),
                 'bets': json.loads(result['bets_json']),
+                'npc_min': result['npc_min'],
+                'npc_max': result['npc_max'],
             }
         except Error as e:
             logging.error(f"Error loading game {game_id}: {e}")
@@ -443,6 +453,8 @@ class Database:
                     'players': json.loads(result['players_json']),
                     'players_waiting': json.loads(result['players_waiting_json']),
                     'bets': json.loads(result['bets_json']),
+                    'npc_min': result['npc_min'],
+                    'npc_max': result['npc_max'],
                 })
             return games
         except Error as e:

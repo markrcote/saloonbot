@@ -9,6 +9,7 @@ import redis.asyncio as redis
 
 from cardgames.money import dollars_to_cents
 
+
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = os.getenv("REDIS_PORT", 6379)
 
@@ -29,6 +30,16 @@ Commands:
   help              - Show this message
   quit              - Exit the CLI
 """
+
+
+def _prompt_int(prompt, default):
+    """Read an int from the console, falling back to default on blank or bad input
+    (the server clamps NPC limits to its own range)."""
+    raw = input(prompt).strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
 
 
 class CasinoCli:
@@ -111,11 +122,8 @@ class CasinoCli:
     async def main(self):
         self.player_name = input("Enter your name: ")
 
-        num_bots_str = input("How many LLM bot players? (0-4, default 0): ").strip()
-        try:
-            num_bots = max(0, min(4, int(num_bots_str))) if num_bots_str else 0
-        except ValueError:
-            num_bots = 0
+        npc_min = _prompt_int("Fewest NPC players to keep at the table? (0-6, default 3): ", 3)
+        npc_max = _prompt_int("Most NPC players allowed? (0-6, default 5): ", 5)
 
         logging.info(f"Welcome {self.player_name}! Creating new game...")
 
@@ -125,7 +133,8 @@ class CasinoCli:
             'event_type': 'casino_action',
             'action': 'new_game',
             'request_id': request_id,
-            'num_bots': num_bots,
+            'npc_min': npc_min,
+            'npc_max': npc_max,
         }
         await self.redis.publish("casino", json.dumps(message))
 

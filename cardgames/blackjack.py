@@ -251,6 +251,9 @@ class Blackjack(CardGame):
         self.time_last_hand_ended = None
         self.time_last_event = time.time()
         self.time_between_hands_duration = self.TIME_BETWEEN_HANDS
+        # Per-game NPC autofill limits set by new_game; None means the Casino's global npc_limits apply.
+        self.npc_min = None
+        self.npc_max = None
 
         # Betting state
         self.bets = {}  # Player -> bet amount
@@ -921,6 +924,8 @@ class Blackjack(CardGame):
             'players_waiting': [serialize_player(p) for p in self.players_waiting],
             'departed_players': [serialize_player(p) for p in self.departed_players],
             'bets': self.bets.copy(),
+            'npc_min': self.npc_min,
+            'npc_max': self.npc_max,
         }
 
     @classmethod
@@ -947,6 +952,9 @@ class Blackjack(CardGame):
 
         if data.get('time_first_player_joined') is not None:
             game.time_first_player_joined = data['time_first_player_joined']
+
+        game.npc_min = data.get('npc_min')
+        game.npc_max = data.get('npc_max')
 
         # Restore deck and discards
         game.deck = deserialize_hand(data['deck'])

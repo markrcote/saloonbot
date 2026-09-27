@@ -100,6 +100,14 @@ _FAME_THRESHOLDS = [
 ]
 
 
+def normalize_npc_limits(npc_min, npc_max):
+    """Clamp per-game NPC limits to [0, MAX_NPCS_PER_TABLE] with max >= min.
+    A missing min means 0; a missing max means the (clamped) min."""
+    lo = max(0, min(MAX_NPCS_PER_TABLE, npc_min if npc_min is not None else 0))
+    hi = max(0, min(MAX_NPCS_PER_TABLE, npc_max if npc_max is not None else lo))
+    return lo, max(lo, hi)
+
+
 def _fame_label(games_played):
     for threshold, label in _FAME_THRESHOLDS:
         if threshold is None or games_played < threshold:
@@ -979,12 +987,18 @@ class Casino:
         except Exception as e:
             logging.error(f"Error deleting game {game_id}: {e}")
 
-    def new_game(self, guild_id=None, channel_id=None, num_bots=0, initial_deck=None):
+    def new_game(self, guild_id=None, channel_id=None, npc_min=None, npc_max=None, initial_deck=None):
+        """Create a game. If npc_min or npc_max is given, the game gets its own NPC
+        autofill limits (overriding the global npc_limits for its lifetime) and
+        npc_min NPCs are seated immediately, no human needed."""
         game_id = generate_game_id(lambda candidate: candidate in self.games)
-        self.games[game_id] = Blackjack(
+        game = Blackjack(
             game_id, self, initial_deck=initial_deck, on_npc_departed=self._on_npc_departed
         )
-        logging.info(f"New game {game_id} created (bots: {num_bots})")
+        self.games[game_id] = game
+        if npc_min is not None or npc_max is not None:
+            game.npc_min, game.npc_max = normalize_npc_limits(npc_min, npc_max)
+        logging.info(f"New game {game_id} created (NPC limits: {game.npc_min}/{game.npc_max})")
 
         # Save game and channel info to database
         self._save_game(game_id)
@@ -994,10 +1008,10 @@ class Casino:
             except Exception as e:
                 logging.error(f"Error saving game channel {game_id}: {e}")
 
-        # Seat bots now rather than waiting for a human: an NPC-only table plays
+        # Seat NPCs now rather than waiting for a human: an NPC-only table plays
         # on as an ambient table, same as one whose humans have all left.
-        if num_bots > 0:
-            self.add_npc(game_id, num_bots)
+        if game.npc_min:
+            self.add_npc(game_id, game.npc_min)
 
         return game_id
 
@@ -1073,8 +1087,15 @@ class Casino:
             else:
                 game.output(f"🎭 New arrivals: {', '.join(arrivals)}. They'll join the next hand.")
 
+    def _npc_limits_for(self, game):
+        """The (min, max) NPC autofill limits for a game: its own, if new_game
+        gave it some, otherwise the global npc_limits."""
+        if game.npc_min is not None:
+            return game.npc_min, game.npc_max
+        return self.npc_min, self.npc_max
+
     def _autofill_npcs(self, game_id, game):
-        """Fill or trim NPCs in a game to stay within npc_min/npc_max.
+        """Fill or trim NPCs in a game to stay within its limits (see _npc_limits_for).
 
         Only acts in WAITING or BETWEEN_HANDS states; throttled to at most once
         per AUTOFILL_INTERVAL seconds per game.
@@ -1090,19 +1111,20 @@ class Casino:
         all_players = game.players + game.players_waiting
         npc_count = sum(1 for p in all_players if getattr(p, 'is_npc', False))
         total_count = len(all_players)
+        npc_min, npc_max = self._npc_limits_for(game)
 
         changed = False
 
-        if npc_count < self.npc_min:
-            to_add = min(self.npc_min - npc_count, MAX_NPCS_PER_TABLE - total_count)
+        if npc_count < npc_min:
+            to_add = min(npc_min - npc_count, MAX_NPCS_PER_TABLE - total_count)
             if to_add > 0:
                 logging.info(f"[{game_id}] Autofill: adding {to_add} NPC(s) "
-                             f"(have {npc_count}, min={self.npc_min})")
+                             f"(have {npc_count}, min={npc_min})")
                 self._spawn_npcs_into_game(game_id, to_add)
                 changed = True
 
-        elif npc_count > self.npc_max:
-            to_remove = npc_count - self.npc_max
+        elif npc_count > npc_max:
+            to_remove = npc_count - npc_max
             # Prefer removing from players_waiting before players
             candidates = (
                 [p for p in game.players_waiting if getattr(p, 'is_npc', False)]
@@ -1110,7 +1132,7 @@ class Casino:
             )
             for npc in candidates[:to_remove]:
                 logging.info(f"[{game_id}] Autofill: removing NPC {npc.name!r} "
-                             f"(have {npc_count}, max={self.npc_max})")
+                             f"(have {npc_count}, max={npc_max})")
                 game.leave(npc)
                 changed = True
 
@@ -1277,6 +1299,8 @@ class Casino:
                 'game_id': game_id,
                 'state': game.state.value,
                 'current_player_idx': game.current_player_idx,
+                'npc_min': game.npc_min,
+                'npc_max': game.npc_max,
                 'dirty': game_id in self._dirty_games,
                 'deck_remaining': len(game.deck),
                 'discards': len(game.discards),
@@ -1435,11 +1459,16 @@ class Casino:
                     if request_id:
                         guild_id = data.get('guild_id')
                         channel_id = data.get('channel_id')
-                        num_bots = int(data.get('num_bots', 0))
+                        npc_min = data.get('npc_min')
+                        npc_max = data.get('npc_max')
                         deck_data = data.get('deck')
                         initial_deck = deserialize_hand(deck_data) if deck_data else None
-                        game_id = self.new_game(guild_id, channel_id, num_bots=num_bots,
-                                                initial_deck=initial_deck)
+                        game_id = self.new_game(
+                            guild_id, channel_id,
+                            npc_min=int(npc_min) if npc_min is not None else None,
+                            npc_max=int(npc_max) if npc_max is not None else None,
+                            initial_deck=initial_deck,
+                        )
                         self.publish_event(
                             'casino_update',
                             {

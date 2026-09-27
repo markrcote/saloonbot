@@ -90,7 +90,7 @@ def tearDownModule():
     logging.info("Cleanup complete")
 
 
-# num_bots NPCs are seated when a game is created, so an NPC-only table would
+# NPCs are seated as soon as a game is created (npc_min or seat_npcs), so an NPC-only table would
 # start betting on its first tick. Classes that seat a human alongside them use
 # this join window so the human sits down first (seat order NPC, then human —
 # the injected decks rely on it).
@@ -334,8 +334,16 @@ class EndToEndTestCase(unittest.TestCase):
         'H6',   # dealer face-up (last in list = first popped)
     ]
 
-    def create_game(self, num_bots=0, deck=None):
-        """Helper method to create a game and return the game_id."""
+    def create_game(self, npc_min=None, npc_max=None, deck=None, seat_npcs=0):
+        """Create a game and return its game_id.
+
+        npc_min/npc_max give the game its own NPC limits, as /newgame does: npc_min
+        NPCs are seated at creation and autofill keeps them there. seat_npcs=N
+        instead seats N NPCs via add_npc under limits 0/N, so nothing refills
+        them -- for tests that remove NPCs or let them depart.
+        """
+        if seat_npcs:
+            npc_min, npc_max = 0, seat_npcs
         pubsub = self.redis.pubsub()
         try:
             pubsub.subscribe("casino_update")
@@ -347,8 +355,10 @@ class EndToEndTestCase(unittest.TestCase):
                 'action': 'new_game',
                 'request_id': request_id
             }
-            if num_bots:
-                message['num_bots'] = num_bots
+            if npc_min is not None:
+                message['npc_min'] = npc_min
+            if npc_max is not None:
+                message['npc_max'] = npc_max
             if deck is not None:
                 message['deck'] = deck
             self.redis.publish("casino", json.dumps(message))
@@ -359,7 +369,15 @@ class EndToEndTestCase(unittest.TestCase):
                 if msg and msg['type'] == 'message':
                     response = json.loads(msg['data'])
                     if response.get('request_id') == request_id:
-                        return response['game_id']
+                        game_id = response['game_id']
+                        if seat_npcs:
+                            self.redis.publish("casino", json.dumps({
+                                'event_type': 'npc_action',
+                                'action': 'add_npc',
+                                'game_id': game_id,
+                                'count': seat_npcs,
+                            }))
+                        return game_id
 
             self.fail("Failed to create game")
         finally:
@@ -487,6 +505,24 @@ class TestGameIdColumnMigration(unittest.TestCase):
     def _game_dict(game_id):
         return Blackjack(game_id=game_id, casino=mock.MagicMock()).to_dict()
 
+    def _seed_v9_game(self, game_id):
+        """Insert a games row using only the columns schema version 9 has. Raw SQL, since
+        save_game() writes columns that later migrations add (e.g. npc_min/npc_max)."""
+        g = self._game_dict(game_id)
+        cursor = self.root.cursor()
+        cursor.execute(
+            f"INSERT INTO {self.SCRATCH_DB}.games (game_id, state, current_player_idx, "
+            "time_betting_started, time_last_hand_ended, time_last_event, deck_json, discards_json, "
+            "dealer_hand_json, players_json, players_waiting_json, bets_json) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (game_id, g['state'], g['current_player_idx'], g['time_betting_started'],
+             g['time_last_hand_ended'], g['time_last_event'], json.dumps(g['deck']),
+             json.dumps(g['discards']), json.dumps(g['dealer_hand']), json.dumps(g['players']),
+             json.dumps(g['players_waiting']), json.dumps(g['bets'])),
+        )
+        self.root.commit()
+        cursor.close()
+
     def test_migration_widens_game_id_columns_and_keeps_existing_rows(self):
         uuid_game_id = str(uuid.uuid4())
 
@@ -496,7 +532,7 @@ class TestGameIdColumnMigration(unittest.TestCase):
         try:
             for table, column in self.GAME_ID_COLUMNS:
                 self.assertEqual(self._column_width(table, column), 36, f"{table}.{column} before migration")
-            old_db.save_game(uuid_game_id, self._game_dict(uuid_game_id))
+            self._seed_v9_game(uuid_game_id)
             old_db.save_game_channel(uuid_game_id, 111, 222)
             npc_id = old_db.create_npc("Winifred Cobb", "The Grizzled Prospector", 15000)
             old_db.set_npc_game(npc_id, uuid_game_id)
@@ -883,7 +919,7 @@ class TestServerRestart(EndToEndTestCase):
 
 
 class TestBotsOnlyGameRestart(EndToEndTestCase):
-    """A game created with num_bots and no human must resume after a restart:
+    """A game created with an NPC minimum and no human must resume after a restart:
     its NPCs are seated (and persisted) at creation, so nothing waits on a join."""
 
     # Bots-only tables are ambient and would otherwise sit 120-300s between hands.
@@ -918,7 +954,7 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
             pubsub.close()
 
     def test_bots_only_game_resumes_after_restart(self):
-        game_id = self.create_game(num_bots=2)
+        game_id = self.create_game(npc_min=2, npc_max=2)
         pubsub = self.subscribe_to_game(game_id)
         try:
             before = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
@@ -934,6 +970,9 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
         self.assertIn(game_id, self._list_game_ids(), "Bots-only game should be reloaded after restart")
         self.assertEqual(self._seated_npc_count(game_id), 2,
                          "Restored game should keep its NPCs seated (not cleared as stale)")
+        self.assertEqual(
+            self.poll_db("SELECT npc_min, npc_max FROM games WHERE game_id = %s", (game_id,), timeout=5),
+            (2, 2), "Per-game NPC limits should persist across the restart")
 
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1165,11 +1204,13 @@ class TestNPCBots(EndToEndTestCase):
     EXTRA_ENV = NPC_JOIN_WINDOW_ENV
 
     def test_bots_only_game_plays_without_a_human(self):
-        """A new game with num_bots and no human deals and settles a hand on its own."""
-        game_id = self.create_game(num_bots=2)
+        """A new game with an NPC minimum and no human deals and settles a hand on its own."""
+        game_id = self.create_game(npc_min=2, npc_max=2)
         pubsub = self.subscribe_to_game(game_id)
         try:
-            messages = self.collect_messages(pubsub, timeout=15, stop_on='dust settles')
+            # With no Redis traffic the server ticks every ~2s and a bots-only table takes one
+            # step (bet, hit, stand, deal...) per tick, so a hand with a few hits runs past 15s.
+            messages = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
             self.assertTrue(any('dust settles' in m for m in messages),
                             f"Bots-only table should play a hand. Messages: {messages}")
         finally:
@@ -1178,7 +1219,7 @@ class TestNPCBots(EndToEndTestCase):
     def test_npc_bot_plays_without_human_intervention(self):
         """NPC bot takes its turn automatically so the hand resolves without prompting it."""
         # NPC is seated at game creation, before the human, so NPC goes first
-        game_id = self.create_game(num_bots=1)
+        game_id = self.create_game(npc_min=1, npc_max=1)
         pubsub = self.subscribe_to_game(game_id)
         try:
             self.join_player(game_id, 'HumanPlayer')
@@ -1427,6 +1468,20 @@ class TestNPCLimits(EndToEndTestCase):
             npc_count, 2,
             f"Expected >= 2 NPCs via autofill, got {npc_count}"
         )
+
+    def test_per_game_limits_override_global_zero(self):
+        """A /newgame table at 3-5 keeps its NPCs even with global limits of 0/0,
+        which previously made autofill trim them all on the first tick."""
+        self.assertTrue(self._casino_request('npc_limits', min=0, max=0)['ok'])
+        game_id = self.create_game(npc_min=3, npc_max=5)
+        try:
+            time.sleep(3)  # let the first autofill pass (runs on the game's first tick) happen
+            debug = self._get_debug()
+            self.assertEqual(self._npc_count_in_game(debug, game_id), 3)
+            game = next(g for g in debug['games'] if g['game_id'] == game_id)
+            self.assertEqual((game['npc_min'], game['npc_max']), (3, 5))
+        finally:
+            self._stop_game(game_id)
 
 
 class TestManualNPC(EndToEndTestCase):
@@ -1692,7 +1747,7 @@ class TestNPCSessionMemory(EndToEndTestCase):
     def test_removed_npc_writes_session_memory(self):
         """The full memory loop: seat an LLM NPC, play a hand, remove the NPC,
         and a condensed session memory lands in npc_memories with usage logged."""
-        game_id = self.create_game(num_bots=1, deck=self.MEMORY_DECK)
+        game_id = self.create_game(seat_npcs=1, deck=self.MEMORY_DECK)
         self.game_id = game_id
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1716,7 +1771,7 @@ class TestNPCSessionMemory(EndToEndTestCase):
 
     def test_second_session_appends_second_memory(self):
         """Reseat the same roster NPC and confirm each session leaves its own memory."""
-        game_id = self.create_game(num_bots=1, deck=self.MEMORY_DECK)
+        game_id = self.create_game(seat_npcs=1, deck=self.MEMORY_DECK)
         self.game_id = game_id
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1772,7 +1827,7 @@ class TestMetricsEndpoint(EndToEndTestCase):
     def test_metrics_endpoint_exposes_llm_series(self):
         """Drive one hand with a fake-provider NPC, then confirm /metrics carries
         both the per-call token counters and the provider-up gauge."""
-        game_id = self.create_game(num_bots=1, deck=self.METRICS_DECK)
+        game_id = self.create_game(npc_min=1, npc_max=1, deck=self.METRICS_DECK)
         self.game_id = game_id
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1933,7 +1988,7 @@ class TestNPCDepartureE2E(EndToEndTestCase):
         super().tearDown()
 
     def test_forced_departure_condenses_session(self):
-        game_id = self.create_game(num_bots=1, deck=TestNPCSessionMemory.MEMORY_DECK)
+        game_id = self.create_game(seat_npcs=1, deck=TestNPCSessionMemory.MEMORY_DECK)
         self.game_id = game_id
         pubsub = self.subscribe_to_game(game_id)
         try:
@@ -1977,7 +2032,7 @@ class TestNPCRelationships(EndToEndTestCase):
         self.db.commit()
         cursor.close()
         # Autofill limits persist in `settings` across classes (the server loads
-        # them at startup); pin them to 0 so only num_bots seats NPCs here.
+        # them at startup); pin them to 0 so only seat_npcs seats NPCs here.
         self._casino_request('npc_limits', min=0, max=4)
 
     def tearDown(self):
@@ -1985,14 +2040,14 @@ class TestNPCRelationships(EndToEndTestCase):
             self._stop_game(self.game_id)
         super().tearDown()
 
-    def _seat_npcs(self, num_bots):
-        """Create a game whose num_bots NPCs are seated at creation, no human needed."""
-        game_id = self.create_game(num_bots=num_bots)
+    def _seat_npcs(self, count):
+        """Create a game with `count` NPCs seated and no human needed."""
+        game_id = self.create_game(seat_npcs=count)
         self.game_id = game_id
         row = self.poll_db(
             "SELECT COUNT(*) FROM npcs WHERE current_game_id = %s", (game_id,),
-            predicate=lambda r: r[0] == num_bots, timeout=10)
-        self.assertIsNotNone(row, f"Expected {num_bots} NPCs seated at game creation")
+            predicate=lambda r: r[0] == count, timeout=10)
+        self.assertIsNotNone(row, f"Expected {count} NPCs seated")
         return game_id
 
     def _seed_relationship(self, rel_type, strength, notes):

@@ -138,6 +138,10 @@ MIGRATIONS = [
     [   # Migration 10: no-op. MySQL widens its game-ID columns here; SQLite's TEXT columns are
         # already unbounded. Kept so schema_version numbers stay in step across both backends.
     ],
+    [   # Migration 11: per-game NPC autofill limits from /newgame; NULL = use the global npc_limits.
+        "ALTER TABLE games ADD COLUMN npc_min INTEGER",
+        "ALTER TABLE games ADD COLUMN npc_max INTEGER",
+    ],
 ]
 
 
@@ -272,8 +276,9 @@ class SqliteDatabase:
                     game_id, state, current_player_idx,
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
-                    players_json, players_waiting_json, bets_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    players_json, players_waiting_json, bets_json,
+                    npc_min, npc_max
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     state = excluded.state,
                     current_player_idx = excluded.current_player_idx,
@@ -286,6 +291,8 @@ class SqliteDatabase:
                     players_json = excluded.players_json,
                     players_waiting_json = excluded.players_waiting_json,
                     bets_json = excluded.bets_json,
+                    npc_min = excluded.npc_min,
+                    npc_max = excluded.npc_max,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 game_id,
@@ -300,6 +307,8 @@ class SqliteDatabase:
                 json.dumps(game_data['players']),
                 json.dumps(game_data['players_waiting']),
                 json.dumps(game_data['bets']),
+                game_data.get('npc_min'),
+                game_data.get('npc_max'),
             ))
             self.connection.commit()
             logging.debug(f"Saved game {game_id}")
@@ -348,6 +357,8 @@ class SqliteDatabase:
             'players': json.loads(result['players_json']),
             'players_waiting': json.loads(result['players_waiting_json']),
             'bets': json.loads(result['bets_json']),
+            'npc_min': result['npc_min'],
+            'npc_max': result['npc_max'],
         }
 
     @_synchronized

@@ -2,6 +2,12 @@
 
 Notable changes to SaloonBot, for players and server admins. Dates are when each change shipped.
 
+## 2026-09-27 — Bots-only tables
+
+- `/newgame` now takes `npc_min` and `npc_max` (defaults 3 and 5) instead of a bot count. The minimum number of bots sit down right away — no human player needed — and the table keeps between the minimum and maximum bots for as long as the game runs, replacing any who head home.
+- A table of only bots plays on its own at a slower, background pace, and picks back up where it left off after a server restart.
+- Admins: a game's own NPC limits override the server-wide `/npclimits`, so a server-wide 0/0 no longer clears the bots out of a `/newgame` table.
+
 ## 2026-09-19 — Memorable game names
 
 - Games now get a memorable Old West name like `dusty-saloon` or `rusty-posse` instead of a long random ID, both when a game is created and in `/debug`. Games already running keep their old IDs until they end.

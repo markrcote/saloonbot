@@ -21,7 +21,7 @@ All gameplay actions have slash commands. As a convenience, `join`, `leave`, `be
 Slash commands:
 
 * `/help` — show all available commands.
-* `/newgame [num_bots]` *(admin)* — starts a new game of blackjack. `num_bots` (0–4, default 0) spawns bot players with Wild West personalities. They sit down as soon as the game is created, so a game with bots and no humans starts playing on its own at the slower ambient pace; anyone who `/join`s within the first few seconds is dealt into the first hand. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Each game gets a memorable Old West ID like `dusty-saloon` (shown when the game is created and in `/debug`) instead of a raw UUID.
+* `/newgame [npc_min] [npc_max]` *(admin)* — starts a new game of blackjack with bot players with Wild West personalities. `npc_min` bots (0–6, default 3) sit down as soon as the game is created, and the table is kept between `npc_min` and `npc_max` (0–6, default 5) bots for as long as the game runs — departing bots are replaced, overriding the server-wide `/npclimits` for this game. A game with bots and no humans starts playing on its own at the slower ambient pace; anyone who `/join`s within the first few seconds is dealt into the first hand. Bots use AI-powered decisions if an API key is configured, otherwise they fall back to basic strategy. Each game gets a memorable Old West ID like `dusty-saloon` (shown when the game is created and in `/debug`) instead of a raw UUID.
 * `/joingame` — sit down at the table.
 * `/leavegame` — leave the current game.
 * `/bet <amount>` — place a bet during the betting phase.
@@ -35,7 +35,7 @@ Slash commands:
 * `/checkwallet <target>` *(admin)* — check any player's or NPC's wallet balance.
 * `/setwallet <target> <amount>` *(admin)* — set a player's or NPC's wallet to an exact amount.
 * `/givechips <target> <amount>` *(admin)* — adjust a player's or NPC's wallet by a delta (negative takes chips away).
-* `/npclimits [min] [max]` *(admin)* — view or set the NPC autofill min/max per table. With `min > 0`, tables stay populated with NPCs even when no humans are present.
+* `/npclimits [min] [max]` *(admin)* — view or set the server-wide NPC autofill min/max per table, for games that don't have their own (games started with `/newgame` do). With `min > 0`, tables stay populated with NPCs even when no humans are present.
 * `/npcrelationships <npc>` *(admin)* — list an NPC's relationships (partner, type, strength, and the story behind them).
 * `/addnpc [count]` *(admin)* — add one or more roster NPCs to the current game (default: 1).
 * `/removenpc [name]` *(admin)* — remove an NPC from the current game; omit name to remove any NPC.
@@ -324,7 +324,7 @@ python start_ambient_table.py --min 3 --max 5
 python start_ambient_table.py --teardown --game-id <id>
 ```
 
-NPC autofill limits are casino-wide, not per-table — run this against a server with no other active games for a clean measurement.
+The script sets the casino-wide NPC autofill limits, which apply to every game without its own (games started with `/newgame` carry their own limits) — run this against a server with no other active games for a clean measurement.
 
 `llm_cost_report.py` connects to the same DB the server uses and applies a small built-in pricing table to `get_llm_usage_summary()`'s token totals, printing a per-purpose/model/provider cost breakdown plus extrapolated day/week/month/year run rates:
 

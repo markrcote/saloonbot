@@ -19,6 +19,7 @@ from cardgames.card_game import Card, CardGame, CardGameError
 from cardgames.casino import (
     NPC_TYPES, Casino,
     DEFAULT_NPC_AUTOFILL_MIN, DEFAULT_NPC_AUTOFILL_MAX, MAX_NPCS_PER_TABLE,
+    normalize_npc_limits,
 )
 from cardgames import game_ids
 from cardgames.money import cents_to_dollars, dollars_to_cents, format_cents
@@ -2746,7 +2747,7 @@ class TestNPCPersistence(unittest.TestCase):
         return mock_db
 
     def test_new_game_seats_bots_from_db_roster(self):
-        """new_game(num_bots=N) seats roster NPCs immediately, no human needed."""
+        """new_game(npc_min=N) seats N roster NPCs immediately, no human needed."""
         from cardgames.casino import Casino
         mock_db = MagicMock()
         mock_db.get_available_npcs.return_value = [
@@ -2756,8 +2757,9 @@ class TestNPCPersistence(unittest.TestCase):
         mock_db.count_npcs.return_value = 20
         casino = Casino(redis_host="localhost", redis_port=6379, db=mock_db)
         casino.redis = MagicMock()
-        game_id = casino.new_game(num_bots=1)
+        game_id = casino.new_game(npc_min=1, npc_max=1)
         game = casino.games[game_id]
+        self.assertEqual((game.npc_min, game.npc_max), (1, 1))
         all_players = game.players + game.players_waiting
         self.assertEqual([p.name for p in all_players], ["Clem"])
         mock_db.set_npc_game.assert_called_with(5, game_id)
@@ -2769,21 +2771,60 @@ class TestNPCPersistence(unittest.TestCase):
         casino = Casino(redis_host="localhost", redis_port=6379, db=self._roster_db(2))
         casino.redis = MagicMock()
         with patch.object(Blackjack, 'TIME_WAIT_FOR_PLAYERS', 0):
-            game_id = casino.new_game(num_bots=2)
+            game_id = casino.new_game(npc_min=2, npc_max=4)
             game = casino.games[game_id]
             game.tick()
         self.assertEqual(game.state, HandState.BETTING)
         self.assertEqual(len(game.players), 2)
         self.assertTrue(game._is_ambient())
 
-    def test_new_game_num_bots_respects_table_cap(self):
+    def test_new_game_npc_min_respects_table_cap(self):
         from cardgames.casino import Casino, MAX_NPCS_PER_TABLE
         casino = Casino(redis_host="localhost", redis_port=6379,
                         db=self._roster_db(MAX_NPCS_PER_TABLE + 3))
         casino.redis = MagicMock()
-        game_id = casino.new_game(num_bots=MAX_NPCS_PER_TABLE + 3)
+        game_id = casino.new_game(npc_min=MAX_NPCS_PER_TABLE + 3, npc_max=MAX_NPCS_PER_TABLE + 3)
         game = casino.games[game_id]
+        self.assertEqual((game.npc_min, game.npc_max), (MAX_NPCS_PER_TABLE, MAX_NPCS_PER_TABLE))
         self.assertEqual(len(game.players) + len(game.players_waiting), MAX_NPCS_PER_TABLE)
+
+    def test_new_game_without_limits_seats_nobody_and_uses_global(self):
+        from cardgames.casino import Casino
+        casino = Casino(redis_host="localhost", redis_port=6379, db=self._roster_db(3))
+        casino.redis = MagicMock()
+        casino.npc_min, casino.npc_max = 1, 2
+        game = casino.games[casino.new_game()]
+        self.assertIsNone(game.npc_min)
+        self.assertEqual(game.players + game.players_waiting, [])
+        self.assertEqual(casino._npc_limits_for(game), (1, 2))
+
+    def test_normalize_npc_limits(self):
+        cases = [
+            ((3, 5), (3, 5)),
+            ((5, 3), (5, 5)),                      # max raised to min
+            ((-2, 99), (0, MAX_NPCS_PER_TABLE)),   # clamped to the table
+            ((None, 4), (0, 4)),                   # missing min -> 0
+            ((2, None), (2, 2)),                   # missing max -> min
+        ]
+        for args, expected in cases:
+            with self.subTest(args=args):
+                self.assertEqual(normalize_npc_limits(*args), expected)
+
+    def test_per_game_npc_limits_round_trip_through_sqlite(self):
+        db = SqliteDatabase(":memory:")
+        try:
+            mock_casino = MagicMock()
+            mock_casino.db = db
+            with_limits = Blackjack(game_id="limited", casino=mock_casino)
+            with_limits.npc_min, with_limits.npc_max = 3, 5
+            without = Blackjack(game_id="unlimited", casino=mock_casino)
+            for game in (with_limits, without):
+                db.save_game(game.game_id, game.to_dict())
+            restored = {g['game_id']: Blackjack.from_dict(g, mock_casino) for g in db.load_all_active_games()}
+            self.assertEqual((restored['limited'].npc_min, restored['limited'].npc_max), (3, 5))
+            self.assertEqual((restored['unlimited'].npc_min, restored['unlimited'].npc_max), (None, None))
+        finally:
+            db.close()
 
     def test_delete_game_clears_npc_game(self):
         """_delete_game() should clear current_game_id for all NPCs in the game."""
@@ -3223,9 +3264,9 @@ class TestNPCAutofill(unittest.TestCase):
         casino.npc_max = npc_max
         return casino
 
-    def _make_game(self, state, npcs=0, humans=0):
-        """Return a mock game with the given state and player counts."""
-        game = MagicMock()
+    def _make_game(self, state, npcs=0, humans=0, npc_min=None, npc_max=None):
+        """Return a mock game with the given state, player counts and per-game limits."""
+        game = MagicMock(npc_min=npc_min, npc_max=npc_max)
         game.state = state
         npc_players = [MagicMock(is_npc=True) for _ in range(npcs)]
         human_players = [MagicMock(is_npc=False) for _ in range(humans)]
@@ -3339,7 +3380,7 @@ class TestNPCAutofill(unittest.TestCase):
         casino._mark_dirty = MagicMock()
         npc1 = MagicMock(is_npc=True, npc_db_id=None)
         npc2 = MagicMock(is_npc=True, npc_db_id=None)
-        game = MagicMock()
+        game = MagicMock(npc_min=None, npc_max=None)  # no per-game limits: global ones apply
         game.state = HandState.WAITING
         game.players = []
         game.players_waiting = [npc1, npc2]
@@ -3380,6 +3421,35 @@ class TestNPCAutofill(unittest.TestCase):
         casino._last_autofill['g1'] = time.time()  # set recent timestamp
         casino._autofill_npcs('g1', game)
         casino._spawn_npcs_into_game.assert_not_called()
+
+    # --- per-game limits from new_game ---
+
+    def test_autofill_per_game_limits_override_global(self):
+        """A /newgame table at 3-5 keeps its NPCs even when the global limits are 0/0."""
+        casino = self._make_casino(npc_min=0, npc_max=0)
+        casino._spawn_npcs_into_game = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=3, npc_min=3, npc_max=5)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        game.leave.assert_not_called()
+        casino._spawn_npcs_into_game.assert_not_called()
+
+    def test_autofill_refills_to_per_game_min(self):
+        casino = self._make_casino(npc_min=0, npc_max=0)
+        casino._spawn_npcs_into_game = MagicMock()
+        casino._mark_dirty = MagicMock()
+        game = self._make_game(HandState.BETWEEN_HANDS, npcs=1, npc_min=3, npc_max=5)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        casino._spawn_npcs_into_game.assert_called_once_with('g1', 2)
+
+    def test_autofill_trims_to_per_game_max(self):
+        casino = self._make_casino(npc_min=0, npc_max=MAX_NPCS_PER_TABLE)
+        casino._mark_dirty = MagicMock()
+        game = self._make_game(HandState.WAITING, npcs=3, npc_min=0, npc_max=2)
+        casino.games['g1'] = game
+        casino._autofill_npcs('g1', game)
+        self.assertEqual(game.leave.call_count, 1)
 
 
 class TestNPCWalletReplenishment(unittest.TestCase):

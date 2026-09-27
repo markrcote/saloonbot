@@ -17,6 +17,12 @@ from cardgames.money import dollars_to_cents, format_cents
 from changelog import parse_changelog, select_recent_entries
 from wwnames.wwnames import WildWestNames
 
+# /newgame NPC limits. MAX_NPCS_PER_TABLE mirrors cardgames/casino.py (not imported: the
+# casino module pulls in LLM and DB clients); the server clamps to its own cap regardless.
+DEFAULT_GAME_NPC_MIN = 3
+DEFAULT_GAME_NPC_MAX = 5
+MAX_NPCS_PER_TABLE = 6
+
 _wwnames = WildWestNames()
 
 
@@ -410,6 +416,8 @@ class BlackjackCog(commands.Cog):
                 f"Current player idx: {g['current_player_idx']}",
                 f"Dealer: {' '.join(g['dealer_hand']) or '—'}",
             ]
+            if g.get('npc_min') is not None:
+                desc_lines.append(f"NPC limits: {g['npc_min']}–{g['npc_max']} (per game)")
             for p in g['players']:
                 npc_tag = f" ({p['npc_type']}/{p['personality']})" if p['is_npc'] else ""
                 hand_str = ' '.join(p['hand']) if p['hand'] else '—'
@@ -820,7 +828,7 @@ class BlackjackCog(commands.Cog):
             "`/wwname` — Generate a random Old West name"
         )
         admin_cmds = (
-            "`/newgame [num_bots]` — Start a new blackjack game (0–4 bots)\n"
+            "`/newgame [npc_min] [npc_max]` — Start a new blackjack game kept at npc_min–npc_max NPCs (default 3–5)\n"
             "`/stopgame` — Stop the current game and refund unresolved bets\n"
             "`/checkwallet <target>` — Check any player's or NPC's balance\n"
             "`/setwallet <target> <amount>` — Set a wallet to an exact amount\n"
@@ -845,16 +853,28 @@ class BlackjackCog(commands.Cog):
     async def new_game(
         self,
         interaction: nextcord.Interaction,
-        num_bots: int = nextcord.SlashOption(
-            name="num_bots",
-            description="How many bot players to add (0–4)",
+        npc_min: int = nextcord.SlashOption(
+            name="npc_min",
+            description="Fewest NPC players to keep at the table; seated right away (0–6, default 3)",
             required=False,
-            default=0,
+            default=DEFAULT_GAME_NPC_MIN,
             min_value=0,
-            max_value=4,
+            max_value=MAX_NPCS_PER_TABLE,
+        ),
+        npc_max: int = nextcord.SlashOption(
+            name="npc_max",
+            description="Most NPC players allowed at the table (0–6, default 5)",
+            required=False,
+            default=DEFAULT_GAME_NPC_MAX,
+            min_value=0,
+            max_value=MAX_NPCS_PER_TABLE,
         ),
     ):
         """Start a game if none in progress in this guild and channel."""
+        if npc_min > npc_max:
+            await interaction.send(f"⚠️ npc_min ({npc_min}) can't be more than npc_max ({npc_max}).",
+                                   ephemeral=True)
+            return
         game = self.find_game_by_interaction(interaction)
         if game:
             await interaction.send("⚠️ A game is already in progress in this channel.")
@@ -870,7 +890,8 @@ class BlackjackCog(commands.Cog):
             'request_id': game.request_id,
             'guild_id': game.guild_id,
             'channel_id': game.channel_id,
-            'num_bots': num_bots,
+            'npc_min': npc_min,
+            'npc_max': npc_max,
         }
         try:
             await self.redis.publish("casino", json.dumps(message))

@@ -274,6 +274,8 @@ pytest test.py
 ```
 (`python test.py` also works, since it's a plain `unittest` suite.)
 
+Under pytest, `conftest.py` caps the test process (and any server it starts) at 2 GB of address space, so a runaway test fails with `MemoryError` instead of exhausting the machine's RAM. Set `SALOONBOT_TEST_MEM_LIMIT_MB` to change the cap, or to `0` to disable it. Running the files directly with `python` skips the cap.
+
 ### End-to-End Tests
 
 End-to-end tests validate the complete system integration using the Redis interface with real MySQL and Redis services (no mocking). These tests:

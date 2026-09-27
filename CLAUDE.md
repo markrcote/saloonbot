@@ -17,6 +17,8 @@ pytest test.py
 ```
 (`python test.py` still works — it's a plain `unittest` suite — but `pytest` is the standard runner and what the pre-commit hook uses.)
 
+Under pytest, `conftest.py` sets `RLIMIT_AS` to 2 GB (override: `SALOONBOT_TEST_MEM_LIMIT_MB`, `0` disables), inherited by the e2e server subprocess, so a runaway test dies with `MemoryError` rather than exhausting the dev container's 4 GB. `python test.py` bypasses it. In unit tests, any mock DB that reaches NPC spawning must set `get_available_npcs.return_value` to a real list — `len()` of a bare `MagicMock` is always 0, so `_get_or_create_npcs` would loop forever.
+
 ### End-to-End Testing
 ```bash
 ./run-e2e-tests.sh

@@ -1446,7 +1446,12 @@ class TestBlackjackCardConservation(unittest.TestCase):
         mock_casino.get_wallet.return_value = 20000
         mock_casino.update_wallet.return_value = True
         mock_casino.game_output = MagicMock()
-        game = Blackjack(game_id="test", casino=mock_casino)
+        # A full 52-card deck with the aces at the bottom (deal pops from the
+        # end), so no random blackjack can skip the PLAYING state these tests need.
+        cards = [Card(suit, value) for suit in "HDCS" for value in range(2, 15)]
+        random.shuffle(cards)
+        cards.sort(key=lambda c: c.value != 14)
+        game = Blackjack(game_id="test", casino=mock_casino, initial_deck=cards)
         game._pause = lambda *args, **kwargs: None
         return game
 

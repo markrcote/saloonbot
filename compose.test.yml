@@ -20,7 +20,7 @@ services:
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysql", "-h", "localhost", "-u", "saloonbot", "-psaloonbot_password", "-e", "SELECT 1"]
+      test: ["CMD", "mysql", "-h", "127.0.0.1", "-u", "saloonbot", "-psaloonbot_password", "-e", "SELECT 1"]
       interval: 5s
       timeout: 3s
       retries: 10

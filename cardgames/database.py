@@ -157,6 +157,10 @@ MIGRATIONS = [
     [   # Migration 11: per-game NPC autofill limits from /newgame; NULL = use the global npc_limits.
         "ALTER TABLE games ADD COLUMN npc_min INT NULL, ADD COLUMN npc_max INT NULL",
     ],
+    [   # Migration 12: persist the (randomised, on ambient tables) BETWEEN_HANDS wait so a
+        # restart mid-wait doesn't reset it; NULL = the Blackjack default.
+        "ALTER TABLE games ADD COLUMN time_between_hands_duration DOUBLE NULL",
+    ],
 ]
 
 
@@ -362,6 +366,7 @@ class Database:
             json.dumps(game_data['bets']),
             game_data.get('npc_min'),
             game_data.get('npc_max'),
+            game_data.get('time_between_hands_duration'),
         )
 
         def fn(cursor):
@@ -371,8 +376,8 @@ class Database:
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
                     players_json, players_waiting_json, bets_json,
-                    npc_min, npc_max
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
+                    npc_min, npc_max, time_between_hands_duration
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
                 ON DUPLICATE KEY UPDATE
                     state = new.state,
                     current_player_idx = new.current_player_idx,
@@ -386,7 +391,8 @@ class Database:
                     players_waiting_json = new.players_waiting_json,
                     bets_json = new.bets_json,
                     npc_min = new.npc_min,
-                    npc_max = new.npc_max
+                    npc_max = new.npc_max,
+                    time_between_hands_duration = new.time_between_hands_duration
             """, params)
             logging.debug(f"Saved game {game_id}")
             return True
@@ -421,6 +427,7 @@ class Database:
                 'bets': json.loads(result['bets_json']),
                 'npc_min': result['npc_min'],
                 'npc_max': result['npc_max'],
+                'time_between_hands_duration': result['time_between_hands_duration'],
             }
         except Error as e:
             logging.error(f"Error loading game {game_id}: {e}")
@@ -455,6 +462,7 @@ class Database:
                     'bets': json.loads(result['bets_json']),
                     'npc_min': result['npc_min'],
                     'npc_max': result['npc_max'],
+                    'time_between_hands_duration': result['time_between_hands_duration'],
                 })
             return games
         except Error as e:

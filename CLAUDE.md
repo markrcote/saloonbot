@@ -159,7 +159,7 @@ Discord Users
 **Database tables:**
 - `schema_version` - Single-row table tracking the last applied migration index
 - `users` - Stores player usernames and wallet balances as `wallet_cents` (default 20000, i.e. $200)
-- `games` - Persists game state (deck, hands, bets, timers, per-game `npc_min`/`npc_max` — NULL = global limits, added by migration 11) for server restart recovery; `game_id` (and every other game-ID column: `game_channels.game_id`, `npcs.current_game_id`, `npc_memories.game_id`) is `VARCHAR(255)` on MySQL since migration 10, so IDs aren't pinned to UUID length
+- `games` - Persists game state (deck, hands, bets, timers, per-game `npc_min`/`npc_max` — NULL = global limits, added by migration 11; `time_between_hands_duration`, added by migration 12) for server restart recovery; `game_id` (and every other game-ID column: `game_channels.game_id`, `npcs.current_game_id`, `npc_memories.game_id`) is `VARCHAR(255)` on MySQL since migration 10, so IDs aren't pinned to UUID length
 - `game_channels` - Maps game IDs to Discord guild/channel for bot restart recovery
 - `npcs` - Persistent NPC roster: name, personality, backstory (LLM-generated), `wallet_cents`, current_game_id
 - `npc_memories` - Condensed NPC session summaries: npc_id, game_id (no FK — games rows are deleted at game end), session_summary, created_at; pruned to the 20 most recent per NPC on insert

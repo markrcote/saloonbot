@@ -2826,6 +2826,21 @@ class TestNPCPersistence(unittest.TestCase):
         finally:
             db.close()
 
+    def test_time_between_hands_duration_round_trips_through_sqlite(self):
+        """An ambient table's randomised between-hands wait survives a restart
+        rather than resetting to the default."""
+        db = SqliteDatabase(":memory:")
+        try:
+            mock_casino = MagicMock()
+            mock_casino.db = db
+            game = Blackjack(game_id="waiting_it_out", casino=mock_casino)
+            game.time_between_hands_duration = 187.5
+            db.save_game(game.game_id, game.to_dict())
+            restored = Blackjack.from_dict(db.load_all_active_games()[0], mock_casino)
+            self.assertEqual(restored.time_between_hands_duration, 187.5)
+        finally:
+            db.close()
+
     def test_delete_game_clears_npc_game(self):
         """_delete_game() should clear current_game_id for all NPCs in the game."""
         from cardgames.casino import Casino

@@ -963,6 +963,10 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
         finally:
             pubsub.close()
         self.assertEqual(self._seated_npc_count(game_id), 2)
+        duration_row = self.poll_db(
+            "SELECT time_between_hands_duration FROM games WHERE game_id = %s", (game_id,),
+            predicate=lambda r: r[0] is not None, timeout=5)
+        self.assertIsNotNone(duration_row, "end_hand's between-hands wait should be persisted")
 
         self._stop_server()
         self._start_server()
@@ -973,6 +977,10 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
         self.assertEqual(
             self.poll_db("SELECT npc_min, npc_max FROM games WHERE game_id = %s", (game_id,), timeout=5),
             (2, 2), "Per-game NPC limits should persist across the restart")
+        self.assertEqual(
+            self.poll_db("SELECT time_between_hands_duration FROM games WHERE game_id = %s", (game_id,),
+                         timeout=5)[0],
+            duration_row[0], "The between-hands wait should survive the restart")
 
         pubsub = self.subscribe_to_game(game_id)
         try:

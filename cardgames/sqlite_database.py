@@ -142,6 +142,10 @@ MIGRATIONS = [
         "ALTER TABLE games ADD COLUMN npc_min INTEGER",
         "ALTER TABLE games ADD COLUMN npc_max INTEGER",
     ],
+    [   # Migration 12: persist the (randomised, on ambient tables) BETWEEN_HANDS wait so a
+        # restart mid-wait doesn't reset it; NULL = the Blackjack default.
+        "ALTER TABLE games ADD COLUMN time_between_hands_duration REAL",
+    ],
 ]
 
 
@@ -277,8 +281,8 @@ class SqliteDatabase:
                     time_betting_started, time_last_hand_ended, time_last_event,
                     deck_json, discards_json, dealer_hand_json,
                     players_json, players_waiting_json, bets_json,
-                    npc_min, npc_max
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    npc_min, npc_max, time_between_hands_duration
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     state = excluded.state,
                     current_player_idx = excluded.current_player_idx,
@@ -293,6 +297,7 @@ class SqliteDatabase:
                     bets_json = excluded.bets_json,
                     npc_min = excluded.npc_min,
                     npc_max = excluded.npc_max,
+                    time_between_hands_duration = excluded.time_between_hands_duration,
                     updated_at = CURRENT_TIMESTAMP
             """, (
                 game_id,
@@ -309,6 +314,7 @@ class SqliteDatabase:
                 json.dumps(game_data['bets']),
                 game_data.get('npc_min'),
                 game_data.get('npc_max'),
+                game_data.get('time_between_hands_duration'),
             ))
             self.connection.commit()
             logging.debug(f"Saved game {game_id}")
@@ -359,6 +365,7 @@ class SqliteDatabase:
             'bets': json.loads(result['bets_json']),
             'npc_min': result['npc_min'],
             'npc_max': result['npc_max'],
+            'time_between_hands_duration': result['time_between_hands_duration'],
         }
 
     @_synchronized

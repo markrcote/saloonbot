@@ -143,6 +143,7 @@ def hunt(n_runs, filter_classes=None):
         test_e2e.TestPlayerActions,
         test_e2e.TestBlackjackGame,
         test_e2e.TestServerRestart,
+        test_e2e.TestBotsOnlyGameRestart,
         test_e2e.TestStopGame,
         test_e2e.TestWalletBalance,
         test_e2e.TestMultiplePlayers,

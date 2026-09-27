@@ -882,6 +882,68 @@ class TestServerRestart(EndToEndTestCase):
             pubsub.close()
 
 
+class TestBotsOnlyGameRestart(EndToEndTestCase):
+    """A game created with num_bots and no human must resume after a restart:
+    its NPCs are seated (and persisted) at creation, so nothing waits on a join."""
+
+    # Bots-only tables are ambient and would otherwise sit 120-300s between hands.
+    EXTRA_ENV = {
+        'BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MIN': '0',
+        'BLACKJACK_AMBIENT_TIME_BETWEEN_HANDS_MAX': '0',
+    }
+
+    def _seated_npc_count(self, game_id):
+        row = self.poll_db("SELECT COUNT(*) FROM npcs WHERE current_game_id = %s", (game_id,), timeout=1)
+        return row[0] if row else 0
+
+    def _list_game_ids(self):
+        pubsub = self.redis.pubsub()
+        try:
+            pubsub.subscribe("casino_update")
+            pubsub.get_message(timeout=1)  # Skip subscribe confirmation
+            request_id = f"list-request-{time.time()}"
+            self.redis.publish("casino", json.dumps({
+                'event_type': 'casino_action',
+                'action': 'list_games',
+                'request_id': request_id,
+            }))
+            for _ in range(20):
+                msg = pubsub.get_message(timeout=1)
+                if msg and msg['type'] == 'message':
+                    response = json.loads(msg['data'])
+                    if response.get('event_type') == 'list_games' and response.get('request_id') == request_id:
+                        return [g['game_id'] for g in response['games']]
+            self.fail("Should receive list_games response")
+        finally:
+            pubsub.close()
+
+    def test_bots_only_game_resumes_after_restart(self):
+        game_id = self.create_game(num_bots=2)
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            before = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
+            self.assertTrue(any('dust settles' in m for m in before),
+                            f"Bots-only table should play before the restart. Messages: {before}")
+        finally:
+            pubsub.close()
+        self.assertEqual(self._seated_npc_count(game_id), 2)
+
+        self._stop_server()
+        self._start_server()
+
+        self.assertIn(game_id, self._list_game_ids(), "Bots-only game should be reloaded after restart")
+        self.assertEqual(self._seated_npc_count(game_id), 2,
+                         "Restored game should keep its NPCs seated (not cleared as stale)")
+
+        pubsub = self.subscribe_to_game(game_id)
+        try:
+            after = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
+            self.assertTrue(any('dust settles' in m for m in after),
+                            f"Bots-only table should keep playing after the restart. Messages: {after}")
+        finally:
+            pubsub.close()
+
+
 class TestStopGame(EndToEndTestCase):
     """Test admin stop_game action."""
 

@@ -21,7 +21,7 @@ mysql-connector-python==26.7.0
 nextcord==3.2.0
 propcache==0.5.2
 pycodestyle==2.14.0
-pyflakes==3.4.0
+pyflakes==4.0.0
 redis==8.1.0
 requests==2.34.2
 setuptools==84.0.0

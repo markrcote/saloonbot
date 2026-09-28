@@ -1726,6 +1726,25 @@ class TestCasinoStuckGameRecovery(unittest.TestCase):
         self.assertIn(other_id, self.casino.games)
         self.assertEqual(other.tick.call_count, 1)
 
+    def test_redis_connection_error_propagates_and_keeps_the_game(self):
+        """A Redis drop mid-tick isn't a game bug: listen() reconnects, the game plays on."""
+        self.game.tick = MagicMock(side_effect=redis.exceptions.ConnectionError("down"))
+        with self.assertRaises(redis.exceptions.ConnectionError):
+            self.casino._tick_games()
+        self.assertIn(self.game_id, self.casino.games)
+        self.assertNotIn(self.game_id, self.casino._quarantined)
+        self.assertNotIn(self.game_id, self.casino._tick_errors)
+        self.casino.db.delete_game.assert_not_called()
+        self.casino.update_wallet.assert_not_called()
+
+    def test_game_ticks_normally_after_a_redis_drop(self):
+        self.game.tick = MagicMock(side_effect=[redis.exceptions.ConnectionError("down"), None])
+        with self.assertRaises(redis.exceptions.ConnectionError):
+            self.casino._tick_games()
+        self.casino._tick_games()  # after reconnect
+        self.assertEqual(self.game.tick.call_count, 2)
+        self.assertIn(self.game_id, self.casino.games)
+
     def test_unexpected_exception_is_logged_with_traceback(self):
         with self.assertLogs(level="ERROR") as logs:
             self._fail_ticks(1, exc=KeyError("boom"))

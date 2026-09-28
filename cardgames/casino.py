@@ -1654,6 +1654,8 @@ class Casino:
                     logging.error(f"[{game_id}] Game is stuck; stopping it and returning bets")
                     self._stop_failed_game(game_id)
                 continue
+            except redis.exceptions.ConnectionError:
+                raise  # Redis dropped, not a game bug: listen() reconnects (#261)
             except Exception:
                 # Anything but CardGameError is a bug that may have left the game
                 # half-updated, so retrying the tick could repeat side effects. Stop

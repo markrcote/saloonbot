@@ -309,7 +309,9 @@ source .venv/bin/activate
 python hunt_flaky.py --runs 20
 ```
 
-Options: `--runs N` (default 10), `--output FILE` (JSON results), `--class ClassName` (limit to specific test class).
+Options: `--runs N` (default 100), `--output FILE` (JSON results), `--class ClassName ...` (limit to specific test classes).
+
+The classes to run are discovered from `test_e2e.py` (every `EndToEndTestCase` subclass, in source order), so new e2e classes are picked up automatically. Plain `unittest.TestCase` classes such as `TestGameIdColumnMigration` aren't hunted; an `EndToEndTestCase` subclass that can't share the stack goes in `EXCLUDED_CLASSES` with its reason.
 
 ## Measuring LLM Cost
 

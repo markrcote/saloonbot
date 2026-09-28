@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import re
 import sqlite3
 import tempfile
 import time
@@ -30,6 +31,7 @@ from cardgames.simple_npc import SimpleBlackjackNPC
 from cardgames.sqlite_database import SqliteDatabase
 
 import deadman_teardown
+import hunt_flaky
 import start_ambient_table
 import watch_ambient_cost
 import watch_game
@@ -5140,6 +5142,49 @@ class TestWatchGameMain(unittest.TestCase):
     def test_ctrl_c_exits_cleanly(self):
         with patch('watch_game.redis.Redis'), patch('watch_game.watch', side_effect=KeyboardInterrupt):
             self.assertEqual(watch_game.main(['--game-id', 'dusty-saloon']), 0)
+
+
+class TestHuntFlakyClassDiscovery(unittest.TestCase):
+    """hunt_flaky.py discovers e2e classes rather than keeping a list that drifts (#266)."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Imported here, not at module level, so pytest doesn't collect its classes.
+        import test_e2e
+        cls.test_e2e = test_e2e
+
+    def test_discovers_every_e2e_class_in_source_order(self):
+        with open(self.test_e2e.__file__) as f:
+            expected = re.findall(r'^class (\w+)\(EndToEndTestCase\):', f.read(), re.MULTILINE)
+        names = [c.__name__ for c in hunt_flaky.discover_classes(self.test_e2e)]
+        self.assertEqual(names, expected)
+        # The classes that had drifted out of the old hand-written list.
+        self.assertIn('TestUsageStats', names)
+        self.assertIn('TestAmbientCostWatchdogE2E', names)
+
+    def test_skips_base_and_non_e2e_classes(self):
+        names = {c.__name__ for c in hunt_flaky.discover_classes(self.test_e2e)}
+        self.assertNotIn('EndToEndTestCase', names)
+        self.assertNotIn('TestGameIdColumnMigration', names)
+
+    def test_excluded_classes_are_dropped_and_explained(self):
+        with patch.dict(hunt_flaky.EXCLUDED_CLASSES, {'TestUsageStats': 'needs a fresh stack'}):
+            names = [c.__name__ for c in hunt_flaky.discover_classes(self.test_e2e)]
+            self.assertNotIn('TestUsageStats', names)
+            with self.assertRaisesRegex(SystemExit, r'TestUsageStats \(excluded: needs a fresh stack\)'):
+                hunt_flaky.select_classes(self.test_e2e, ['TestUsageStats'])
+
+    def test_select_filters_in_source_order(self):
+        selected = hunt_flaky.select_classes(self.test_e2e, ['TestUsageStats', 'TestGameCreation'])
+        self.assertEqual([c.__name__ for c in selected], ['TestGameCreation', 'TestUsageStats'])
+
+    def test_select_without_filter_returns_all(self):
+        self.assertEqual(hunt_flaky.select_classes(self.test_e2e),
+                         hunt_flaky.discover_classes(self.test_e2e))
+
+    def test_select_rejects_unknown_class(self):
+        with self.assertRaisesRegex(SystemExit, 'TestGameIdColumnMigration, TestNope'):
+            hunt_flaky.select_classes(self.test_e2e, ['TestNope', 'TestGameIdColumnMigration'])
 
 
 if __name__ == '__main__':

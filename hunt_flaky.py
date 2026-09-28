@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import inspect
 import json
 import logging
 import os
@@ -130,38 +131,55 @@ def run_one(cls, method_name):
 # ── Main hunt ──────────────────────────────────────────────────────────────────
 
 
+# EndToEndTestCase subclasses that can't run on the hunter's shared stack, mapped to
+# the reason. Plain unittest.TestCase classes (e.g. TestGameIdColumnMigration, which
+# builds its own scratch DB and needs no server) are never discovered at all.
+EXCLUDED_CLASSES = {}
+
+
+def discover_classes(module):
+    """Every EndToEndTestCase subclass defined in `module`, in source order,
+    minus EXCLUDED_CLASSES."""
+    base = module.EndToEndTestCase
+    classes = [
+        obj
+        for obj in vars(module).values()
+        if isinstance(obj, type)
+        and issubclass(obj, base)
+        and obj is not base
+        and obj.__module__ == module.__name__
+        and obj.__name__ not in EXCLUDED_CLASSES
+    ]
+    return sorted(classes, key=lambda c: inspect.getsourcelines(c)[1])
+
+
+def select_classes(module, filter_classes=None):
+    """The discovered classes, restricted to `filter_classes` names if given.
+
+    Raises SystemExit naming any requested class that isn't runnable.
+    """
+    classes = discover_classes(module)
+    if not filter_classes:
+        return classes
+    by_name = {c.__name__: c for c in classes}
+    problems = []
+    for name in sorted(set(filter_classes) - by_name.keys()):
+        reason = EXCLUDED_CLASSES.get(name)
+        problems.append(f"{name} (excluded: {reason})" if reason else name)
+    if problems:
+        raise SystemExit(f"Unknown test class(es): {', '.join(problems)}")
+    return [c for c in classes if c.__name__ in filter_classes]
+
+
 def hunt(n_runs, filter_classes=None):
-    # Import test module AFTER we've set up infra so module-level code is clean
     import test_e2e  # noqa: PLC0415
+
+    # Validate --class before paying for docker startup.
+    all_classes = select_classes(test_e2e, filter_classes)
 
     r, db = start_infra()
     test_e2e._redis = r
     test_e2e._db = db
-
-    all_classes = [
-        test_e2e.TestGameCreation,
-        test_e2e.TestPlayerActions,
-        test_e2e.TestBlackjackGame,
-        test_e2e.TestServerRestart,
-        test_e2e.TestBotsOnlyGameRestart,
-        test_e2e.TestStopGame,
-        test_e2e.TestWalletBalance,
-        test_e2e.TestMultiplePlayers,
-        test_e2e.TestNPCBots,
-        test_e2e.TestAdminWallet,
-        test_e2e.TestNPCLimits,
-        test_e2e.TestManualNPC,
-        test_e2e.TestNPCWalletReplenishment,
-        test_e2e.TestNPCSessionMemory,
-        test_e2e.TestMetricsEndpoint,
-        test_e2e.TestNPCDepartureE2E,
-        test_e2e.TestNPCRelationships,
-    ]
-    if filter_classes:
-        all_classes = [c for c in all_classes if c.__name__ in filter_classes]
-        unknown = set(filter_classes) - {c.__name__ for c in all_classes}
-        if unknown:
-            raise SystemExit(f"Unknown test class(es): {', '.join(sorted(unknown))}")
 
     results = {}  # "Class::method" -> {passes, fails, errors[]}
 

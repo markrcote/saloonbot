@@ -263,7 +263,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - ALWAYS activate the virtualenv before running tests or scripts (e.g., `source .venv/bin/activate`)
 - ALWAYS run tests (unit + e2e where relevant) after code changes, before committing
 - After fixing a bug, run the full test suite to catch regressions in adjacent modules
-- **Flaky test hunting**: `hunt_flaky.py` re-uses a single Docker stack across N runs per test (~100× faster than re-spinning docker each time). Usage: `python hunt_flaky.py [--runs N] [--output FILE] [--class ClassName]`
+- **Flaky test hunting**: `hunt_flaky.py` re-uses a single Docker stack across N runs per test (~100× faster than re-spinning docker each time). Usage: `python hunt_flaky.py [--runs N] [--output FILE] [--class ClassName ...]`. It discovers every `EndToEndTestCase` subclass in `test_e2e.py` (source order) — no list to update when adding an e2e class; put one that can't share the stack in `hunt_flaky.EXCLUDED_CLASSES` with a reason. `TestHuntFlakyClassDiscovery` in `test.py` guards this.
 
 ## Planning Docs
 - `VISION.md` — high-level product vision: the atmospheric frontier casino simulator and its goals

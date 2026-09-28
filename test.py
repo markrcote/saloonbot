@@ -5187,5 +5187,45 @@ class TestHuntFlakyClassDiscovery(unittest.TestCase):
             hunt_flaky.select_classes(self.test_e2e, ['TestNope', 'TestGameIdColumnMigration'])
 
 
+class TestHuntFlakyRunOne(unittest.TestCase):
+    """hunt_flaky.run_one runs addCleanup callbacks like unittest does."""
+
+    def _make_case(self, calls, fail_test=False, fail_setup=False):
+        class Case(unittest.TestCase):
+            def setUp(self):
+                self.addCleanup(calls.append, 'cleanup')
+                if fail_setup:
+                    raise RuntimeError('setUp broke')
+
+            def tearDown(self):
+                calls.append('tearDown')
+
+            def test_it(self):
+                calls.append('test')
+                if fail_test:
+                    self.fail('boom')
+        return Case
+
+    def test_cleanups_run_after_teardown_on_pass(self):
+        calls = []
+        passed, err, _ = hunt_flaky.run_one(self._make_case(calls), 'test_it')
+        self.assertTrue(passed)
+        self.assertIsNone(err)
+        self.assertEqual(calls, ['test', 'tearDown', 'cleanup'])
+
+    def test_cleanups_run_after_teardown_on_failure(self):
+        calls = []
+        passed, err, _ = hunt_flaky.run_one(self._make_case(calls, fail_test=True), 'test_it')
+        self.assertFalse(passed)
+        self.assertIn('boom', err)
+        self.assertEqual(calls, ['test', 'tearDown', 'cleanup'])
+
+    def test_cleanups_run_when_setup_fails(self):
+        calls = []
+        with self.assertRaisesRegex(RuntimeError, 'setUp broke'):
+            hunt_flaky.run_one(self._make_case(calls, fail_setup=True), 'test_it')
+        self.assertEqual(calls, ['cleanup'])
+
+
 if __name__ == '__main__':
     unittest.main()

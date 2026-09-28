@@ -106,7 +106,12 @@ def run_one(cls, method_name):
 
     inst = cls(method_name)
     # setUp flushes Redis and clears DB tables — same as a normal test run.
-    inst.setUp()
+    try:
+        inst.setUp()
+    except BaseException:
+        # unittest still runs cleanups registered before a failing setUp.
+        inst.doCleanups()
+        raise
 
     error_msg = None
     try:
@@ -118,6 +123,11 @@ def run_one(cls, method_name):
     finally:
         try:
             inst.tearDown()
+        except Exception:
+            pass
+        # addCleanup callbacks, which unittest runs after tearDown.
+        try:
+            inst.doCleanups()
         except Exception:
             pass
 

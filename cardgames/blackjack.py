@@ -259,6 +259,9 @@ class Blackjack(CardGame):
         self.bets = {}  # Player -> bet amount
         self._dirty = False
         self.time_betting_started = None
+        # Whether this betting round's halfway nudge has gone out. Deliberately not
+        # persisted: a restart mid-betting can at worst repeat one reminder.
+        self.betting_reminder_sent = False
         self.time_first_player_joined = None
 
         # Players who left mid-hand after acting; resolved at end_hand()
@@ -440,12 +443,18 @@ class Blackjack(CardGame):
         self.bets = {}
         self.time_first_player_joined = None
         self.time_betting_started = time.time()
+        self.betting_reminder_sent = False
         self.state = HandState.BETTING
         logging.info(f"[{self.game_id}] Betting opens — {', '.join(_player_label(p) for p in self.players)}")
 
         self.output("💰 Ante up, folks! Place your bets!")
         self.output(f"🎰 Table limits: ${format_cents(self.MIN_BET)} to ${format_cents(self.MAX_BET)}")
-        self.output(f"⏱️ You've got {self.TIME_FOR_BETTING} seconds before the cards fly.")
+        # The betting timeout only exists to bench idle humans (ambient tables skip it),
+        # so address the countdown to the seated humans and leave it off NPC-only tables.
+        humans = [p for p in self.players if not p.is_npc]
+        if humans:
+            names = ", ".join(str(p) for p in humans)
+            self.output(f"⏱️ {names}: you've got {self.TIME_FOR_BETTING} seconds to bet before the cards fly.")
 
         # Output all players' wallets before betting (NPC balances hidden)
         wallet_lines = []
@@ -592,8 +601,7 @@ class Blackjack(CardGame):
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""
         self._dirty = True
-        self.output("✨ ~*~ The dust settles... ~*~ ✨")
-        self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
+        self.output(f"🏁 Showdown — dealer's sitting at {self.get_score(self.dealer)}.")
         ambient = self._is_ambient()
         for player in self.players:
             self._pause(self.RESULT_PAUSE)
@@ -876,6 +884,23 @@ class Blackjack(CardGame):
                 return
 
             self.new_hand()
+        elif not ambient:
+            self._remind_humans_to_bet()
+
+    def _remind_humans_to_bet(self):
+        """Once per betting round, at the halfway mark, nudge humans who haven't bet."""
+        if self.betting_reminder_sent:
+            return
+        now = time.time()
+        if now < self.time_betting_started + self.TIME_FOR_BETTING / 2:
+            return
+        waiting_on = [p for p in self.players if not p.is_npc and p.name not in self.bets]
+        if not waiting_on:
+            return
+        self.betting_reminder_sent = True
+        seconds_left = max(1, round(self.time_betting_started + self.TIME_FOR_BETTING - now))
+        names = ", ".join(str(p) for p in waiting_on)
+        self.output(f"⏱️ Still waitin' on bets from {names} — {seconds_left} seconds left.")
 
     def _tick_playing(self):
         """Handle PLAYING state: auto-play NPCs, remind humans."""

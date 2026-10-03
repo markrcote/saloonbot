@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import subprocess
+import re
 import sys
 import uuid
 from enum import Enum
@@ -15,6 +15,7 @@ from nextcord.ext import commands, tasks
 
 from cardgames.money import dollars_to_cents, format_cents
 from changelog import parse_changelog, select_recent_entries
+from version_info import format_version, load_version
 from wwnames.wwnames import WildWestNames
 
 # /newgame NPC limits. MAX_NPCS_PER_TABLE mirrors cardgames/casino.py (not imported: the
@@ -67,30 +68,25 @@ if not DISCORD_TOKEN:
 
 GUILD_IDS = [int(x) for x in GUILD_IDS_STR.split(",")] if GUILD_IDS_STR else None
 
+# Formatting rule for game updates (#286): embeds for hand milestones (new hand,
+# betting opens, showdown), every per-player hand result, and NPC speech; plain
+# text for play-by-play. Keep in step with watch_game.classify() (#256).
+# Result lines are "<player> <emoji> [(already left) ]<outcome>...".
+HAND_RESULT_RE = re.compile(
+    r" (🏆|💥|🤝|❌) (?:\(already left\) )?(?:strikes gold|went bust|pushes with the dealer|loses to the house)")
+HAND_RESULT_TYPES = {"🏆": ("win", 0xffd700), "💥": ("loss", 0xff0000),  # Gold, red
+                     "❌": ("loss", 0xff0000), "🤝": ("push", 0x95a5a6)}  # Red, grey
+
 MESSAGE_PACING_DELAY = 1.2  # seconds between game messages sent to Discord
 
-VERSION = None
-
-try:
-    with open('.version') as version_file:
-        VERSION = version_file.readline().strip()
-except FileNotFoundError:
-    pass
-
-if not VERSION:
-    try:
-        VERSION = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
-                                 text=True).stdout.strip()
-    except FileNotFoundError:
-        pass
-
+VERSION_INFO = load_version()
 
 logging.info("=== Bot Configuration ===")
 logging.info(f"  Redis: {REDIS_HOST}:{REDIS_PORT}")
 logging.info(f"  DISCORD_TOKEN: {'set' if DISCORD_TOKEN else 'not set'}")
 logging.info(f"  DISCORD_GUILDS: {GUILD_IDS_STR or '(all guilds)'}")
 logging.info(f"  Debug logging: {'enabled' if DEBUG_LOGGING else 'disabled'}")
-logging.info(f"  Version: {VERSION or 'unknown'}")
+logging.info(f"  Version: {VERSION_INFO.sha if VERSION_INFO else 'unknown'}")
 logging.info("=========================")
 
 intents = nextcord.Intents.default()
@@ -107,11 +103,7 @@ async def on_ready():
 
 @bot.slash_command(description="Version", guild_ids=GUILD_IDS)
 async def version(interaction: nextcord.Interaction):
-    if VERSION:
-        response = VERSION
-    else:
-        response = "?"
-    await interaction.send(response)
+    await interaction.send(format_version(VERSION_INFO))
 
 
 @bot.slash_command(description="Generate a name", guild_ids=GUILD_IDS)
@@ -1122,20 +1114,17 @@ class BlackjackCog(commands.Cog):
 
                     text = data["text"]
 
-                    # Use embeds for special messages
+                    # Embeds for milestones, hand results and NPC speech (see HAND_RESULT_RE)
+                    result = HAND_RESULT_RE.search(text)
                     if text.startswith("🤠") and ': "' in text:
                         msg_type = "npc_quip"
                         embed = nextcord.Embed(description=text, color=0xc8a96e)  # Sepia
                         await game.channel.send(embed=embed)
-                    elif "🏆 strikes gold" in text:
-                        msg_type = "win"
-                        embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
+                    elif result:
+                        msg_type, colour = HAND_RESULT_TYPES[result.group(1)]
+                        embed = nextcord.Embed(description=text, color=colour)
                         await game.channel.send(embed=embed)
-                    elif "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
-                        msg_type = "bust"
-                        embed = nextcord.Embed(description=text, color=0xff0000)  # Red
-                        await game.channel.send(embed=embed)
-                    elif "✨ ~*~ The dust settles" in text:
+                    elif text.startswith("🏁 Showdown"):
                         msg_type = "hand_result"
                         logging.debug(f"[{game.game_id}] Dramatic pause: 1.0s (hand_result)")
                         async with game.channel.typing():

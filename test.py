@@ -12,6 +12,7 @@ from unittest.mock import ANY, MagicMock, patch
 import redis
 
 from changelog import parse_changelog, select_recent_entries, ChangelogEntry
+from version_info import VersionInfo, format_version, load_version, parse_version_text
 from cardgames.blackjack import (
     Action, Blackjack, HandState, InvalidActionError, InvalidBetError,
     card_to_str, str_to_card, serialize_hand, deserialize_hand,
@@ -457,6 +458,39 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.game.players.append(Player("Human"))
         self.game._pause(1.0)
         mock_sleep.assert_called_once_with(1.0)
+
+    def _outputs(self):
+        return [c.args[1] for c in self.game.casino.game_output.call_args_list]
+
+    def test_betting_countdown_names_seated_humans_only(self):
+        self.game.players.extend([Player("Alice"), SimpleBlackjackNPC("Bot1"), Player("Bob")])
+        self.game.start_betting()
+        timer_lines = [t for t in self._outputs() if t.startswith("⏱️")]
+        self.assertEqual(timer_lines, [
+            f"⏱️ Alice, Bob: you've got {self.game.TIME_FOR_BETTING} seconds to bet before the cards fly."])
+
+    def test_betting_countdown_omitted_on_ambient_table(self):
+        # Ambient tables skip the betting timeout, so there's no countdown to announce.
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.game.start_betting()
+        self.assertTrue(any(t.startswith("💰 Ante up") for t in self._outputs()))
+        self.assertFalse(any(t.startswith("⏱️") for t in self._outputs()))
+
+    @patch('cardgames.blackjack.time.sleep')
+    def test_end_hand_opens_with_single_showdown_line(self, _sleep):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        player = Player("Human")
+        self.game.players.append(player)
+        self.game.new_hand()
+        self.game.bets[player.name] = self.game.MIN_BET
+        self.game.stand(player)
+        self.game.dealer_turn()
+        self.game.casino.game_output.reset_mock()
+        self.game.end_hand()
+        first = self._outputs()[0]
+        self.assertEqual(first, f"🏁 Showdown — dealer's sitting at {self.game.get_score(self.game.dealer)}.")
+        self.assertFalse(any("dust settles" in t for t in self._outputs()))
 
     def test_end_hand_ambient_sets_random_between_hands_duration(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
@@ -1179,6 +1213,73 @@ class TestBlackjackBetting(unittest.TestCase):
         self.game.bet(player, 1000)
         with self.assertRaises(CardGameError):
             self.game.bet(player, 2000)
+
+
+class TestBlackjackBettingReminder(unittest.TestCase):
+    """One halfway nudge per betting round for humans who haven't bet (#284)."""
+
+    def setUp(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 100000
+        mock_casino.update_wallet.return_value = True
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
+        self.alice = Player("Alice")
+        self.bob = Player("Bob")
+        self.game.players.extend([self.alice, self.bob])
+        self.game.start_betting()
+
+    def _reminders(self):
+        return [c.args[1] for c in self.game.casino.game_output.call_args_list
+                if c.args[1].startswith("⏱️ Still waitin'")]
+
+    def _rewind(self, seconds):
+        self.game.time_betting_started -= seconds
+
+    def test_no_reminder_before_halfway(self):
+        self._rewind(self.game.TIME_FOR_BETTING / 2 - 1)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
+
+    def test_reminder_at_halfway_names_humans_who_havent_bet(self):
+        self.game.bet(self.alice, self.game.MIN_BET)
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        left = self.game.TIME_FOR_BETTING - self.game.TIME_FOR_BETTING // 2
+        self.assertEqual(self._reminders(), [f"⏱️ Still waitin' on bets from Bob — {left} seconds left."])
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_reminder_sent_only_once_per_round(self):
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        self.game.tick()
+        self.assertEqual(len(self._reminders()), 1)
+
+    def test_reminder_rearms_next_betting_round(self):
+        self.game.betting_reminder_sent = True
+        self.game.start_betting()
+        self.assertFalse(self.game.betting_reminder_sent)
+
+    def test_no_reminder_for_npcs_still_deciding(self):
+        # An NPC whose LLM bet is pending shouldn't trigger a nudge once the humans have bet.
+        npc = SimpleBlackjackNPC("Bot1")
+        npc.decide_bet = MagicMock(return_value=None)
+        self.game.players.append(npc)
+        self.game.bet(self.alice, self.game.MIN_BET)
+        self.game.bet(self.bob, self.game.MIN_BET)
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_no_reminder_on_ambient_table(self):
+        self.game.players = []
+        npc = SimpleBlackjackNPC("Bot1")
+        npc.decide_bet = MagicMock(return_value=None)
+        self.game.players.append(npc)
+        self._rewind(self.game.TIME_FOR_BETTING)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
 
 
 class TestBlackjackPayouts(unittest.TestCase):
@@ -3982,6 +4083,60 @@ class TestLLMHealthCheck(unittest.TestCase):
         self.assertIsNone(casino._llm_health['openai']['first_failure_at'])
 
 
+class TestVersionInfo(unittest.TestCase):
+    """/version output built from .version (sha, commit date, subject)."""
+
+    def test_parse_full_file(self):
+        info = parse_version_text("abc123\n2026-10-03T07:18:38+00:00\nFix the thing\n")
+        self.assertEqual(info, VersionInfo("abc123", "2026-10-03T07:18:38+00:00", "Fix the thing"))
+
+    def test_parse_legacy_sha_only_file(self):
+        self.assertEqual(parse_version_text("abc123\n"), VersionInfo("abc123", None, None))
+
+    def test_parse_blank_build_args(self):
+        # Built without GIT_COMMIT_* args: the Dockerfile's printf writes empty lines 2-3.
+        self.assertEqual(parse_version_text("abc123\n\n\n"), VersionInfo("abc123", None, None))
+
+    def test_parse_empty_is_none(self):
+        self.assertIsNone(parse_version_text(""))
+        self.assertIsNone(parse_version_text("\n\n\n"))
+
+    def test_format_full(self):
+        info = VersionInfo("0123456789abcdef", "2026-10-03T07:18:38+00:00", "Fix the thing")
+        self.assertEqual(format_version(info),
+                         "`0123456789ab` · <t:1791011918:f> (<t:1791011918:R>)\n> Fix the thing")
+
+    def test_format_sha_only(self):
+        self.assertEqual(format_version(VersionInfo("abc123", None, None)), "`abc123`")
+
+    def test_format_unparseable_date_shown_raw(self):
+        self.assertEqual(format_version(VersionInfo("abc123", "yesterday", None)), "`abc123` · yesterday")
+
+    def test_format_none(self):
+        self.assertEqual(format_version(None), "?")
+
+    def test_load_prefers_version_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".version", delete=False) as f:
+            f.write("abc123\n2026-10-03T07:18:38+00:00\nFix the thing\n")
+        self.addCleanup(os.unlink, f.name)
+        with patch("version_info.subprocess.run") as run:
+            info = load_version(f.name)
+        run.assert_not_called()
+        self.assertEqual(info.subject, "Fix the thing")
+
+    def test_load_falls_back_to_git(self):
+        git_out = MagicMock(returncode=0, stdout="def456\n2026-10-02T12:00:00-07:00\nOther commit\n")
+        with patch("version_info.subprocess.run", return_value=git_out):
+            info = load_version("/nonexistent/.version")
+        self.assertEqual(info, VersionInfo("def456", "2026-10-02T12:00:00-07:00", "Other commit"))
+
+    def test_load_without_file_or_git_is_none(self):
+        with patch("version_info.subprocess.run", side_effect=FileNotFoundError):
+            self.assertIsNone(load_version("/nonexistent/.version"))
+        with patch("version_info.subprocess.run", return_value=MagicMock(returncode=128, stdout="")):
+            self.assertIsNone(load_version("/nonexistent/.version"))
+
+
 class TestChangelog(unittest.TestCase):
 
     def _write(self, text):
@@ -5060,8 +5215,14 @@ class TestWatchGameClassify(unittest.TestCase):
         cases = [
             ('🤠 Big Jim: "Fortune favours the bold."', 'npc_quip', watch_game.SEPIA),
             ('Big Jim 🏆 strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
-            ('💥 Big Jim busts and lost $5.00', 'bust', watch_game.RED),
-            ('✨ ~*~ The dust settles ~*~ ✨', 'hand_result', watch_game.ROYAL_BLUE),
+            ('Big Jim 🏆 (already left) strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
+            ('Alice 💥 went bust! $5.00 lost to the house. 💰 Wad: $195.00', 'loss', watch_game.RED),
+            ('Alice ❌ loses to the house. $5.00 gone. 💰 Wad: $195.00', 'loss', watch_game.RED),
+            ('Big Jim 🤝 pushes with the dealer. $5.00 returned.', 'push', watch_game.GREY),
+            # Mid-hand busts are play-by-play, not results (#286).
+            ('💥 Big Jim busts! Too greedy, partner.', 'game_event', None),
+            ('💥 Dealer busts! The house crumbles!', 'game_event', None),
+            ("🏁 Showdown — dealer's sitting at 19.", 'hand_result', watch_game.ROYAL_BLUE),
             ('🃏 The dealer shuffles a fresh deck.', 'new_hand', watch_game.PURPLE),
             ('💰 Ante up, gents!', 'bet_prompt', watch_game.ORANGE),
             ('🔄 Dealer flips a King of Spades.', 'dealer_reveal', None),
@@ -5076,6 +5237,29 @@ class TestWatchGameClassify(unittest.TestCase):
 
     def test_bust_needs_more_than_the_emoji(self):
         self.assertEqual(watch_game.classify('💥 A glass shatters.')[0], 'game_event')
+
+    def test_every_real_hand_result_line_is_a_result(self):
+        # Drift guard: render each outcome through Blackjack._resolve_player itself.
+        dealer_19 = [Card("H", 10), Card("S", 9)]
+        outcomes = {
+            'win': [Card("H", 10), Card("D", 10)],
+            'push': [Card("C", 10), Card("D", 9)],
+            'loss': [Card("C", 10), Card("D", 8)],
+        }
+        for departed in (False, True):
+            for npc in (False, True):
+                for expected, hand in list(outcomes.items()) + [('loss', [Card("C", 10), Card("D", 8), Card("S", 5)])]:
+                    with self.subTest(expected=expected, departed=departed, npc=npc, hand=hand):
+                        casino = MagicMock()
+                        casino.get_wallet.return_value = 20000
+                        game = Blackjack(game_id="g", casino=casino)
+                        player = SimpleBlackjackNPC("Bot1") if npc else Player("Alice")
+                        player.hand = list(hand)
+                        game.dealer.hand = list(dealer_19)
+                        game.bets[player.name] = 500
+                        game._resolve_player(player, departed=departed)
+                        text = casino.game_output.call_args.args[1]
+                        self.assertEqual(watch_game.classify(text)[0], expected, text)
 
 
 class TestWatchGameFormat(unittest.TestCase):

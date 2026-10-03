@@ -44,7 +44,7 @@ Slash commands:
 
 ### Metadata
 
-* `/version`: Outputs the current git sha.
+* `/version`: Outputs the current git SHA plus the last commit's date and summary.
 
 ## LLM Bot Players
 
@@ -130,7 +130,7 @@ python watch_game.py --game-id dusty-saloon
 REDIS_HOST=localhost python watch_game.py --game-id dusty-saloon   # e.g. through an SSH tunnel to staging
 ```
 
-It prints each update as it arrives, tinted to match the bot's embed colours (quips, wins, busts, results, shuffles, ante-up) when stdout is a terminal (`NO_COLOR` turns colour off), and exits when the game ends or on Ctrl-C. Updates are live pub/sub with no history, so only what happens after it connects is shown, and it doesn't reproduce the bot's per-message pacing delays. Its message classification is a copy of the rules in `bot.py`'s message handler, so keep the two in step (see [#256](https://github.com/markrcote/saloonbot/issues/256) for sharing them).
+It prints each update as it arrives, tinted to match the bot's embed colours (quips, per-player wins/losses/pushes, showdown, shuffles, ante-up) when stdout is a terminal (`NO_COLOR` turns colour off), and exits when the game ends or on Ctrl-C. Updates are live pub/sub with no history, so only what happens after it connects is shown, and it doesn't reproduce the bot's per-message pacing delays. Its message classification is a copy of the rules in `bot.py`'s message handler, so keep the two in step (see [#256](https://github.com/markrcote/saloonbot/issues/256) for sharing them).
 
 ## Development
 

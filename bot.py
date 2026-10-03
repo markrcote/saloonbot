@@ -1117,7 +1117,7 @@ class BlackjackCog(commands.Cog):
                         msg_type = "bust"
                         embed = nextcord.Embed(description=text, color=0xff0000)  # Red
                         await game.channel.send(embed=embed)
-                    elif "✨ ~*~ The dust settles" in text:
+                    elif text.startswith("🏁 Showdown"):
                         msg_type = "hand_result"
                         logging.debug(f"[{game.game_id}] Dramatic pause: 1.0s (hand_result)")
                         async with game.channel.typing():

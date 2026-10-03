@@ -601,8 +601,7 @@ class Blackjack(CardGame):
     def end_hand(self):
         """Resolve the hand: compare scores and announce winners."""
         self._dirty = True
-        self.output("✨ ~*~ The dust settles... ~*~ ✨")
-        self.output(f"Dealer's sitting at {self.get_score(self.dealer)}.")
+        self.output(f"🏁 Showdown — dealer's sitting at {self.get_score(self.dealer)}.")
         ambient = self._is_ambient()
         for player in self.players:
             self._pause(self.RESULT_PAUSE)

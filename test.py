@@ -476,6 +476,22 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.assertTrue(any(t.startswith("💰 Ante up") for t in self._outputs()))
         self.assertFalse(any(t.startswith("⏱️") for t in self._outputs()))
 
+    @patch('cardgames.blackjack.time.sleep')
+    def test_end_hand_opens_with_single_showdown_line(self, _sleep):
+        self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
+                          Card("H", 7), Card("H", 8), Card("H", 9)]
+        player = Player("Human")
+        self.game.players.append(player)
+        self.game.new_hand()
+        self.game.bets[player.name] = self.game.MIN_BET
+        self.game.stand(player)
+        self.game.dealer_turn()
+        self.game.casino.game_output.reset_mock()
+        self.game.end_hand()
+        first = self._outputs()[0]
+        self.assertEqual(first, f"🏁 Showdown — dealer's sitting at {self.game.get_score(self.game.dealer)}.")
+        self.assertFalse(any("dust settles" in t for t in self._outputs()))
+
     def test_end_hand_ambient_sets_random_between_hands_duration(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]
@@ -5200,7 +5216,7 @@ class TestWatchGameClassify(unittest.TestCase):
             ('🤠 Big Jim: "Fortune favours the bold."', 'npc_quip', watch_game.SEPIA),
             ('Big Jim 🏆 strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
             ('💥 Big Jim busts and lost $5.00', 'bust', watch_game.RED),
-            ('✨ ~*~ The dust settles ~*~ ✨', 'hand_result', watch_game.ROYAL_BLUE),
+            ("🏁 Showdown — dealer's sitting at 19.", 'hand_result', watch_game.ROYAL_BLUE),
             ('🃏 The dealer shuffles a fresh deck.', 'new_hand', watch_game.PURPLE),
             ('💰 Ante up, gents!', 'bet_prompt', watch_game.ORANGE),
             ('🔄 Dealer flips a King of Spades.', 'dealer_reveal', None),

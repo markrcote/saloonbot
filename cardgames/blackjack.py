@@ -445,7 +445,12 @@ class Blackjack(CardGame):
 
         self.output("💰 Ante up, folks! Place your bets!")
         self.output(f"🎰 Table limits: ${format_cents(self.MIN_BET)} to ${format_cents(self.MAX_BET)}")
-        self.output(f"⏱️ You've got {self.TIME_FOR_BETTING} seconds before the cards fly.")
+        # The betting timeout only exists to bench idle humans (ambient tables skip it),
+        # so address the countdown to the seated humans and leave it off NPC-only tables.
+        humans = [p for p in self.players if not p.is_npc]
+        if humans:
+            names = ", ".join(str(p) for p in humans)
+            self.output(f"⏱️ {names}: you've got {self.TIME_FOR_BETTING} seconds to bet before the cards fly.")
 
         # Output all players' wallets before betting (NPC balances hidden)
         wallet_lines = []

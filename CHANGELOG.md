@@ -8,6 +8,7 @@ Notable changes to SaloonBot, for players and server admins. Dates are when each
 - The betting countdown now names the players it's for, and bots-only tables (which have no betting deadline) no longer show it.
 - Players who haven't bet get a reminder halfway through the betting window, instead of the table quietly waiting on them.
 - The end of each hand is now announced as "🏁 Showdown — dealer's sitting at N" (one message) instead of "The dust settles..." followed by the dealer's score.
+- Game messages are styled consistently: every player's end-of-hand result (win, loss or push) gets a coloured box, while mid-hand play — including busts — stays plain text.
 
 ## 2026-09-27 — Bots-only tables
 

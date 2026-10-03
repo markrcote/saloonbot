@@ -242,6 +242,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 ## Key Patterns
 
 - Bot uses asyncio with `@tasks.loop(seconds=3.0)` for polling Redis
+- **Game message formatting (#286)**: the bot posts a game update as a coloured embed only if it's a hand milestone (new hand, "Ante up", "🏁 Showdown"), a per-player hand result (`bot.HAND_RESULT_RE`: win gold, bust/loss red, push grey — including departed players' "(already left)" results), or NPC speech (sepia); all play-by-play, including mid-hand "💥 … busts!", is plain text. `watch_game.classify()` mirrors the rule; `TestWatchGameClassify` renders every `_resolve_player` outcome to catch wording drift
 - Server uses synchronous Redis in blocking game loop
 - Both implement exponential backoff for Redis reconnection
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`

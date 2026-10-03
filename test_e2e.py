@@ -633,10 +633,10 @@ class TestBlackjackGame(EndToEndTestCase):
             self.player_action(game_id, 'Player1', 'stand')
 
             # Wait for dealer turn and end of hand
-            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='dust settles'))
+            all_updates.extend(self.collect_messages(pubsub, timeout=5, stop_on='Showdown'))
 
             # Verify game flow
-            hand_ended = any('dust settles' in u for u in all_updates)
+            hand_ended = any('Showdown' in u for u in all_updates)
             self.assertTrue(hand_ended, f"Hand should have ended. Messages: {all_updates}")
 
             # Verify dealer played
@@ -723,10 +723,10 @@ class TestServerRestart(EndToEndTestCase):
         pubsub = self.subscribe_to_game(game_id)
         try:
             self.player_action(game_id, 'PersistPlayer', 'stand')
-            messages = self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+            messages = self.collect_messages(pubsub, timeout=10, stop_on='Showdown')
             self.assertTrue(any('stands pat' in m for m in messages),
                             f"Game should continue after restart. Got: {messages}")
-            self.assertTrue(any('dust settles' in m for m in messages),
+            self.assertTrue(any('Showdown' in m for m in messages),
                             "Hand should resolve after player stands")
         finally:
             pubsub.close()
@@ -998,8 +998,8 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
         game_id = self.create_game(npc_min=2, npc_max=2)
         pubsub = self.subscribe_to_game(game_id)
         try:
-            before = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
-            self.assertTrue(any('dust settles' in m for m in before),
+            before = self.collect_messages(pubsub, timeout=45, stop_on='Showdown')
+            self.assertTrue(any('Showdown' in m for m in before),
                             f"Bots-only table should play before the restart. Messages: {before}")
         finally:
             pubsub.close()
@@ -1025,8 +1025,8 @@ class TestBotsOnlyGameRestart(EndToEndTestCase):
 
         pubsub = self.subscribe_to_game(game_id)
         try:
-            after = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
-            self.assertTrue(any('dust settles' in m for m in after),
+            after = self.collect_messages(pubsub, timeout=45, stop_on='Showdown')
+            self.assertTrue(any('Showdown' in m for m in after),
                             f"Bots-only table should keep playing after the restart. Messages: {after}")
         finally:
             pubsub.close()
@@ -1172,11 +1172,11 @@ class TestWalletBalance(EndToEndTestCase):
             self.collect_messages(pubsub, timeout=0.5)
             self.place_bet(game_id, player_name, bet)
 
-            # Stop on either "you're up" (normal) or "dust settles" (dealer blackjack).
-            pre_stand = self.collect_messages(pubsub, timeout=5, stop_on=["you're up", 'dust settles'])
+            # Stop on either "you're up" (normal) or "Showdown" (dealer blackjack).
+            pre_stand = self.collect_messages(pubsub, timeout=5, stop_on=["you're up", 'Showdown'])
             if any("you're up" in m for m in pre_stand):
                 self.player_action(game_id, player_name, 'stand')
-                messages = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+                messages = self.collect_messages(pubsub, timeout=5, stop_on='Showdown')
             else:
                 # Dealer blackjack — hand resolved without a player turn.
                 messages = pre_stand
@@ -1218,10 +1218,10 @@ class TestMultiplePlayers(EndToEndTestCase):
             self.place_bet(game_id, 'Beta', 1000)
 
             first_turn = self.collect_messages(
-                pubsub, timeout=5, stop_on=["you're up", 'dust settles']
+                pubsub, timeout=5, stop_on=["you're up", 'Showdown']
             )
             # Dealer blackjack resolves the hand immediately with no player turns — valid outcome.
-            if any('dust settles' in m for m in first_turn):
+            if any('Showdown' in m for m in first_turn):
                 return
             self.assertTrue(
                 any("Alpha, you're up" in m for m in first_turn),
@@ -1238,9 +1238,9 @@ class TestMultiplePlayers(EndToEndTestCase):
 
             self.player_action(game_id, 'Beta', 'stand')
 
-            end = self.collect_messages(pubsub, timeout=5, stop_on='dust settles')
+            end = self.collect_messages(pubsub, timeout=5, stop_on='Showdown')
             self.assertTrue(
-                any('dust settles' in m for m in end),
+                any('Showdown' in m for m in end),
                 f"Hand should resolve after both players stand. Messages: {end}"
             )
         finally:
@@ -1259,8 +1259,8 @@ class TestNPCBots(EndToEndTestCase):
         try:
             # With no Redis traffic the server ticks every ~2s and a bots-only table takes one
             # step (bet, hit, stand, deal...) per tick, so a hand with a few hits runs past 15s.
-            messages = self.collect_messages(pubsub, timeout=45, stop_on='dust settles')
-            self.assertTrue(any('dust settles' in m for m in messages),
+            messages = self.collect_messages(pubsub, timeout=45, stop_on='Showdown')
+            self.assertTrue(any('Showdown' in m for m in messages),
                             f"Bots-only table should play a hand. Messages: {messages}")
         finally:
             pubsub.close()
@@ -1280,9 +1280,9 @@ class TestNPCBots(EndToEndTestCase):
             # Wait until it's the human's turn (NPC plays first and is handled automatically).
             # Dealer blackjack resolves the hand immediately with no player turns — valid outcome.
             pre_human = self.collect_messages(
-                pubsub, timeout=10, stop_on=["HumanPlayer, you're up", 'dust settles']
+                pubsub, timeout=10, stop_on=["HumanPlayer, you're up", 'Showdown']
             )
-            if any('dust settles' in m for m in pre_human):
+            if any('Showdown' in m for m in pre_human):
                 return
             self.assertTrue(
                 any("HumanPlayer, you're up" in m for m in pre_human),
@@ -1291,9 +1291,9 @@ class TestNPCBots(EndToEndTestCase):
 
             self.player_action(game_id, 'HumanPlayer', 'stand')
 
-            end = self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+            end = self.collect_messages(pubsub, timeout=10, stop_on='Showdown')
             self.assertTrue(
-                any('dust settles' in m for m in end),
+                any('Showdown' in m for m in end),
                 f"Hand should resolve after both NPC and human act. Messages: {end}"
             )
         finally:
@@ -1778,13 +1778,13 @@ class TestNPCSessionMemory(EndToEndTestCase):
         self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
         self.place_bet(game_id, player_name, 1000)
         pre = self.collect_messages(
-            pubsub, timeout=10, stop_on=[f"{player_name}, you're up", 'dust settles'])
-        if not any('dust settles' in m for m in pre):
+            pubsub, timeout=10, stop_on=[f"{player_name}, you're up", 'Showdown'])
+        if not any('Showdown' in m for m in pre):
             self.assertTrue(
                 any(f"{player_name}, you're up" in m for m in pre),
                 f"{player_name} should be prompted for their turn. Messages: {pre}")
             self.player_action(game_id, player_name, 'stand')
-            self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+            self.collect_messages(pubsub, timeout=10, stop_on='Showdown')
 
     def test_npc_memories_table_exists(self):
         """Migration 7 was applied on server startup."""
@@ -1884,10 +1884,10 @@ class TestMetricsEndpoint(EndToEndTestCase):
             self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
             self.place_bet(game_id, 'MetricsHuman', 1000)
             messages = self.collect_messages(
-                pubsub, timeout=10, stop_on=["MetricsHuman, you're up", 'dust settles'])
-            if not any('dust settles' in m for m in messages):
+                pubsub, timeout=10, stop_on=["MetricsHuman, you're up", 'Showdown'])
+            if not any('Showdown' in m for m in messages):
                 self.player_action(game_id, 'MetricsHuman', 'stand')
-                self.collect_messages(pubsub, timeout=10, stop_on='dust settles')
+                self.collect_messages(pubsub, timeout=10, stop_on='Showdown')
         finally:
             pubsub.close()
 
@@ -1901,7 +1901,7 @@ class TestMetricsEndpoint(EndToEndTestCase):
         while time.time() < deadline:
             body = _fetch_metrics()
             # The hand counter ticks at the end of end_hand(), after the result pauses
-            # that follow the "dust settles" message, so wait for it too. Match the
+            # that follow the "Showdown" message, so wait for it too. Match the
             # labelled sample, not the bare name: the HELP/TYPE lines exist from startup.
             if 'saloonbot_llm_calls_total' in body and 'saloonbot_hands_total{' in body:
                 break
@@ -2045,8 +2045,8 @@ class TestNPCDepartureE2E(EndToEndTestCase):
             self.collect_messages(pubsub, timeout=10, stop_on='Place your bets')
             self.place_bet(game_id, 'RollHuman', 1000)
             pre = self.collect_messages(
-                pubsub, timeout=10, stop_on=["RollHuman, you're up", 'dust settles'])
-            if not any('dust settles' in m for m in pre):
+                pubsub, timeout=10, stop_on=["RollHuman, you're up", 'Showdown'])
+            if not any('Showdown' in m for m in pre):
                 self.player_action(game_id, 'RollHuman', 'stand')
             end = self.collect_messages(pubsub, timeout=10, stop_on='call it a night')
             self.assertTrue(

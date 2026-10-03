@@ -43,7 +43,7 @@ def classify(text):
         return "win", GOLD
     if "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
         return "bust", RED
-    if "✨ ~*~ The dust settles" in text:
+    if text.startswith("🏁 Showdown"):
         return "hand_result", ROYAL_BLUE
     if "🃏 The dealer shuffles" in text:
         return "new_hand", PURPLE

@@ -459,6 +459,23 @@ class TestBlackjackAmbientTiming(unittest.TestCase):
         self.game._pause(1.0)
         mock_sleep.assert_called_once_with(1.0)
 
+    def _outputs(self):
+        return [c.args[1] for c in self.game.casino.game_output.call_args_list]
+
+    def test_betting_countdown_names_seated_humans_only(self):
+        self.game.players.extend([Player("Alice"), SimpleBlackjackNPC("Bot1"), Player("Bob")])
+        self.game.start_betting()
+        timer_lines = [t for t in self._outputs() if t.startswith("⏱️")]
+        self.assertEqual(timer_lines, [
+            f"⏱️ Alice, Bob: you've got {self.game.TIME_FOR_BETTING} seconds to bet before the cards fly."])
+
+    def test_betting_countdown_omitted_on_ambient_table(self):
+        # Ambient tables skip the betting timeout, so there's no countdown to announce.
+        self.game.players.append(SimpleBlackjackNPC("Bot1"))
+        self.game.start_betting()
+        self.assertTrue(any(t.startswith("💰 Ante up") for t in self._outputs()))
+        self.assertFalse(any(t.startswith("⏱️") for t in self._outputs()))
+
     def test_end_hand_ambient_sets_random_between_hands_duration(self):
         self.game.deck = [Card("H", 3), Card("H", 2), Card("H", 5), Card("H", 6),
                           Card("H", 7), Card("H", 8), Card("H", 9)]

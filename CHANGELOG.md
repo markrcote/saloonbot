@@ -5,6 +5,7 @@ Notable changes to SaloonBot, for players and server admins. Dates are when each
 ## 2026-10-03 — Table polish
 
 - `/version` now shows when the running build's last commit was made and what it was, not just its SHA.
+- The betting countdown now names the players it's for, and bots-only tables (which have no betting deadline) no longer show it.
 
 ## 2026-09-27 — Bots-only tables
 

@@ -1199,6 +1199,73 @@ class TestBlackjackBetting(unittest.TestCase):
             self.game.bet(player, 2000)
 
 
+class TestBlackjackBettingReminder(unittest.TestCase):
+    """One halfway nudge per betting round for humans who haven't bet (#284)."""
+
+    def setUp(self):
+        mock_casino = MagicMock()
+        mock_casino.db = MagicMock()
+        mock_casino.get_wallet.return_value = 100000
+        mock_casino.update_wallet.return_value = True
+        self.game = Blackjack(game_id="test_game", casino=mock_casino)
+        self.alice = Player("Alice")
+        self.bob = Player("Bob")
+        self.game.players.extend([self.alice, self.bob])
+        self.game.start_betting()
+
+    def _reminders(self):
+        return [c.args[1] for c in self.game.casino.game_output.call_args_list
+                if c.args[1].startswith("⏱️ Still waitin'")]
+
+    def _rewind(self, seconds):
+        self.game.time_betting_started -= seconds
+
+    def test_no_reminder_before_halfway(self):
+        self._rewind(self.game.TIME_FOR_BETTING / 2 - 1)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
+
+    def test_reminder_at_halfway_names_humans_who_havent_bet(self):
+        self.game.bet(self.alice, self.game.MIN_BET)
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        left = self.game.TIME_FOR_BETTING - self.game.TIME_FOR_BETTING // 2
+        self.assertEqual(self._reminders(), [f"⏱️ Still waitin' on bets from Bob — {left} seconds left."])
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_reminder_sent_only_once_per_round(self):
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        self.game.tick()
+        self.assertEqual(len(self._reminders()), 1)
+
+    def test_reminder_rearms_next_betting_round(self):
+        self.game.betting_reminder_sent = True
+        self.game.start_betting()
+        self.assertFalse(self.game.betting_reminder_sent)
+
+    def test_no_reminder_for_npcs_still_deciding(self):
+        # An NPC whose LLM bet is pending shouldn't trigger a nudge once the humans have bet.
+        npc = SimpleBlackjackNPC("Bot1")
+        npc.decide_bet = MagicMock(return_value=None)
+        self.game.players.append(npc)
+        self.game.bet(self.alice, self.game.MIN_BET)
+        self.game.bet(self.bob, self.game.MIN_BET)
+        self._rewind(self.game.TIME_FOR_BETTING / 2)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
+        self.assertEqual(self.game.state, HandState.BETTING)
+
+    def test_no_reminder_on_ambient_table(self):
+        self.game.players = []
+        npc = SimpleBlackjackNPC("Bot1")
+        npc.decide_bet = MagicMock(return_value=None)
+        self.game.players.append(npc)
+        self._rewind(self.game.TIME_FOR_BETTING)
+        self.game.tick()
+        self.assertEqual(self._reminders(), [])
+
+
 class TestBlackjackPayouts(unittest.TestCase):
     def test_winner_gets_2x_bet(self):
         mock_casino = MagicMock()

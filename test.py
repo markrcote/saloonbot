@@ -5215,7 +5215,13 @@ class TestWatchGameClassify(unittest.TestCase):
         cases = [
             ('🤠 Big Jim: "Fortune favours the bold."', 'npc_quip', watch_game.SEPIA),
             ('Big Jim 🏆 strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
-            ('💥 Big Jim busts and lost $5.00', 'bust', watch_game.RED),
+            ('Big Jim 🏆 (already left) strikes gold! Payout: $10.00', 'win', watch_game.GOLD),
+            ('Alice 💥 went bust! $5.00 lost to the house. 💰 Wad: $195.00', 'loss', watch_game.RED),
+            ('Alice ❌ loses to the house. $5.00 gone. 💰 Wad: $195.00', 'loss', watch_game.RED),
+            ('Big Jim 🤝 pushes with the dealer. $5.00 returned.', 'push', watch_game.GREY),
+            # Mid-hand busts are play-by-play, not results (#286).
+            ('💥 Big Jim busts! Too greedy, partner.', 'game_event', None),
+            ('💥 Dealer busts! The house crumbles!', 'game_event', None),
             ("🏁 Showdown — dealer's sitting at 19.", 'hand_result', watch_game.ROYAL_BLUE),
             ('🃏 The dealer shuffles a fresh deck.', 'new_hand', watch_game.PURPLE),
             ('💰 Ante up, gents!', 'bet_prompt', watch_game.ORANGE),
@@ -5231,6 +5237,29 @@ class TestWatchGameClassify(unittest.TestCase):
 
     def test_bust_needs_more_than_the_emoji(self):
         self.assertEqual(watch_game.classify('💥 A glass shatters.')[0], 'game_event')
+
+    def test_every_real_hand_result_line_is_a_result(self):
+        # Drift guard: render each outcome through Blackjack._resolve_player itself.
+        dealer_19 = [Card("H", 10), Card("S", 9)]
+        outcomes = {
+            'win': [Card("H", 10), Card("D", 10)],
+            'push': [Card("C", 10), Card("D", 9)],
+            'loss': [Card("C", 10), Card("D", 8)],
+        }
+        for departed in (False, True):
+            for npc in (False, True):
+                for expected, hand in list(outcomes.items()) + [('loss', [Card("C", 10), Card("D", 8), Card("S", 5)])]:
+                    with self.subTest(expected=expected, departed=departed, npc=npc, hand=hand):
+                        casino = MagicMock()
+                        casino.get_wallet.return_value = 20000
+                        game = Blackjack(game_id="g", casino=casino)
+                        player = SimpleBlackjackNPC("Bot1") if npc else Player("Alice")
+                        player.hand = list(hand)
+                        game.dealer.hand = list(dealer_19)
+                        game.bets[player.name] = 500
+                        game._resolve_player(player, departed=departed)
+                        text = casino.game_output.call_args.args[1]
+                        self.assertEqual(watch_game.classify(text)[0], expected, text)
 
 
 class TestWatchGameFormat(unittest.TestCase):

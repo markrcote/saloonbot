@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from enum import Enum
@@ -66,6 +67,15 @@ if not DISCORD_TOKEN:
     sys.exit(1)
 
 GUILD_IDS = [int(x) for x in GUILD_IDS_STR.split(",")] if GUILD_IDS_STR else None
+
+# Formatting rule for game updates (#286): embeds for hand milestones (new hand,
+# betting opens, showdown), every per-player hand result, and NPC speech; plain
+# text for play-by-play. Keep in step with watch_game.classify() (#256).
+# Result lines are "<player> <emoji> [(already left) ]<outcome>...".
+HAND_RESULT_RE = re.compile(
+    r" (🏆|💥|🤝|❌) (?:\(already left\) )?(?:strikes gold|went bust|pushes with the dealer|loses to the house)")
+HAND_RESULT_TYPES = {"🏆": ("win", 0xffd700), "💥": ("loss", 0xff0000),  # Gold, red
+                     "❌": ("loss", 0xff0000), "🤝": ("push", 0x95a5a6)}  # Red, grey
 
 MESSAGE_PACING_DELAY = 1.2  # seconds between game messages sent to Discord
 
@@ -1104,18 +1114,15 @@ class BlackjackCog(commands.Cog):
 
                     text = data["text"]
 
-                    # Use embeds for special messages
+                    # Embeds for milestones, hand results and NPC speech (see HAND_RESULT_RE)
+                    result = HAND_RESULT_RE.search(text)
                     if text.startswith("🤠") and ': "' in text:
                         msg_type = "npc_quip"
                         embed = nextcord.Embed(description=text, color=0xc8a96e)  # Sepia
                         await game.channel.send(embed=embed)
-                    elif "🏆 strikes gold" in text:
-                        msg_type = "win"
-                        embed = nextcord.Embed(description=text, color=0xffd700)  # Gold
-                        await game.channel.send(embed=embed)
-                    elif "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
-                        msg_type = "bust"
-                        embed = nextcord.Embed(description=text, color=0xff0000)  # Red
+                    elif result:
+                        msg_type, colour = HAND_RESULT_TYPES[result.group(1)]
+                        embed = nextcord.Embed(description=text, color=colour)
                         await game.channel.send(embed=embed)
                     elif text.startswith("🏁 Showdown"):
                         msg_type = "hand_result"

@@ -17,6 +17,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 
 import redis
@@ -33,16 +34,21 @@ RED = 0xff0000
 ROYAL_BLUE = 0x4169e1
 PURPLE = 0x9370db
 ORANGE = 0xff8c00
+GREY = 0x95a5a6
+
+# Per-player hand result lines, as bot.py's HAND_RESULT_RE.
+HAND_RESULT_RE = re.compile(
+    r" (🏆|💥|🤝|❌) (?:\(already left\) )?(?:strikes gold|went bust|pushes with the dealer|loses to the house)")
+HAND_RESULT_TYPES = {"🏆": ("win", GOLD), "💥": ("loss", RED), "❌": ("loss", RED), "🤝": ("push", GREY)}
 
 
 def classify(text):
     """Return (message_type, embed_colour_or_None) for a game update, as bot.py would."""
     if text.startswith("🤠") and ': "' in text:
         return "npc_quip", SEPIA
-    if "🏆 strikes gold" in text:
-        return "win", GOLD
-    if "💥" in text and ("bust" in text.lower() or "lost" in text.lower()):
-        return "bust", RED
+    result = HAND_RESULT_RE.search(text)
+    if result:
+        return HAND_RESULT_TYPES[result.group(1)]
     if text.startswith("🏁 Showdown"):
         return "hand_result", ROYAL_BLUE
     if "🃏 The dealer shuffles" in text:

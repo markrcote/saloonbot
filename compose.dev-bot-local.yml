@@ -6,6 +6,8 @@ services:
       dockerfile: Dockerfile.server
       args:
         GIT_SHA: ${GIT_SHA}
+        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE}
+        GIT_COMMIT_SUBJECT: ${GIT_COMMIT_SUBJECT}
     image: ghcr.io/markrcote/saloonbot-server:main
     restart: always
     environment:

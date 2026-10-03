@@ -6,6 +6,8 @@ services:
       dockerfile: Dockerfile.bot
       args:
         GIT_SHA: ${GIT_SHA}
+        GIT_COMMIT_DATE: ${GIT_COMMIT_DATE}
+        GIT_COMMIT_SUBJECT: ${GIT_COMMIT_SUBJECT}
         SALOONBOT_DEBUG: ${SALOONBOT_DEBUG}
     image: ghcr.io/markrcote/saloonbot-bot:main
     restart: always

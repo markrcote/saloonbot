@@ -12,6 +12,7 @@ from unittest.mock import ANY, MagicMock, patch
 import redis
 
 from changelog import parse_changelog, select_recent_entries, ChangelogEntry
+from version_info import VersionInfo, format_version, load_version, parse_version_text
 from cardgames.blackjack import (
     Action, Blackjack, HandState, InvalidActionError, InvalidBetError,
     card_to_str, str_to_card, serialize_hand, deserialize_hand,
@@ -3980,6 +3981,60 @@ class TestLLMHealthCheck(unittest.TestCase):
         self.assertIsNotNone(casino._llm_health['openai']['first_failure_at'])
         casino._set_llm_health('openai', up=True)
         self.assertIsNone(casino._llm_health['openai']['first_failure_at'])
+
+
+class TestVersionInfo(unittest.TestCase):
+    """/version output built from .version (sha, commit date, subject)."""
+
+    def test_parse_full_file(self):
+        info = parse_version_text("abc123\n2026-10-03T07:18:38+00:00\nFix the thing\n")
+        self.assertEqual(info, VersionInfo("abc123", "2026-10-03T07:18:38+00:00", "Fix the thing"))
+
+    def test_parse_legacy_sha_only_file(self):
+        self.assertEqual(parse_version_text("abc123\n"), VersionInfo("abc123", None, None))
+
+    def test_parse_blank_build_args(self):
+        # Built without GIT_COMMIT_* args: the Dockerfile's printf writes empty lines 2-3.
+        self.assertEqual(parse_version_text("abc123\n\n\n"), VersionInfo("abc123", None, None))
+
+    def test_parse_empty_is_none(self):
+        self.assertIsNone(parse_version_text(""))
+        self.assertIsNone(parse_version_text("\n\n\n"))
+
+    def test_format_full(self):
+        info = VersionInfo("0123456789abcdef", "2026-10-03T07:18:38+00:00", "Fix the thing")
+        self.assertEqual(format_version(info),
+                         "`0123456789ab` · <t:1791011918:f> (<t:1791011918:R>)\n> Fix the thing")
+
+    def test_format_sha_only(self):
+        self.assertEqual(format_version(VersionInfo("abc123", None, None)), "`abc123`")
+
+    def test_format_unparseable_date_shown_raw(self):
+        self.assertEqual(format_version(VersionInfo("abc123", "yesterday", None)), "`abc123` · yesterday")
+
+    def test_format_none(self):
+        self.assertEqual(format_version(None), "?")
+
+    def test_load_prefers_version_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".version", delete=False) as f:
+            f.write("abc123\n2026-10-03T07:18:38+00:00\nFix the thing\n")
+        self.addCleanup(os.unlink, f.name)
+        with patch("version_info.subprocess.run") as run:
+            info = load_version(f.name)
+        run.assert_not_called()
+        self.assertEqual(info.subject, "Fix the thing")
+
+    def test_load_falls_back_to_git(self):
+        git_out = MagicMock(returncode=0, stdout="def456\n2026-10-02T12:00:00-07:00\nOther commit\n")
+        with patch("version_info.subprocess.run", return_value=git_out):
+            info = load_version("/nonexistent/.version")
+        self.assertEqual(info, VersionInfo("def456", "2026-10-02T12:00:00-07:00", "Other commit"))
+
+    def test_load_without_file_or_git_is_none(self):
+        with patch("version_info.subprocess.run", side_effect=FileNotFoundError):
+            self.assertIsNone(load_version("/nonexistent/.version"))
+        with patch("version_info.subprocess.run", return_value=MagicMock(returncode=128, stdout="")):
+            self.assertIsNone(load_version("/nonexistent/.version"))
 
 
 class TestChangelog(unittest.TestCase):

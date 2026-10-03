@@ -2,12 +2,15 @@
 
 FROM python:3.13-slim
 ARG GIT_SHA
+ARG GIT_COMMIT_DATE
+ARG GIT_COMMIT_SUBJECT
 
 # Use a non-root user to avoid warnings about
 # running pip as root.
 RUN adduser --gecos "" --disabled-password appuser
 WORKDIR /app
-RUN echo $GIT_SHA > .version
+# .version: SHA, commit date, commit subject (one per line; see version_info.py).
+RUN printf '%s\n%s\n%s\n' "$GIT_SHA" "$GIT_COMMIT_DATE" "$GIT_COMMIT_SUBJECT" > .version
 USER appuser
 
 # Add ~/.local/bin to PATH to avoid Python

@@ -44,7 +44,7 @@ Slash commands:
 
 ### Metadata
 
-* `/version`: Outputs the current git sha.
+* `/version`: Outputs the current git SHA plus the last commit's date and summary.
 
 ## LLM Bot Players
 

@@ -2,6 +2,8 @@
 
 LABEL=$1
 GIT_SHA=$(git rev-parse HEAD)
+GIT_COMMIT_DATE=$(git log -1 --format=%cI)
+GIT_COMMIT_SUBJECT=$(git log -1 --format=%s)
 
-docker build --build-arg GIT_SHA=$GIT_SHA -t $ECR_DOMAIN/saloonbot/saloonbot-server -f Dockerfile.server .
-docker build --build-arg GIT_SHA=$GIT_SHA -t $ECR_DOMAIN/saloonbot/saloonbot-bot -f Dockerfile.bot .
+docker build --build-arg GIT_SHA=$GIT_SHA --build-arg GIT_COMMIT_DATE="$GIT_COMMIT_DATE" --build-arg GIT_COMMIT_SUBJECT="$GIT_COMMIT_SUBJECT" -t $ECR_DOMAIN/saloonbot/saloonbot-server -f Dockerfile.server .
+docker build --build-arg GIT_SHA=$GIT_SHA --build-arg GIT_COMMIT_DATE="$GIT_COMMIT_DATE" --build-arg GIT_COMMIT_SUBJECT="$GIT_COMMIT_SUBJECT" -t $ECR_DOMAIN/saloonbot/saloonbot-bot -f Dockerfile.bot .

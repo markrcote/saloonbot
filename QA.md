@@ -27,7 +27,8 @@ source .venv/bin/activate
 python cli.py   # name: Alice, bots: 0
 ```
 
-- [ ] "Joined game" then "💰 Ante up, folks!" with wallet shown
+- [ ] "Joined game" then "💰 Ante up, folks!" with wallet shown, and "⏱️ Alice: you've got 30 seconds to bet..."
+- [ ] Wait ~15 s without betting → one "⏱️ Still waitin' on bets from Alice — 15 seconds left."
 - [ ] `bet 10` → bet confirmed, cards dealt, "👉 Alice, you're up..."
 - [ ] `hit` or `stand` → hand resolves, wallet updates, returns to WAITING
 - [ ] `quit`

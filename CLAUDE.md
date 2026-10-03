@@ -193,7 +193,7 @@ Discord Users
 | SALOONBOT_DEBUG | - | Set to enable debug logging |
 | BLACKJACK_MIN_BET | 500 | Minimum bet amount in cents |
 | BLACKJACK_MAX_BET | 10000 | Maximum bet amount in cents |
-| BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets |
+| BLACKJACK_TIME_FOR_BETTING | 30 | Seconds allowed for placing bets (humans who haven't bet get one reminder at the halfway mark) |
 | BLACKJACK_TIME_BETWEEN_HANDS | 10 | Seconds between hands |
 | BLACKJACK_REMINDER_PERIOD | 30 | Seconds before reminding player of their turn |
 | BLACKJACK_AMBIENT_SPEED_MULTIPLIER | 2.0 | Multiplier applied to dramatic/dealer-card/result pauses when a table has no human players (NPCs only) |
@@ -245,7 +245,7 @@ This means Docker secrets work automatically when mounted at `/run/secrets/` wit
 - Server uses synchronous Redis in blocking game loop
 - Both implement exponential backoff for Redis reconnection
 - Custom exceptions: `CardGameError`, `NotPlayerTurnError`, `PlayerNotFoundError`, `InvalidBetError`, `InsufficientFundsError`
-- Blackjack `tick()` handles auto-advance between hands and player turn reminders
+- Blackjack `tick()` handles auto-advance between hands and player reminders: every `BLACKJACK_REMINDER_PERIOD` on a human's turn, and once per betting round at the `TIME_FOR_BETTING` halfway mark for humans who haven't bet (`_remind_humans_to_bet`; the `betting_reminder_sent` flag is reset in `start_betting()` and deliberately not persisted)
 - **Schema migrations**: `_init_database()` runs on startup and applies any pending migrations from the `MIGRATIONS` list in order, each committed atomically; `schema_version` tracks the last applied index. To add a schema change, append a new entry to `MIGRATIONS` — never edit existing entries. Migrations run automatically on server restart, so no manual SQL is needed for staging/production deployments.
 - **Dirty-flag write-behind**: Each `Blackjack` instance sets its own `_dirty` flag when its state changes; on each tick the Casino moves dirty games into `_dirty_games`, then batches and flushes DB writes only when that set is non-empty, reducing unnecessary writes on each tick.
 - **MySQL deadlock retry**: `database.py` wraps writes in a retry helper that catches InnoDB deadlock errors (errno 1213) and retries automatically; callers don't need retry logic.

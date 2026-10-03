@@ -168,6 +168,10 @@ Discord Users
 - `llm_usage` - Per-call LLM token tracking: purpose, model, provider, input/output tokens, npc_id
 - `settings` - Runtime key/value config store (`setting_key`/`setting_value`); accessed via `get_setting`/`set_setting`
 
+**Top-level helpers**
+- `version_info.py` - `/version` metadata: `.version` holds the commit SHA, ISO commit date and subject, one per line (written by the Dockerfiles from the `GIT_SHA`/`GIT_COMMIT_DATE`/`GIT_COMMIT_SUBJECT` build args, which CI, `build-images` and the compose files pass); falls back to `git log -1` when the file is absent; `format_version` renders the date as Discord `<t:…>` timestamps. Older single-line `.version` files still parse
+- `changelog.py` - parses `CHANGELOG.md` for `/changelog`
+
 **wwnames/**
 - `wwnames.py` - Random name generator using data files in `names/`
 

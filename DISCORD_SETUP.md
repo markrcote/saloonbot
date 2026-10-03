@@ -90,7 +90,7 @@ export DISCORD_GUILDS="your-guild-id"
 ## 9. Verify the Bot is Working
 
 1. In your Discord server, type `/version` in any channel the bot can see.
-2. The bot should respond with the current git SHA or version string.
+2. The bot should respond with the current git SHA, plus the commit's date and summary when known.
 3. Try `/wwname` to generate a random Old West name.
 4. Try `/newgame` to start a blackjack game.
 

@@ -2,6 +2,10 @@
 
 Notable changes to SaloonBot, for players and server admins. Dates are when each change shipped.
 
+## 2026-10-03 — Table polish
+
+- `/version` now shows when the running build's last commit was made and what it was, not just its SHA.
+
 ## 2026-09-27 — Bots-only tables
 
 - `/newgame` now takes `npc_min` and `npc_max` (defaults 3 and 5) instead of a bot count. The minimum number of bots sit down right away — no human player needed — and the table keeps between the minimum and maximum bots for as long as the game runs, replacing any who head home.

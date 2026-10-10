@@ -136,6 +136,28 @@ It prints each update as it arrives, tinted to match the bot's embed colours (qu
 
 SaloonBot provides flexible development workflows using Docker Compose configurations. The bot consists of two main components: the Discord bot (`bot.py`) and the server component (`server.py`), both communicating through Redis. The server persists state to a database — MySQL in production, SQLite locally.
 
+### Dependencies
+
+Dependencies are managed with [pip-tools](https://github.com/jazzband/pip-tools). Edit the `.in` files and never the generated `.txt` lock files by hand:
+
+| Source | Lock file | Contents |
+|--------|-----------|----------|
+| `requirements.in` | `requirements.txt` | Runtime packages; the only file the Docker images install |
+| `requirements-dev.in` | `requirements-dev.txt` | Tests, linting, `cli.py`, and pip-tools; constrained to the runtime lock so versions match |
+
+For a local environment, install the dev lock (it includes the runtime packages):
+```bash
+pip install -r requirements-dev.txt
+```
+
+After changing a `.in` file, regenerate both lock files (runtime first, since the dev lock is constrained by it). Compile under Python 3.13, which CI and the images use; some pins depend on the Python version. If your host Python differs, compile in a container:
+```bash
+docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v "$PWD":/src -w /src python:3.13-slim sh -c \
+  'pip install -q --user pip-tools && export PATH=/tmp/.local/bin:$PATH &&
+   pip-compile -q --strip-extras requirements.in && pip-compile -q --strip-extras requirements-dev.in'
+```
+To upgrade a single package on purpose, add `--upgrade-package <name>` to the `pip-compile` command. CI recompiles both files and fails if the committed locks are stale. Dependabot recognises the pip-compile setup and updates the `.in` and `.txt` files together.
+
 ### SQLite for local development
 
 The server supports SQLite as a drop-in replacement for MySQL, controlled by the `USE_SQLITE` environment variable. All three dev scripts enable this automatically, so no MySQL container is needed for local development.

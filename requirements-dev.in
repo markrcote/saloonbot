@@ -1,0 +1,11 @@
+# Development and CI dependencies: tests, linting, cli.py, and pip-tools itself.
+# Constrained to the runtime lock so dev and production resolve identical versions.
+# Edit this file, then regenerate the lock file (see README.md, "Dependencies"):
+#   pip-compile --strip-extras requirements-dev.in
+-c requirements.txt
+aioconsole
+flake8
+pip-tools
+pytest>=9.1.1
+pytest-timeout>=2.4.0
+requests

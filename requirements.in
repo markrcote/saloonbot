@@ -1,0 +1,9 @@
+# Runtime dependencies for the bot and server images.
+# Edit this file, then regenerate the lock file (see README.md, "Dependencies"):
+#   pip-compile --strip-extras requirements.in
+anthropic>=1.11.0
+mysql-connector-python
+nextcord
+openai>=3.26.0
+prometheus-client>=0.26.0
+redis

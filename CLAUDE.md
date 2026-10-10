@@ -11,6 +11,9 @@ SaloonBot is a Discord bot that generates Old West names and provides a blackjac
 
 ## Commands
 
+### Dependencies
+pip-tools: edit `requirements.in` (runtime, the only file the images install) or `requirements-dev.in` (tests/lint/`cli.py`; `-r requirements.in` pulls the runtime packages in and `-c requirements.txt` pins them — `-c` alone adds nothing), never the generated `.txt` locks. Recompile runtime first, then dev, under Python 3.13 — the host venv may be newer, so use the `python:3.13-slim` container command in README.md's "Dependencies" section. CI fails if the committed locks are stale. Local setup: `pip install -r requirements-dev.txt`.
+
 ### Unit Testing
 ```bash
 pytest test.py

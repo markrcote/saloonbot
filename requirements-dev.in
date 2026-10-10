@@ -1,0 +1,13 @@
+# Development and CI dependencies: the runtime packages plus tests, linting,
+# cli.py, and pip-tools itself. -r pulls the runtime packages in; -c pins them
+# (and anything shared) to the runtime lock, so dev and production match.
+# Edit this file, then regenerate the lock file (see README.md, "Dependencies"):
+#   pip-compile --strip-extras requirements-dev.in
+-r requirements.in
+-c requirements.txt
+aioconsole
+flake8
+pip-tools
+pytest>=9.1.1
+pytest-timeout>=2.4.0
+requests

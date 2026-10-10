@@ -143,7 +143,7 @@ Dependencies are managed with [pip-tools](https://github.com/jazzband/pip-tools)
 | Source | Lock file | Contents |
 |--------|-----------|----------|
 | `requirements.in` | `requirements.txt` | Runtime packages; the only file the Docker images install |
-| `requirements-dev.in` | `requirements-dev.txt` | Tests, linting, `cli.py`, and pip-tools; constrained to the runtime lock so versions match |
+| `requirements-dev.in` | `requirements-dev.txt` | The runtime packages (`-r requirements.in`, pinned to the runtime lock with `-c requirements.txt`) plus tests, linting, `cli.py`, and pip-tools |
 
 For a local environment, install the dev lock (it includes the runtime packages):
 ```bash

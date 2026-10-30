@@ -1,4 +1,4 @@
-anthropic>=1.15.0
+anthropic>=2.3.0
 pytest>=9.1.1
 pytest-timeout>=2.4.0
 openai>=3.35.1
